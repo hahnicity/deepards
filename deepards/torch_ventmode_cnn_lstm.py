@@ -1,64 +1,14 @@
 from __future__ import print_function
 import argparse
-from glob import glob
-import os
-import re
 
-from keras.preprocessing.sequence import pad_sequences
-import numpy as np
-import pandas as pd
 from sklearn.metrics import classification_report
 import torch
 from torch.autograd import Variable
 import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
-from ventmap.raw_utils import extract_raw, read_processed_file
+from torch.utils.data import DataLoader
 
-from keras_lstm_autoencoder import (
-    get_scaler, get_y_df, get_y_file_matches, match_xfilename_to_yfilename
-)
-from cnn_models.torch_cnn_lstm_combo import CNNLSTMNetwork
-
-
-class VentmodeRawDataset(Dataset):
-    def __init__(self, data_path, experiment_num, cohort_file, to_pickle=None, from_pickle=None, train=True):
-        self.all_sequences = []
-        if from_pickle:
-            self.all_sequences = pd.read_pickle(from_pickle)
-            return
-
-        raw_dir = os.path.join(data_path, 'experiment{}'.format(experiment_num), 'kfold', 'raw')
-        raw_files = sorted(glob(os.path.join(raw_dir, '*/*.raw.npy')))
-        processed_files = sorted(glob(os.path.join(raw_dir, '*/*.processed.npy')))
-        # set to constant for now
-        #
-        # XXX want to have a data driven number tho in the future. At least something
-        # that captures about 90-95% of all breaths.
-        seq_len = 128
-        n_breaths_in_seq = 20
-        bns_in_seq = []
-
-        seq_arr = None
-        seq_n = 0
-        for fidx, filename in enumerate(raw_files):
-            gen = list(read_processed_file(filename, processed_files[fidx]))
-            match = re.search(r'(0\d{3}RPI\d{10})', filename)
-            try:
-                patient_id = match.groups()[0]
-            except:
-                raise ValueError('could not find patient id in file: {}'.format(filename))
-
-            for bidx, breath in enumerate(gen):
-                # XXX
-
-        if to_pickle:
-            pd.to_pickle(self.all_sequences, to_pickle)
-
-    def __getitem__(self, index):
-        return self.all_sequences[index]
-
-    def __len__(self):
-        return len(self.all_sequences)
+from deepards.models.torch_cnn_lstm_combo import CNNLSTMNetwork
+from deepards.dataset import ARDSRawDataset
 
 
 def main():
