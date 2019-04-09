@@ -13,6 +13,9 @@ from deepards.dataset import ARDSRawDataset
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument('-dp', '--data-path', default='/fastdata/ardsdetection', help='Path to ARDS detection dataset')
+    parser.add_argument('-en', '--experiment-num', type=int, default=1)
+    parser.add_argument('-c', '--cohort-file', default='cohort-description.csv')
     parser.add_argument('-n', '--network', choices=['basic'], default='basic')
     parser.add_argument('-e', '--epochs', type=int, default=5)
     parser.add_argument('-p', '--train-from-pickle')
@@ -29,7 +32,13 @@ def main():
 
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     criterion = torch.nn.BCELoss()
-    train_dataset = VentmodeRawDataset(to_pickle=args.train_to_pickle, from_pickle=args.train_from_pickle)
+    train_dataset = ARDSRawDataset(
+        args.data_path,
+        args.experiment_num,
+        args.cohort_file,
+        to_pickle=args.train_to_pickle,
+        from_pickle=args.train_from_pickle
+    )
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
     n_loss = 0
     total_loss = 0
@@ -55,7 +64,14 @@ def main():
                 n_loss += 1
                 print("batch num: {}/{}, avg loss: {}\r".format(idx+1, len(train_loader), total_loss/n_loss), end="")
 
-    test_dataset = VentmodeRawDataset(to_pickle=args.test_to_pickle, from_pickle=args.test_from_pickle, train=False)
+    test_dataset = ARDSRawDataset(
+        args.data_path,
+        args.experiment_num,
+        args.cohort_file,
+        to_pickle=args.test_to_pickle,
+        from_pickle=args.test_from_pickle,
+        train=False
+    )
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=True)
 
     preds = None

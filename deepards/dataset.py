@@ -19,13 +19,14 @@ class ARDSRawDataset(Dataset):
         # XXX this will change in the future
         data_subdir = 'prototrain' if train else 'prototest'
         raw_dir = os.path.join(data_path, 'experiment{}'.format(experiment_num), data_subdir, 'raw')
+        if not os.path.exists(raw_dir):
+            raise Exception('No directory {} exists!'.format(raw_dir))
         raw_files = sorted(glob(os.path.join(raw_dir, '*/*.raw.npy')))
         processed_files = sorted(glob(os.path.join(raw_dir, '*/*.processed.npy')))
-        # set to constant for now
-        #
-        # XXX want to have a data driven number tho in the future. At least something
-        # that captures about 90-95% of all breaths.
-        seq_len = 128
+        # So I calculated out the stats on the training set. Our breaths are a mean of 140.5
+        # obs and the std is 46.82. So mu + 2 * std = 234.19. So I can go up to 224 or 256.
+        # 224 seems reasonable because it would fit well with existing img systems.
+        seq_len = 224
         n_breaths_in_seq = 20
 
         last_patient = None
@@ -40,6 +41,7 @@ class ARDSRawDataset(Dataset):
                 seq_arr = None
             last_patient = patient_id
             patient_row = cohort[cohort['Patient Unique Identifier'] == patient_id]
+            patient_row = patient_row.iloc[0]
             patho = 1 if patient_row['Pathophysiology'] == 'ARDS' else 0
 
             for bidx, breath in enumerate(gen):

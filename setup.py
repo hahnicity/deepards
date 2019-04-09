@@ -14,7 +14,6 @@ setup(name='deepards',
           'scipy',
           'scikit-learn',
           'ventmap',
-          'pytorch',
       ],
       entry_points={
       },
