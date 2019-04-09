@@ -39,6 +39,7 @@ class ARDSRawDataset(Dataset):
                 raise ValueError('could not find patient id in file: {}'.format(filename))
             if patient_id != last_patient:
                 seq_arr = None
+                n_seq = 0
             last_patient = patient_id
             patient_row = cohort[cohort['Patient Unique Identifier'] == patient_id]
             patient_row = patient_row.iloc[0]
@@ -58,8 +59,13 @@ class ARDSRawDataset(Dataset):
                 else:
                     seq_arr = np.append(seq_arr, flow, axis=0)
 
-                if seq_arr.shape[0] == n_breaths_in_seq:
+                n_seq += 1
+                if n_seq == n_breaths_in_seq:
+                    target = np.zeros(2)
+                    target[patho] = 1
                     self.all_sequences.append((patient_id, seq_arr, target))
+                    seq_arr = None
+                    n_seq = 0
 
         if to_pickle:
             pd.to_pickle(self.all_sequences, to_pickle)
