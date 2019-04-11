@@ -71,7 +71,8 @@ class ARDSRawDataset(Dataset):
             pd.to_pickle(self.all_sequences, to_pickle)
 
     def __getitem__(self, index):
-        return self.all_sequences[index]
+        patient, seq, target = self.all_sequences[index]
+        return index, patient, seq, target
 
     def collate(self, batch):
         """
@@ -83,3 +84,9 @@ class ARDSRawDataset(Dataset):
 
     def __len__(self):
         return len(self.all_sequences)
+
+    def get_ground_truth_df(self):
+        rows = []
+        for patient, _, target in self.all_sequences:
+            rows.append([patient, np.argmax(target, axis=0)])
+        return pd.DataFrame(rows, columns=['patient', 'y'])

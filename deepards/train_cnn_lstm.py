@@ -2,12 +2,14 @@ from __future__ import print_function
 import argparse
 
 import numpy as np
+import pandas as pd
 from sklearn.metrics import classification_report
 import torch
 from torch.autograd import Variable
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
+from deepards.metrics import DeepARDSResults
 from deepards.models.resnet import resnet18
 from deepards.models.torch_cnn_lstm_combo import CNNLSTMNetwork
 from deepards.dataset import ARDSRawDataset
@@ -25,7 +27,7 @@ def main():
     parser.add_argument('--test-from-pickle')
     parser.add_argument('--test-to-pickle')
     parser.add_argument('--cuda', action='store_true')
-    parser.add_argument('-b', '--batch-size', type=int, default=1)
+    parser.add_argument('-b', '--batch-size', type=int, default=32)
     parser.add_argument('--base-network', choices=['resnet18'], default='resnet18')
     args = parser.parse_args()
 
@@ -50,7 +52,7 @@ def main():
     with torch.enable_grad():
         for ep in range(args.epochs):
             print("\nrun epoch {}\n".format(ep+1))
-            for idx, (patient, seq, target) in enumerate(train_loader):
+            for idx, (obs_idx, patient, seq, target) in enumerate(train_loader):
                 hidden = model.init_hidden(seq.shape[0])
                 model.zero_grad()
                 target_shape = target.numpy().shape
@@ -81,24 +83,26 @@ def main():
     )
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=True)
 
-    preds = None
-    gt = None
+    preds = []
+    pred_idx = []
+    y_test = test_dataset.get_ground_truth_df()
+    results = DeepARDSResults(y_test)
     with torch.no_grad():
-        for idx, (patient, seq, target) in enumerate(test_loader):
+        for idx, (obs_idx, patient, seq, target) in enumerate(test_loader):
             hidden = model.init_hidden(seq.shape[0])
             inputs = cuda_wrapper(Variable(seq.float()))
             outputs = model(inputs, hidden)
-            if args.batch_size > 1:
-                target = target.unsqueeze(1)
-            target = target.repeat((1, 20, 1))
-            if preds is None:
-                gt = target
-                preds = outputs
-            else:
-                gt = torch.cat([gt, target], dim=0)
-                preds = torch.cat([preds, outputs], dim=0)
-    import IPython; IPython.embed()
-    print(classification_report(gt.argmax(dim=-1).view(-1).cpu().numpy(), preds.argmax(dim=-1).view(-1).cpu().numpy()))
+            # get the last prediction in the LSTM chain. Just do this for now. Maybe
+            # later we can have a slightly more sophisticated voting. Or we can just
+            # skip all of that together and only backprop on the last item.
+            preds.extend(outputs[:, -1, :].argmax(dim=1).cpu().tolist())
+            pred_idx.extend(obs_idx.cpu().tolist())
+
+    preds = pd.Series(preds, index=pred_idx)
+    preds = preds.sort_index()
+    results.perform_patient_predictions(preds)
+    results.aggregate_all_results()
+    print(results.aggregate_stats)
 
 if __name__ == "__main__":
     main()
