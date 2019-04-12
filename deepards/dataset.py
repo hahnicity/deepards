@@ -4,20 +4,35 @@ import re
 
 import numpy as np
 import pandas as pd
+from sklearn.model_selection import StratifiedKFold
 from torch.utils.data import Dataset, DataLoader
 from ventmap.raw_utils import extract_raw, read_processed_file
 
 
 class ARDSRawDataset(Dataset):
-    def __init__(self, data_path, experiment_num, cohort_file, to_pickle=None, from_pickle=None, train=True):
+    def __init__(self, data_path, experiment_num, cohort_file, sequence_size, to_pickle=None, from_pickle=None, train=True, kfold_num=None, total_kfolds=None):
+        """
+        Dataset to generate sequences of data for ARDS Detection
+        """
         self.all_sequences = []
-        if from_pickle:
+        self.train = train
+        self.kfold_num = kfold_num
+        self.total_kfolds = total_kfolds
+
+        if from_pickle and kfold_num is not None:
+            self.all_sequences = pd.read_pickle(from_pickle)
+            self.get_kfold_indexes()
+            return
+        elif from_pickle:
             self.all_sequences = pd.read_pickle(from_pickle)
             return
 
         cohort = pd.read_csv(cohort_file)
-        # XXX this will change in the future
-        data_subdir = 'prototrain' if train else 'prototest'
+        if kfold_num is None:
+            # XXX this will change in the future
+            data_subdir = 'prototrain' if train else 'prototest'
+        else:
+            data_subdir = 'training'
         raw_dir = os.path.join(data_path, 'experiment{}'.format(experiment_num), data_subdir, 'raw')
         if not os.path.exists(raw_dir):
             raise Exception('No directory {} exists!'.format(raw_dir))
@@ -27,7 +42,6 @@ class ARDSRawDataset(Dataset):
         # obs and the std is 46.82. So mu + 2 * std = 234.19. So I can go up to 224 or 256.
         # 224 seems reasonable because it would fit well with existing img systems.
         seq_len = 224
-        n_breaths_in_seq = 20
 
         last_patient = None
         for fidx, filename in enumerate(raw_files):
@@ -60,7 +74,7 @@ class ARDSRawDataset(Dataset):
                     seq_arr = np.append(seq_arr, flow, axis=0)
 
                 n_seq += 1
-                if n_seq == n_breaths_in_seq:
+                if n_seq == sequence_size:
                     target = np.zeros(2)
                     target[patho] = 1
                     self.all_sequences.append((patient_id, seq_arr, target))
@@ -70,7 +84,16 @@ class ARDSRawDataset(Dataset):
         if to_pickle:
             pd.to_pickle(self.all_sequences, to_pickle)
 
+        if kfold_num is not None:
+            self.get_kfold_indexes()
+
     def __getitem__(self, index):
+        # This is a bit tricky because pytorch will just assume that indexing
+        # goes from 0 ... __len__ - 1. But this is not the case for kfold. So you
+        # have to get the pytorch index and then translate that to what it looks
+        # like in your kfold
+        if self.kfold_num is not None:
+            index = self.kfold_indexes[index]
         patient, seq, target = self.all_sequences[index]
         return index, patient, seq, target
 
@@ -83,10 +106,33 @@ class ARDSRawDataset(Dataset):
         pass
 
     def __len__(self):
-        return len(self.all_sequences)
+        if self.kfold_num is None:
+            return len(self.all_sequences)
+        else:
+            return len(self.kfold_indexes)
 
     def get_ground_truth_df(self):
         rows = []
-        for patient, _, target in self.all_sequences:
-            rows.append([patient, np.argmax(target, axis=0)])
+
+        if self.kfold_num is None:
+            for patient, _, target in self.all_sequences:
+                rows.append([patient, np.argmax(target, axis=0)])
+        else:
+            for idx in self.kfold_indexes:
+                patient, _, target = self.all_sequences[idx]
+                rows.append([patient, np.argmax(target, axis=0)])
+
         return pd.DataFrame(rows, columns=['patient', 'y'])
+
+    def get_kfold_indexes(self):
+        ground_truth = self.get_ground_truth_df()
+        patients = ground_truth.patient
+        patho = ground_truth.y
+        kfolds = StratifiedKFold(n_splits=self.total_kfolds)
+        for split_num, (train_idx, test_idx) in enumerate(kfolds.split(patients, patho)):
+            if split_num == self.kfold_num and self.train:
+                self.kfold_indexes = train_idx
+                break
+            elif split_num == self.kfold_num and not self.train:
+                self.kfold_indexes = test_idx
+                break
