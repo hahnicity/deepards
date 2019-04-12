@@ -112,20 +112,27 @@ class ARDSRawDataset(Dataset):
             return len(self.kfold_indexes)
 
     def get_ground_truth_df(self):
-        rows = []
-
         if self.kfold_num is None:
-            for patient, _, target in self.all_sequences:
-                rows.append([patient, np.argmax(target, axis=0)])
+            return self._get_all_sequence_ground_truth()
         else:
-            for idx in self.kfold_indexes:
-                patient, _, target = self.all_sequences[idx]
-                rows.append([patient, np.argmax(target, axis=0)])
+            return self._get_kfold_ground_truth()
 
+    def _get_all_sequence_ground_truth(self):
+        rows = []
+        for patient, _, target in self.all_sequences:
+            rows.append([patient, np.argmax(target, axis=0)])
         return pd.DataFrame(rows, columns=['patient', 'y'])
 
+    def _get_kfold_ground_truth(self):
+        rows = []
+        for idx in self.kfold_indexes:
+            patient, _, target = self.all_sequences[idx]
+            rows.append([patient, np.argmax(target, axis=0)])
+        return pd.DataFrame(rows, columns=['patient', 'y'])
+
+
     def get_kfold_indexes(self):
-        ground_truth = self.get_ground_truth_df()
+        ground_truth = self._get_all_sequence_ground_truth()
         patients = ground_truth.patient
         patho = ground_truth.y
         kfolds = StratifiedKFold(n_splits=self.total_kfolds)

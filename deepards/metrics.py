@@ -78,11 +78,7 @@ def sensitivity(actual, predictions, label):
 
 
 class DeepARDSResults(object):
-    def __init__(self, y_test):
-        """
-        :param y_test: DataFrame with columns patient, y
-        """
-        self.y_test = y_test
+    def __init__(self):
         self.pathos = {0: 'OTHER', 1: 'ARDS'}
 
         results_cols = ["patient", "patho"]
@@ -135,15 +131,16 @@ class DeepARDSResults(object):
             columns=['patho', 'tps', 'tns', 'fps', 'fns', 'accuracy', 'sensitivity', 'specificity', 'precision', 'auc', 'f1']
         )
 
-    def perform_patient_predictions(self, predictions):
+    def perform_patient_predictions(self, y_test, predictions):
         """
         After a group of patients is run through the model, record all necessary stats
         such as true positives, false positives, etc.
 
+        :param y_test: Should be a pd.DataFrame instance with 2 columns patient, y
         :param predictions: Should be a pd.Series instance with all predictions made on a per-stack basis. Should be numerically indexed in 1-1 match with y_test
         """
-        for pt in self.y_test.patient.unique():
-            pt_rows = self.y_test[self.y_test.patient == pt]
+        for pt in y_test.patient.unique():
+            pt_rows = y_test[y_test.patient == pt]
             pt_idx = pt_rows.index
             patho_n = pt_rows.y.unique()[0]
 
