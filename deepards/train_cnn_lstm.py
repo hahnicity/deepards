@@ -24,7 +24,7 @@ class TrainModel(object):
         # Train and test both load from the same dataset in the case of kfold
         if self.n_runs > 1:
             self.args.test_from_pickle = self.args.train_from_pickle
-            self.args.test_to_pickle = self.args.train_to_pickle
+            self.args.test_to_pickle = None
 
     def run_train_epochs(self, model, train_loader, optimizer):
         n_loss = 0

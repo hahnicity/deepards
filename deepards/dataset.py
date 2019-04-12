@@ -18,6 +18,8 @@ class ARDSRawDataset(Dataset):
         self.train = train
         self.kfold_num = kfold_num
         self.total_kfolds = total_kfolds
+        self.vent_bn_frac_missing = .5
+        self.frames_dropped = dict()
 
         if from_pickle and kfold_num is not None:
             self.all_sequences = pd.read_pickle(from_pickle)
@@ -54,11 +56,13 @@ class ARDSRawDataset(Dataset):
             if patient_id != last_patient:
                 seq_arr = None
                 n_seq = 0
+                seq_vent_bns = []
             last_patient = patient_id
             patient_row = cohort[cohort['Patient Unique Identifier'] == patient_id]
             patient_row = patient_row.iloc[0]
             patho = 1 if patient_row['Pathophysiology'] == 'ARDS' else 0
 
+            # XXX need to eventually add cutoffs based on vent time or Berlin time
             for bidx, breath in enumerate(gen):
                 flow = breath['flow']
                 if len(flow) < seq_len:
@@ -70,16 +74,35 @@ class ARDSRawDataset(Dataset):
                 # XXX in future ensure vent bns relatively contiguous
                 if seq_arr is None:
                     seq_arr = flow
+                    seq_vent_bns = [breath['vent_bn']]
                 else:
                     seq_arr = np.append(seq_arr, flow, axis=0)
+                    seq_vent_bns.append(breath['vent_bn'])
 
                 n_seq += 1
                 if n_seq == sequence_size:
+                    seq_vent_bns = np.array(seq_vent_bns)
+                    diffs = seq_vent_bns[:-1] + 1 - seq_vent_bns[1:]
+                    # do not include the stack if it is discontiguous to too large a degree
+                    bns_missing = sum(abs(diffs))
+                    missing_thresh = int(sequence_size * self.vent_bn_frac_missing)
+                    if bns_missing > missing_thresh:
+                        # last vent BN possible is 65536 (2^16) I'd like to recognize if this is occurring
+                        if not abs(bns_missing - (2 ** 16)) <= missing_thresh:
+                            if not patient_id in self.frames_dropped:
+                                self.frames_dropped[patient_id] = 1
+                            else:
+                                self.frames_dropped[patient_id] += 1
+                            seq_arr = None
+                            n_seq = 0
+                            seq_vent_bns = []
+                            continue
                     target = np.zeros(2)
                     target[patho] = 1
                     self.all_sequences.append((patient_id, seq_arr, target))
                     seq_arr = None
                     n_seq = 0
+                    seq_vent_bns = []
 
         if to_pickle:
             pd.to_pickle(self.all_sequences, to_pickle)
@@ -128,18 +151,21 @@ class ARDSRawDataset(Dataset):
         for idx in self.kfold_indexes:
             patient, _, target = self.all_sequences[idx]
             rows.append([patient, np.argmax(target, axis=0)])
-        return pd.DataFrame(rows, columns=['patient', 'y'])
-
+        return pd.DataFrame(rows, columns=['patient', 'y'], index=self.kfold_indexes)
 
     def get_kfold_indexes(self):
         ground_truth = self._get_all_sequence_ground_truth()
-        patients = ground_truth.patient
-        patho = ground_truth.y
+        other_patients = ground_truth[ground_truth.y == 0].patient.unique()
+        ards_patients = ground_truth[ground_truth.y == 1].patient.unique()
+        all_patients = np.append(other_patients, ards_patients)
+        patho = [0] * len(other_patients) + [1] * len(ards_patients)
         kfolds = StratifiedKFold(n_splits=self.total_kfolds)
-        for split_num, (train_idx, test_idx) in enumerate(kfolds.split(patients, patho)):
+        for split_num, (train_pt_idx, test_pt_idx) in enumerate(kfolds.split(all_patients, patho)):
+            train_pts = all_patients[train_pt_idx]
+            test_pts = all_patients[test_pt_idx]
             if split_num == self.kfold_num and self.train:
-                self.kfold_indexes = train_idx
+                self.kfold_indexes = ground_truth[ground_truth.patient.isin(train_pts)].index
                 break
             elif split_num == self.kfold_num and not self.train:
-                self.kfold_indexes = test_idx
+                self.kfold_indexes = ground_truth[ground_truth.patient.isin(test_pts)].index
                 break
