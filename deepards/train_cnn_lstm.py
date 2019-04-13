@@ -20,10 +20,10 @@ class TrainModel(object):
         self.args = args
         self.cuda_wrapper = lambda x: x.cuda() if args.cuda else x
         self.criterion = torch.nn.BCELoss()
+
         self.n_runs = self.args.kfolds if self.args.kfolds is not None else 1
         # Train and test both load from the same dataset in the case of kfold
         if self.n_runs > 1:
-            self.args.test_from_pickle = self.args.train_from_pickle
             self.args.test_to_pickle = None
 
     def run_train_epochs(self, model, train_loader, optimizer):
@@ -71,39 +71,74 @@ class TrainModel(object):
         preds = preds.sort_index()
         return preds
 
+    def get_base_datasets(self):
+        # We are doing things this way by loading sequence information here so that
+        # train and test datasets can access the same reference to the sequence array
+        # stored in memory if we are using kfold. It is a bit awkward on the coding
+        # side but it saves us memory.
+
+        # for kfold
+        if self.args.train_from_pickle and self.args.kfolds is not None:
+            train_sequences = pd.read_pickle(self.args.train_from_pickle)
+            test_sequences = train_sequences
+        # for holdout
+        elif self.args.train_from_pickle and self.args.kfolds is None:
+            train_sequences = pd.read_pickle(self.args.train_from_pickle)
+        # no pickle
+        else:
+            train_sequences = []
+
+        # for holdout
+        if self.args.test_from_pickle and self.args.kfolds is None:
+            test_sequences = pd.read_pickle(self.args.test_from_pickle)
+        # no pickle, no kfolds
+        elif not self.args.test_from_pickle and self.args.kfolds is None:
+            test_sequences = []
+
+        kfold_num = None if self.args.kfolds is None else 0
+        train_dataset = ARDSRawDataset(
+            self.args.data_path,
+            self.args.experiment_num,
+            self.args.cohort_file,
+            self.args.n_breaths_in_seq,
+            all_sequences=train_sequences,
+            to_pickle=self.args.train_to_pickle,
+            kfold_num=kfold_num,
+            total_kfolds=self.args.kfolds,
+        )
+        # I can't easily the train dataset as the test set because doing so would
+        # involve changing internal propeties on the train set
+        test_dataset = ARDSRawDataset(
+            self.args.data_path,
+            self.args.experiment_num,
+            self.args.cohort_file,
+            self.args.n_breaths_in_seq,
+            all_sequences=test_sequences,
+            to_pickle=self.args.test_to_pickle,
+            train=False,
+            kfold_num=kfold_num,
+            total_kfolds=self.args.kfolds,
+        )
+        return train_dataset, test_dataset
+
+    def get_splits(self):
+        train_dataset, test_dataset = self.get_base_datasets()
+        for i in range(self.n_runs):
+            if self.args.kfolds is not None:
+                print('--- Run Fold {} ---'.format(i+1))
+                train_dataset.get_kfold_indexes_for_fold(i)
+                test_dataset.get_kfold_indexes_for_fold(i)
+            yield train_dataset, test_dataset
+
     def train_and_test(self):
         results = DeepARDSResults()
-        for i in range(self.n_runs):
-            if self.n_runs > 1:
-                print('--- Run Fold {} ---'.format(i+1))
+        for train_dataset, test_dataset in self.get_splits():
             network_map = {'basic': CNNLSTMNetwork}
             base_network = {'resnet18': resnet18}[self.args.base_network]()
             model = self.cuda_wrapper(network_map[self.args.network](base_network))
             optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-
-            train_dataset = ARDSRawDataset(
-                self.args.data_path,
-                self.args.experiment_num,
-                self.args.cohort_file,
-                self.args.n_breaths_in_seq,
-                to_pickle=self.args.train_to_pickle,
-                from_pickle=self.args.train_from_pickle,
-                kfold_num=i,
-                total_kfolds=self.args.kfolds,
-            )
             train_loader = DataLoader(train_dataset, batch_size=self.args.batch_size, shuffle=True)
             self.run_train_epochs(model, train_loader, optimizer)
-            test_dataset = ARDSRawDataset(
-                self.args.data_path,
-                self.args.experiment_num,
-                self.args.cohort_file,
-                self.args.n_breaths_in_seq,
-                to_pickle=self.args.test_to_pickle,
-                from_pickle=self.args.test_from_pickle,
-                train=False,
-                kfold_num=i,
-                total_kfolds=self.args.kfolds,
-            )
             test_loader = DataLoader(test_dataset, batch_size=self.args.batch_size, shuffle=True)
             y_test = test_dataset.get_ground_truth_df()
             preds = self.run_test_epoch(model, test_loader)
@@ -130,6 +165,7 @@ def main():
     parser.add_argument('-nb', '--n-breaths-in-seq', type=int, default=20)
     parser.add_argument('--no-print-progress', action='store_true')
     parser.add_argument('--kfolds', type=int)
+    # XXX should probably be more explicit that we are using kfold or holdout in the future
     args = parser.parse_args()
 
     cls = TrainModel(args)

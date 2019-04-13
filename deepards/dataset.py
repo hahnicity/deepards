@@ -10,23 +10,21 @@ from ventmap.raw_utils import extract_raw, read_processed_file
 
 
 class ARDSRawDataset(Dataset):
-    def __init__(self, data_path, experiment_num, cohort_file, sequence_size, to_pickle=None, from_pickle=None, train=True, kfold_num=None, total_kfolds=None):
+    def __init__(self, data_path, experiment_num, cohort_file, sequence_size, all_sequences=[], to_pickle=None, train=True, kfold_num=None, total_kfolds=None):
         """
         Dataset to generate sequences of data for ARDS Detection
         """
-        self.all_sequences = []
+        self.all_sequences = all_sequences
         self.train = train
         self.kfold_num = kfold_num
         self.total_kfolds = total_kfolds
         self.vent_bn_frac_missing = .5
         self.frames_dropped = dict()
 
-        if from_pickle and kfold_num is not None:
-            self.all_sequences = pd.read_pickle(from_pickle)
+        if len(all_sequences) > 0 and kfold_num is not None:
             self.get_kfold_indexes()
             return
-        elif from_pickle:
-            self.all_sequences = pd.read_pickle(from_pickle)
+        elif len(all_sequences) > 0:
             return
 
         cohort = pd.read_csv(cohort_file)
@@ -152,6 +150,10 @@ class ARDSRawDataset(Dataset):
             patient, _, target = self.all_sequences[idx]
             rows.append([patient, np.argmax(target, axis=0)])
         return pd.DataFrame(rows, columns=['patient', 'y'], index=self.kfold_indexes)
+
+    def get_kfold_indexes_for_fold(self, fold_num):
+        self.kfold_num = fold_num
+        self.get_kfold_indexes()
 
     def get_kfold_indexes(self):
         ground_truth = self._get_all_sequence_ground_truth()
