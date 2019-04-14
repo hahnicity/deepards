@@ -77,23 +77,12 @@ class TrainModel(object):
         # stored in memory if we are using kfold. It is a bit awkward on the coding
         # side but it saves us memory.
 
-        # for kfold
-        if self.args.train_from_pickle and self.args.kfolds is not None:
-            train_sequences = pd.read_pickle(self.args.train_from_pickle)
-            test_sequences = train_sequences
-        # for holdout
-        elif self.args.train_from_pickle and self.args.kfolds is None:
+        # for holdout and kfold
+        if self.args.train_from_pickle:
             train_sequences = pd.read_pickle(self.args.train_from_pickle)
         # no pickle
         else:
             train_sequences = []
-
-        # for holdout
-        if self.args.test_from_pickle and self.args.kfolds is None:
-            test_sequences = pd.read_pickle(self.args.test_from_pickle)
-        # no pickle, no kfolds
-        elif not self.args.test_from_pickle and self.args.kfolds is None:
-            test_sequences = []
 
         kfold_num = None if self.args.kfolds is None else 0
         train_dataset = ARDSRawDataset(
@@ -106,6 +95,16 @@ class TrainModel(object):
             kfold_num=kfold_num,
             total_kfolds=self.args.kfolds,
         )
+        # for holdout
+        if self.args.test_from_pickle and self.args.kfolds is None:
+            test_sequences = pd.read_pickle(self.args.test_from_pickle)
+        # for kfold
+        elif self.args.kfolds is not None:
+            test_sequences = train_dataset.all_sequences
+        # holdout, no pickle, no kfolds
+        else:
+            test_sequences = []
+
         # I can't easily the train dataset as the test set because doing so would
         # involve changing internal propeties on the train set
         test_dataset = ARDSRawDataset(
@@ -133,9 +132,11 @@ class TrainModel(object):
     def train_and_test(self):
         results = DeepARDSResults()
         for train_dataset, test_dataset in self.get_splits():
-            network_map = {'basic': CNNLSTMNetwork}
             base_network = {'resnet18': resnet18}[self.args.base_network]()
-            model = self.cuda_wrapper(network_map[self.args.network](base_network))
+            network_map = {'basic': CNNLSTMNetwork}
+            model = self.cuda_wrapper(nn.DataParallel(network_map[self.args.network](base_network)))
+            # add this attr to DataParallel to make it compatible with the main model
+            model.init_hidden = model.module.init_hidden
             optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
             train_loader = DataLoader(train_dataset, batch_size=self.args.batch_size, shuffle=True)
             self.run_train_epochs(model, train_loader, optimizer)
