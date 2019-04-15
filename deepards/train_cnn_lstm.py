@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader
 from deepards.metrics import DeepARDSResults
 from deepards.models.resnet import resnet18
 from deepards.models.torch_cnn_lstm_combo import CNNLSTMNetwork
+from deepards.models.torch_cnn_linear_network import CNNLinearNetwork
 from deepards.dataset import ARDSRawDataset
 
 
@@ -19,12 +20,23 @@ class TrainModel(object):
     def __init__(self, args):
         self.args = args
         self.cuda_wrapper = lambda x: x.cuda() if args.cuda else x
+        self.model_cuda_wrapper = lambda x: nn.DataParallel(x).cuda() if args.cuda else x
         self.criterion = torch.nn.BCELoss()
 
         self.n_runs = self.args.kfolds if self.args.kfolds is not None else 1
         # Train and test both load from the same dataset in the case of kfold
         if self.n_runs > 1:
             self.args.test_to_pickle = None
+
+    def calc_loss(self, outputs, target):
+        if self.args.loss_calc == 'all_breaths' and self.args.network == 'cnn_lstm':
+            if self.args.batch_size > 1:
+                target = target.unsqueeze(1)
+            return self.criterion(outputs, target.repeat((1, self.args.n_breaths_in_seq, 1)))
+        elif self.args.loss_calc == 'last_breath' and self.args.network == 'cnn_lstm':
+            return self.criterion(outputs[:, -1, :], target)
+        else:
+            return self.criterion(outputs, target)
 
     def run_train_epochs(self, model, train_loader, optimizer):
         n_loss = 0
@@ -38,12 +50,7 @@ class TrainModel(object):
                     target = self.cuda_wrapper(target.float())
                     inputs = self.cuda_wrapper(Variable(seq.float()))
                     outputs = model(inputs)
-                    if self.args.loss_calc == 'all_breaths':
-                        if self.args.batch_size > 1:
-                            target = target.unsqueeze(1)
-                        loss = self.criterion(outputs, target.repeat((1, self.args.n_breaths_in_seq, 1)))
-                    elif self.args.loss_calc == 'last_breath':
-                        loss = self.criterion(outputs[:, -1, :], target)
+                    loss = self.calc_loss(outputs, target)
                     loss.backward()
                     optimizer.step()
                     optimizer.zero_grad()
@@ -63,7 +70,9 @@ class TrainModel(object):
                 # get the last prediction in the LSTM chain. Just do this for now. Maybe
                 # later we can have a slightly more sophisticated voting. Or we can just
                 # skip all of that together and only backprop on the last item.
-                preds.extend(outputs[:, -1, :].argmax(dim=1).cpu().tolist())
+                if self.args.network == 'cnn_lstm':
+                    outputs = outputs[:, -1, :]
+                preds.extend(outputs.argmax(dim=1).cpu().tolist())
                 pred_idx.extend(obs_idx.cpu().tolist())
         preds = pd.Series(preds, index=pred_idx)
         preds = preds.sort_index()
@@ -134,9 +143,10 @@ class TrainModel(object):
         results = DeepARDSResults()
         for train_dataset, test_dataset in self.get_splits():
             base_network = {'resnet18': resnet18}[self.args.base_network]()
-            network_map = {'basic': CNNLSTMNetwork}
-            model = self.cuda_wrapper(nn.DataParallel(network_map[self.args.network](base_network)))
-            # add this attr to DataParallel to make it compatible with the main model
+            if self.args.network == 'cnn_lstm':
+                model = self.model_cuda_wrapper(CNNLSTMNetwork(base_network))
+            elif self.args.network == 'cnn_linear':
+                model = self.model_cuda_wrapper(CNNLinearNetwork(base_network, self.args.n_breaths_in_seq))
             optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
             train_loader = DataLoader(train_dataset, batch_size=self.args.batch_size, shuffle=True)
             self.run_train_epochs(model, train_loader, optimizer)
@@ -153,7 +163,7 @@ def main():
     parser.add_argument('-dp', '--data-path', default='/fastdata/ardsdetection', help='Path to ARDS detection dataset')
     parser.add_argument('-en', '--experiment-num', type=int, default=1)
     parser.add_argument('-c', '--cohort-file', default='cohort-description.csv')
-    parser.add_argument('-n', '--network', choices=['basic'], default='basic')
+    parser.add_argument('-n', '--network', choices=['cnn_lstm', 'cnn_linear'], default='cnn_lstm')
     parser.add_argument('-e', '--epochs', type=int, default=5)
     parser.add_argument('-p', '--train-from-pickle')
     parser.add_argument('--train-to-pickle')
@@ -162,7 +172,7 @@ def main():
     parser.add_argument('--cuda', action='store_true')
     parser.add_argument('-b', '--batch-size', type=int, default=32)
     parser.add_argument('--base-network', choices=['resnet18'], default='resnet18')
-    parser.add_argument('--loss-calc', choices=['all_breaths', 'last_breath'], required=True)
+    parser.add_argument('--loss-calc', choices=['all_breaths', 'last_breath'], default='all_breaths')
     parser.add_argument('-nb', '--n-breaths-in-seq', type=int, default=20)
     parser.add_argument('--no-print-progress', action='store_true')
     parser.add_argument('--kfolds', type=int)
