@@ -142,7 +142,9 @@ class TrainModel(object):
     def train_and_test(self):
         results = DeepARDSResults()
         for train_dataset, test_dataset in self.get_splits():
-            base_network = {'resnet18': resnet18}[self.args.base_network]()
+            if self.args.base_network == 'resnet18':
+                base_network = resnet18(initial_planes=self.args.resnet_initial_planes)
+
             if self.args.network == 'cnn_lstm':
                 model = self.model_cuda_wrapper(CNNLSTMNetwork(base_network))
             elif self.args.network == 'cnn_linear':
@@ -176,6 +178,7 @@ def main():
     parser.add_argument('-nb', '--n-breaths-in-seq', type=int, default=20)
     parser.add_argument('--no-print-progress', action='store_true')
     parser.add_argument('--kfolds', type=int)
+    parser.add_argument('--resnet-initial-planes', type=int, default=64)
     # XXX should probably be more explicit that we are using kfold or holdout in the future
     args = parser.parse_args()
 

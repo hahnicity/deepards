@@ -81,19 +81,19 @@ class Bottleneck(nn.Module):
 
 class ResNet(nn.Module):
 
-    def __init__(self, block, layers):
-        self.inplanes = 64
+    def __init__(self, block, layers, initial_planes=64):
+        self.inplanes = initial_planes
         self.expansion = block.expansion
         super(ResNet, self).__init__()
-        self.conv1 = nn.Conv1d(1, 64, kernel_size=7, stride=2, padding=3,
+        self.conv1 = nn.Conv1d(1, self.inplanes, kernel_size=7, stride=2, padding=3,
                                bias=False)
-        self.bn1 = nn.BatchNorm1d(64)
+        self.bn1 = nn.BatchNorm1d(self.inplanes)
         self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool1d(kernel_size=3, stride=2, padding=1)
-        self.layer1 = self._make_layer(block, 64, layers[0])
-        self.layer2 = self._make_layer(block, 128, layers[1], stride=2)
-        self.layer3 = self._make_layer(block, 256, layers[2], stride=2)
-        self.layer4 = self._make_layer(block, 512, layers[3], stride=2)
+        self.layer1 = self._make_layer(block, initial_planes, layers[0])
+        self.layer2 = self._make_layer(block, initial_planes * 2, layers[1], stride=2)
+        self.layer3 = self._make_layer(block, initial_planes * 4, layers[2], stride=2)
+        self.layer4 = self._make_layer(block, initial_planes * 8, layers[3], stride=2)
         self.avgpool = nn.AvgPool1d(7, stride=1)
 
         for m in self.modules():
