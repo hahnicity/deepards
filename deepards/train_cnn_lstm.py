@@ -33,12 +33,11 @@ class TrainModel(object):
             for ep in range(self.args.epochs):
                 print("\nrun epoch {}\n".format(ep+1))
                 for idx, (obs_idx, patient, seq, target) in enumerate(train_loader):
-                    hidden = model.init_hidden(seq.shape[0])
                     model.zero_grad()
                     target_shape = target.numpy().shape
                     target = self.cuda_wrapper(target.float())
                     inputs = self.cuda_wrapper(Variable(seq.float()))
-                    outputs = model(inputs, hidden)
+                    outputs = model(inputs)
                     if self.args.loss_calc == 'all_breaths':
                         if self.args.batch_size > 1:
                             target = target.unsqueeze(1)
@@ -59,9 +58,8 @@ class TrainModel(object):
         pred_idx = []
         with torch.no_grad():
             for idx, (obs_idx, patient, seq, target) in enumerate(test_loader):
-                hidden = model.init_hidden(seq.shape[0])
                 inputs = self.cuda_wrapper(Variable(seq.float()))
-                outputs = model(inputs, hidden)
+                outputs = model(inputs)
                 # get the last prediction in the LSTM chain. Just do this for now. Maybe
                 # later we can have a slightly more sophisticated voting. Or we can just
                 # skip all of that together and only backprop on the last item.
@@ -76,6 +74,9 @@ class TrainModel(object):
         # train and test datasets can access the same reference to the sequence array
         # stored in memory if we are using kfold. It is a bit awkward on the coding
         # side but it saves us memory.
+        #
+        # XXX in future this function should probably handle to_pickle as well. Either
+        # that or we just have a separate function that handles pickling
 
         # for holdout and kfold
         if self.args.train_from_pickle:
@@ -136,7 +137,6 @@ class TrainModel(object):
             network_map = {'basic': CNNLSTMNetwork}
             model = self.cuda_wrapper(nn.DataParallel(network_map[self.args.network](base_network)))
             # add this attr to DataParallel to make it compatible with the main model
-            model.init_hidden = model.module.init_hidden
             optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
             train_loader = DataLoader(train_dataset, batch_size=self.args.batch_size, shuffle=True)
             self.run_train_epochs(model, train_loader, optimizer)
