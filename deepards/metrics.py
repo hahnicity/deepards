@@ -283,7 +283,6 @@ class DeepARDSResults(object):
         if not self.reporting.does_meter_exist(fold_auc_meter):
             self.reporting.new_meter(fold_auc_meter)
 
-        results_idx_start = len(self.results)
         for pt in y_test.patient.unique():
             pt_rows = y_test[y_test.patient == pt]
             pt_idx = pt_rows.index
@@ -308,7 +307,8 @@ class DeepARDSResults(object):
                 self.results.loc[self.results.patient == pt] = [pt_results]
             else:
                 self.results.loc[len(self.results)] = pt_results
-        chunked_results = self.results[results_idx_start:len(self.results)]
+
+        chunked_results = self.results[self.results.patient.isin(y_test.patient.unique())]
         stats = self._aggregate_specific_results(chunked_results)
         self.reporting.update(fold_auc_meter, stats.iloc[0].auc)
         self._print_specific_results_report(stats)
