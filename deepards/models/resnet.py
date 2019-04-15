@@ -81,7 +81,7 @@ class Bottleneck(nn.Module):
 
 class ResNet(nn.Module):
 
-    def __init__(self, block, layers, initial_planes=64):
+    def __init__(self, block, layers, initial_planes=64, first_pool_type='max'):
         self.inplanes = initial_planes
         self.expansion = block.expansion
         super(ResNet, self).__init__()
@@ -89,7 +89,10 @@ class ResNet(nn.Module):
                                bias=False)
         self.bn1 = nn.BatchNorm1d(self.inplanes)
         self.relu = nn.ReLU(inplace=True)
-        self.maxpool = nn.MaxPool1d(kernel_size=3, stride=2, padding=1)
+        if first_pool_type == 'max':
+            self.first_pool = nn.MaxPool1d(kernel_size=3, stride=2, padding=1)
+        elif first_pool_type == 'avg':
+            self.first_pool = nn.AvgPool1d(kernel_size=3, stride=2, padding=1)
         self.layer1 = self._make_layer(block, initial_planes, layers[0])
         self.layer2 = self._make_layer(block, initial_planes * 2, layers[1], stride=2)
         self.layer3 = self._make_layer(block, initial_planes * 4, layers[2], stride=2)
@@ -125,7 +128,7 @@ class ResNet(nn.Module):
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
-        x = self.maxpool(x)
+        x = self.first_pool(x)
 
         x = self.layer1(x)
         x = self.layer2(x)

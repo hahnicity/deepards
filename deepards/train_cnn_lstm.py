@@ -9,7 +9,7 @@ from torch.autograd import Variable
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
-from deepards.metrics import DeepARDSResults
+from deepards.metrics import DeepARDSResults, Reporting
 from deepards.models.resnet import resnet18
 from deepards.models.torch_cnn_lstm_combo import CNNLSTMNetwork
 from deepards.models.torch_cnn_linear_network import CNNLinearNetwork
@@ -38,27 +38,28 @@ class TrainModel(object):
         else:
             return self.criterion(outputs, target)
 
-    def run_train_epochs(self, model, train_loader, optimizer):
+    def run_train_epoch(self, model, train_loader, optimizer, epoch_num):
         n_loss = 0
         total_loss = 0
         with torch.enable_grad():
-            for ep in range(self.args.epochs):
-                print("\nrun epoch {}\n".format(ep+1))
-                for idx, (obs_idx, patient, seq, target) in enumerate(train_loader):
-                    model.zero_grad()
-                    target_shape = target.numpy().shape
-                    target = self.cuda_wrapper(target.float())
-                    inputs = self.cuda_wrapper(Variable(seq.float()))
-                    outputs = model(inputs)
-                    loss = self.calc_loss(outputs, target)
-                    loss.backward()
-                    optimizer.step()
-                    optimizer.zero_grad()
-                    # print individual loss and total loss
-                    total_loss += loss.data
-                    n_loss += 1
-                    if not self.args.no_print_progress:
-                        print("batch num: {}/{}, avg loss: {}\r".format(idx+1, len(train_loader), total_loss/n_loss), end="")
+            print("\nrun epoch {}\n".format(epoch_num))
+            for idx, (obs_idx, patient, seq, target) in enumerate(train_loader):
+                model.zero_grad()
+                target_shape = target.numpy().shape
+                target = self.cuda_wrapper(target.float())
+                inputs = self.cuda_wrapper(Variable(seq.float()))
+                outputs = model(inputs)
+                loss = self.calc_loss(outputs, target)
+                loss.backward()
+                optimizer.step()
+                optimizer.zero_grad()
+                # print individual loss and total loss
+                total_loss += loss.data
+                n_loss += 1
+                if not self.args.no_print_progress:
+                    print("batch num: {}/{}, avg loss: {}\r".format(idx+1, len(train_loader), total_loss/n_loss), end="")
+                if self.args.debug:
+                    break
 
     def run_test_epoch(self, model, test_loader):
         preds = []
@@ -140,10 +141,16 @@ class TrainModel(object):
             yield train_dataset, test_dataset
 
     def train_and_test(self):
-        results = DeepARDSResults()
-        for train_dataset, test_dataset in self.get_splits():
+        results = DeepARDSResults('{}_e{}_nb{}_lc{}_rip{}'.format(
+            self.args.network,
+            self.args.epochs,
+            self.args.n_breaths_in_seq,
+            self.args.loss_calc,
+            self.args.resnet_initial_planes
+        ))
+        for run_num, (train_dataset, test_dataset) in enumerate(self.get_splits()):
             if self.args.base_network == 'resnet18':
-                base_network = resnet18(initial_planes=self.args.resnet_initial_planes)
+                base_network = resnet18(initial_planes=self.args.resnet_initial_planes, first_pool_type=self.args.resnet_first_pool_type)
 
             if self.args.network == 'cnn_lstm':
                 model = self.model_cuda_wrapper(CNNLSTMNetwork(base_network))
@@ -151,13 +158,23 @@ class TrainModel(object):
                 model = self.model_cuda_wrapper(CNNLinearNetwork(base_network, self.args.n_breaths_in_seq))
             optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
             train_loader = DataLoader(train_dataset, batch_size=self.args.batch_size, shuffle=True)
-            self.run_train_epochs(model, train_loader, optimizer)
             test_loader = DataLoader(test_dataset, batch_size=self.args.batch_size, shuffle=True)
-            y_test = test_dataset.get_ground_truth_df()
-            preds = self.run_test_epoch(model, test_loader)
-            results.perform_patient_predictions(y_test, preds)
-        results.aggregate_all_results()
-        print(results.aggregate_stats)
+            for epoch in range(self.args.epochs):
+                self.run_train_epoch(model, train_loader, optimizer, epoch+1)
+                if self.args.test_after_epochs:
+                    preds = self.run_test_epoch(model, test_loader)
+                    y_test = test_dataset.get_ground_truth_df()
+                    results.perform_patient_predictions(y_test, preds, run_num)
+
+            if not self.args.test_after_epochs:
+                preds = self.run_test_epoch(model, test_loader)
+                y_test = test_dataset.get_ground_truth_df()
+                results.perform_patient_predictions(y_test, preds, run_num)
+
+        if self.n_runs > 1:
+            results.aggregate_all_results()
+        else:
+            results.reporting.save_all()
 
 
 def main():
@@ -178,7 +195,10 @@ def main():
     parser.add_argument('-nb', '--n-breaths-in-seq', type=int, default=20)
     parser.add_argument('--no-print-progress', action='store_true')
     parser.add_argument('--kfolds', type=int)
-    parser.add_argument('--resnet-initial-planes', type=int, default=64)
+    parser.add_argument('-rip', '--resnet-initial-planes', type=int, default=64)
+    parser.add_argument('-rfpt', '--resnet-first-pool-type', default='max', choices=['max', 'avg'])
+    parser.add_argument('--test-after-epochs', action='store_true')
+    parser.add_argument('--debug', action='store_true', help='debug code and dont train')
     # XXX should probably be more explicit that we are using kfold or holdout in the future
     args = parser.parse_args()
 
