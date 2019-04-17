@@ -74,7 +74,7 @@ class TrainModel(object):
                 # (47 ARDS v 53 OTHER)
                 if self.args.network == 'cnn_lstm':
                     batch_preds = [
-                        1 if int(outputs[batch_num].argmax(dim=1).sum()) > self.args.lstm_vote_percent else 0
+                        1 if int(outputs[batch_num].argmax(dim=1).sum()) >= self.args.lstm_vote_percent else 0
                         for batch_num in range(outputs.shape[0])
                     ]
                 preds.extend(batch_preds)
