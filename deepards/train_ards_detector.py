@@ -10,7 +10,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from deepards.metrics import DeepARDSResults, Reporting
-from deepards.models.resnet import resnet18
+from deepards.models.resnet import resnet18, resnet50
 from deepards.models.torch_cnn_lstm_combo import CNNLSTMNetwork
 from deepards.models.torch_cnn_linear_network import CNNLinearNetwork
 from deepards.dataset import ARDSRawDataset
@@ -68,12 +68,16 @@ class TrainModel(object):
             for idx, (obs_idx, patient, seq, target) in enumerate(test_loader):
                 inputs = self.cuda_wrapper(Variable(seq.float()))
                 outputs = model(inputs)
-                # get the last prediction in the LSTM chain. Just do this for now. Maybe
-                # later we can have a slightly more sophisticated voting. Or we can just
-                # skip all of that together and only backprop on the last item.
+                # With LSTM it seems like its all or nothing for the batches. It
+                # doesn't frequently change prediction frequently across them, although a
+                # small minority do have changes, one stack was even fairly mixed
+                # (47 ARDS v 53 OTHER)
                 if self.args.network == 'cnn_lstm':
-                    outputs = outputs[:, -1, :]
-                preds.extend(outputs.argmax(dim=1).cpu().tolist())
+                    batch_preds = [
+                        1 if int(outputs[batch_num].argmax(dim=1).sum()) > self.args.lstm_vote_percent else 0
+                        for batch_num in range(outputs.shape[0])
+                    ]
+                preds.extend(batch_preds)
                 pred_idx.extend(obs_idx.cpu().tolist())
         preds = pd.Series(preds, index=pred_idx)
         preds = preds.sort_index()
@@ -141,16 +145,22 @@ class TrainModel(object):
             yield train_dataset, test_dataset
 
     def train_and_test(self):
-        results = DeepARDSResults('{}_e{}_nb{}_lc{}_rip{}'.format(
+        results = DeepARDSResults('{}_base{}_e{}_nb{}_lc{}_rip{}_lvp{}_rfpt{}'.format(
             self.args.network,
+            self.args.base_network,
             self.args.epochs,
             self.args.n_breaths_in_seq,
             self.args.loss_calc,
-            self.args.resnet_initial_planes
+            self.args.resnet_initial_planes,
+            self.args.lstm_vote_percent,
+            self.args.resnet_first_pool_type,
         ))
         for run_num, (train_dataset, test_dataset) in enumerate(self.get_splits()):
-            if self.args.base_network == 'resnet18':
-                base_network = resnet18(initial_planes=self.args.resnet_initial_planes, first_pool_type=self.args.resnet_first_pool_type)
+            base_network = {'resnet18': resnet18, 'resnet50': resnet50}[self.args.base_network]
+            base_network = base_network(
+                initial_planes=self.args.resnet_initial_planes,
+                first_pool_type=self.args.resnet_first_pool_type,
+            )
 
             if self.args.network == 'cnn_lstm':
                 model = self.model_cuda_wrapper(CNNLSTMNetwork(base_network))
@@ -190,13 +200,14 @@ def main():
     parser.add_argument('--test-to-pickle')
     parser.add_argument('--cuda', action='store_true')
     parser.add_argument('-b', '--batch-size', type=int, default=32)
-    parser.add_argument('--base-network', choices=['resnet18'], default='resnet18')
+    parser.add_argument('--base-network', choices=['resnet18', 'resnet50'], default='resnet18')
     parser.add_argument('--loss-calc', choices=['all_breaths', 'last_breath'], default='all_breaths')
     parser.add_argument('-nb', '--n-breaths-in-seq', type=int, default=20)
     parser.add_argument('--no-print-progress', action='store_true')
     parser.add_argument('--kfolds', type=int)
     parser.add_argument('-rip', '--resnet-initial-planes', type=int, default=64)
     parser.add_argument('-rfpt', '--resnet-first-pool-type', default='max', choices=['max', 'avg'])
+    parser.add_argument('--lstm-vote-percent', default=70, type=int)
     parser.add_argument('--test-after-epochs', action='store_true')
     parser.add_argument('--debug', action='store_true', help='debug code and dont train')
     # XXX should probably be more explicit that we are using kfold or holdout in the future

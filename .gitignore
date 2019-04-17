@@ -5,6 +5,7 @@ __pycache__/
 *.sw[op]
 *.pkl
 *pkl.gz
+results/
 
 # C extensions
 *.so

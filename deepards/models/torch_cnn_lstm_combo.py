@@ -14,7 +14,7 @@ class CNNLSTMNetwork(nn.Module):
         # If you want to use DataParallel and save hidden state in the future then
         # you may not be able to use batch_first=True
         # https://discuss.pytorch.org/t/multi-layer-rnn-with-dataparallel/4450/10
-        self.lstm = nn.LSTM(breath_block.inplanes * breath_block.expansion, self.lstm_hidden_units, num_layers=self.lstm_layers, batch_first=True)
+        self.lstm = nn.LSTM(breath_block.inplanes, self.lstm_hidden_units, num_layers=self.lstm_layers, batch_first=True)
         self.linear_final = nn.Linear(self.lstm_hidden_units, 2)
         self.softmax = nn.Softmax(dim=-1)
 
