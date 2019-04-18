@@ -85,17 +85,24 @@ class ResNet(nn.Module):
         self.inplanes = initial_planes
         self.expansion = block.expansion
         super(ResNet, self).__init__()
+        # This divides the input by 2 so your output shape will be (batches, chans, 112)
         self.conv1 = nn.Conv1d(1, self.inplanes, kernel_size=7, stride=2, padding=3,
                                bias=False)
+
         self.bn1 = nn.BatchNorm1d(self.inplanes)
         self.relu = nn.ReLU(inplace=True)
+        # This also divides the input by 2 so your output shape will be (batches, chans, 56)
         if first_pool_type == 'max':
             self.first_pool = nn.MaxPool1d(kernel_size=3, stride=2, padding=1)
         elif first_pool_type == 'avg':
             self.first_pool = nn.AvgPool1d(kernel_size=3, stride=2, padding=1)
+        # This layer keeps the same data shape
         self.layer1 = self._make_layer(block, initial_planes, layers[0])
+        # This layer divides input seq size by 2 again: (batchs, chans, 28)
         self.layer2 = self._make_layer(block, initial_planes * 2, layers[1], stride=2)
+        # This layer divides input seq size by 2 again: (batchs, chans, 14)
         self.layer3 = self._make_layer(block, initial_planes * 4, layers[2], stride=2)
+        # This layer divides input seq size by 2 again: (batchs, chans, 7)
         self.layer4 = self._make_layer(block, initial_planes * 8, layers[3], stride=2)
         self.avgpool = nn.AvgPool1d(7, stride=1)
 

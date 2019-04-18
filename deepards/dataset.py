@@ -10,7 +10,7 @@ from ventmap.raw_utils import extract_raw, read_processed_file
 
 
 class ARDSRawDataset(Dataset):
-    def __init__(self, data_path, experiment_num, cohort_file, sequence_size, all_sequences=[], to_pickle=None, train=True, kfold_num=None, total_kfolds=None):
+    def __init__(self, data_path, experiment_num, cohort_file, n_breaths_in_seq, all_sequences=[], to_pickle=None, train=True, kfold_num=None, total_kfolds=None):
         """
         Dataset to generate sequences of data for ARDS Detection
         """
@@ -42,7 +42,6 @@ class ARDSRawDataset(Dataset):
         # obs and the std is 46.82. So mu + 2 * std = 234.19. So I can go up to 224 or 256.
         # 224 seems reasonable because it would fit well with existing img systems.
         seq_len = 224
-
         last_patient = None
         for fidx, filename in enumerate(raw_files):
             gen = list(read_processed_file(filename, processed_files[fidx]))
@@ -52,7 +51,7 @@ class ARDSRawDataset(Dataset):
             except:
                 raise ValueError('could not find patient id in file: {}'.format(filename))
             if patient_id != last_patient:
-                seq_arr = None
+                seq_arr = []
                 n_seq = 0
                 seq_vent_bns = []
             last_patient = patient_id
@@ -62,28 +61,16 @@ class ARDSRawDataset(Dataset):
 
             # XXX need to eventually add cutoffs based on vent time or Berlin time
             for bidx, breath in enumerate(gen):
-                flow = breath['flow']
-                if len(flow) < seq_len:
-                    flow.extend([0] * (seq_len - len(flow)))
-                elif len(flow) > seq_len:
-                    flow = flow[:seq_len]
-                # the dimensions correspond num breaths in sequence, num channels, num obs
-                flow = np.array(flow).reshape((1, 1, seq_len))
-                # XXX in future ensure vent bns relatively contiguous
-                if seq_arr is None:
-                    seq_arr = flow
-                    seq_vent_bns = [breath['vent_bn']]
-                else:
-                    seq_arr = np.append(seq_arr, flow, axis=0)
-                    seq_vent_bns.append(breath['vent_bn'])
-
+                seq_arr.append(breath['flow'])
+                seq_vent_bns.append(breath['vent_bn'])
                 n_seq += 1
-                if n_seq == sequence_size:
+
+                if n_seq == n_breaths_in_seq:
                     seq_vent_bns = np.array(seq_vent_bns)
                     diffs = seq_vent_bns[:-1] + 1 - seq_vent_bns[1:]
                     # do not include the stack if it is discontiguous to too large a degree
                     bns_missing = sum(abs(diffs))
-                    missing_thresh = int(sequence_size * self.vent_bn_frac_missing)
+                    missing_thresh = int(n_breaths_in_seq * self.vent_bn_frac_missing)
                     if bns_missing > missing_thresh:
                         # last vent BN possible is 65536 (2^16) I'd like to recognize if this is occurring
                         if not abs(bns_missing - (2 ** 16)) <= missing_thresh:
@@ -91,17 +78,47 @@ class ARDSRawDataset(Dataset):
                                 self.frames_dropped[patient_id] = 1
                             else:
                                 self.frames_dropped[patient_id] += 1
-                            seq_arr = None
+                            seq_arr = []
                             n_seq = 0
                             seq_vent_bns = []
                             continue
                     target = np.zeros(2)
                     target[patho] = 1
-                    self.all_sequences.append((patient_id, seq_arr, target))
-                    seq_arr = None
+                    self.all_sequences.append([patient_id, seq_arr, target])
+                    seq_arr = []
                     n_seq = 0
                     seq_vent_bns = []
 
+        # find mean scaling factor
+        #
+        # XXX there is a problem with this and we are not respecting train sets versus
+        # testing sets. Everything is just scaled to the same factor. I think that we
+        # should change this but for now I'm going to let it ride for a bit.
+        flow_sum = 0
+        n_obs = 0
+        for seq in self.all_sequences:
+            flow_sum += sum([sum(row) for row in seq[1]])
+            n_obs += sum([len(row) for row in seq[1]])
+        mu = flow_sum / n_obs
+
+        # find std scaling factor
+        std_sum = 0
+        for seq in self.all_sequences:
+            std_sum += sum([((np.array(row) - mu) ** 2).sum()  for row in seq[1]])
+        std = np.sqrt(std_sum / (n_obs-1))
+
+        # scale and pad and update array
+        for idx, seq in enumerate(self.all_sequences):
+            # you can also pad before performing ops if you just pad with mu. But
+            # for now the point is kinda moot
+            new_seq = np.array([
+                np.pad((np.array(row) - mu) / std, (0, seq_len - len(row)), 'constant')
+                if len(row) < seq_len else ((np.array(row) - mu) / std)[:seq_len]
+                for row in seq[1]
+            ]).reshape((n_breaths_in_seq, 1, seq_len))
+            self.all_sequences[idx][1] = new_seq
+
+        # the overall dimensions correspond num breaths in sequence, num channels, num obs
         if to_pickle:
             pd.to_pickle(self.all_sequences, to_pickle)
 
