@@ -145,7 +145,7 @@ class TrainModel(object):
             yield train_dataset, test_dataset
 
     def train_and_test(self):
-        results = DeepARDSResults('{}_base{}_e{}_nb{}_lc{}_rip{}_lvp{}_rfpt{}'.format(
+        results = DeepARDSResults('{}_base{}_e{}_nb{}_lc{}_rip{}_lvp{}_rfpt{}_optim{}'.format(
             self.args.network,
             self.args.base_network,
             self.args.epochs,
@@ -154,6 +154,7 @@ class TrainModel(object):
             self.args.resnet_initial_planes,
             self.args.lstm_vote_percent,
             self.args.resnet_first_pool_type,
+            self.args.optimizer,
         ))
         for run_num, (train_dataset, test_dataset) in enumerate(self.get_splits()):
             base_network = {'resnet18': resnet18, 'resnet50': resnet50}[self.args.base_network]
@@ -166,7 +167,10 @@ class TrainModel(object):
                 model = self.model_cuda_wrapper(CNNLSTMNetwork(base_network))
             elif self.args.network == 'cnn_linear':
                 model = self.model_cuda_wrapper(CNNLinearNetwork(base_network, self.args.n_breaths_in_seq))
-            optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+            if self.args.optimizer == 'adam':
+                optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+            elif self.args.optimizer == 'sgd':
+                optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9, weight_decay=0.0001, nesterov=True)
             train_loader = DataLoader(train_dataset, batch_size=self.args.batch_size, shuffle=True)
             test_loader = DataLoader(test_dataset, batch_size=self.args.batch_size, shuffle=True)
             for epoch in range(self.args.epochs):
@@ -210,6 +214,7 @@ def main():
     parser.add_argument('--lstm-vote-percent', default=70, type=int)
     parser.add_argument('--test-after-epochs', action='store_true')
     parser.add_argument('--debug', action='store_true', help='debug code and dont train')
+    parser.add_argument('--optimizer', choices=['adam', 'sgd'], default='adam')
     # XXX should probably be more explicit that we are using kfold or holdout in the future
     args = parser.parse_args()
 
