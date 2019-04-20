@@ -77,6 +77,9 @@ class TrainModel(object):
                         1 if int(outputs[batch_num].argmax(dim=1).sum()) >= self.args.lstm_vote_percent else 0
                         for batch_num in range(outputs.shape[0])
                     ]
+                elif self.args.network == 'cnn_linear':
+                    batch_preds = outputs.argmax(dim=1).cpu().tolist()
+
                 preds.extend(batch_preds)
                 pred_idx.extend(obs_idx.cpu().tolist())
         preds = pd.Series(preds, index=pred_idx)
