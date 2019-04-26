@@ -10,7 +10,18 @@ from ventmap.raw_utils import extract_raw, read_processed_file
 
 
 class ARDSRawDataset(Dataset):
-    def __init__(self, data_path, experiment_num, cohort_file, n_breaths_in_seq, all_sequences=[], to_pickle=None, train=True, kfold_num=None, total_kfolds=None):
+
+    def __init__(self,
+                 data_path,
+                 experiment_num,
+                 cohort_file,
+                 n_sub_batches,
+                 dataset_type,
+                 all_sequences=[],
+                 to_pickle=None,
+                 train=True,
+                 kfold_num=None,
+                 total_kfolds=None):
         """
         Dataset to generate sequences of data for ARDS Detection
         """
@@ -20,6 +31,7 @@ class ARDSRawDataset(Dataset):
         self.total_kfolds = total_kfolds
         self.vent_bn_frac_missing = .5
         self.frames_dropped = dict()
+        self.n_sub_batches = n_sub_batches
 
         if len(all_sequences) > 0 and kfold_num is not None:
             self.get_kfold_indexes()
@@ -27,103 +39,148 @@ class ARDSRawDataset(Dataset):
         elif len(all_sequences) > 0:
             return
 
-        cohort = pd.read_csv(cohort_file)
+        self.cohort = pd.read_csv(cohort_file)
         if kfold_num is None:
-            # XXX this will change in the future
             data_subdir = 'prototrain' if train else 'prototest'
         else:
             data_subdir = 'training'
         raw_dir = os.path.join(data_path, 'experiment{}'.format(experiment_num), data_subdir, 'raw')
         if not os.path.exists(raw_dir):
             raise Exception('No directory {} exists!'.format(raw_dir))
-        raw_files = sorted(glob(os.path.join(raw_dir, '*/*.raw.npy')))
-        processed_files = sorted(glob(os.path.join(raw_dir, '*/*.processed.npy')))
+        self.raw_files = sorted(glob(os.path.join(raw_dir, '*/*.raw.npy')))
+        self.processed_files = sorted(glob(os.path.join(raw_dir, '*/*.processed.npy')))
+
         # So I calculated out the stats on the training set. Our breaths are a mean of 140.5
-        # obs and the std is 46.82. So mu + 2 * std = 234.19. So I can go up to 224 or 256.
-        # 224 seems reasonable because it would fit well with existing img systems.
-        seq_len = 224
-        last_patient = None
-        for fidx, filename in enumerate(raw_files):
-            gen = list(read_processed_file(filename, processed_files[fidx]))
-            match = re.search(r'(0\d{3}RPI\d{10})', filename)
-            try:
-                patient_id = match.groups()[0]
-            except:
-                raise ValueError('could not find patient id in file: {}'.format(filename))
-            if patient_id != last_patient:
-                seq_arr = []
-                n_seq = 0
-                seq_vent_bns = []
-            last_patient = patient_id
-            patient_row = cohort[cohort['Patient Unique Identifier'] == patient_id]
-            patient_row = patient_row.iloc[0]
-            patho = 1 if patient_row['Pathophysiology'] == 'ARDS' else 0
-
-            # XXX need to eventually add cutoffs based on vent time or Berlin time
-            for bidx, breath in enumerate(gen):
-                seq_arr.append(breath['flow'])
-                seq_vent_bns.append(breath['vent_bn'])
-                n_seq += 1
-
-                if n_seq == n_breaths_in_seq:
-                    seq_vent_bns = np.array(seq_vent_bns)
-                    diffs = seq_vent_bns[:-1] + 1 - seq_vent_bns[1:]
-                    # do not include the stack if it is discontiguous to too large a degree
-                    bns_missing = sum(abs(diffs))
-                    missing_thresh = int(n_breaths_in_seq * self.vent_bn_frac_missing)
-                    if bns_missing > missing_thresh:
-                        # last vent BN possible is 65536 (2^16) I'd like to recognize if this is occurring
-                        if not abs(bns_missing - (2 ** 16)) <= missing_thresh:
-                            if not patient_id in self.frames_dropped:
-                                self.frames_dropped[patient_id] = 1
-                            else:
-                                self.frames_dropped[patient_id] += 1
-                            seq_arr = []
-                            n_seq = 0
-                            seq_vent_bns = []
-                            continue
-                    target = np.zeros(2)
-                    target[patho] = 1
-                    self.all_sequences.append([patient_id, seq_arr, target])
-                    seq_arr = []
-                    n_seq = 0
-                    seq_vent_bns = []
-
+        flow_sum = 0
+        n_obs = 0
         # find mean scaling factor
         #
         # XXX there is a problem with this and we are not respecting train sets versus
         # testing sets. Everything is just scaled to the same factor. I think that we
         # should change this but for now I'm going to let it ride for a bit.
-        flow_sum = 0
-        n_obs = 0
-        for seq in self.all_sequences:
-            flow_sum += sum([sum(row) for row in seq[1]])
-            n_obs += sum([len(row) for row in seq[1]])
-        mu = flow_sum / n_obs
+        for fidx, filename in enumerate(self.raw_files):
+            gen = list(read_processed_file(filename, self.processed_files[fidx]))
+            for breath in gen:
+                flow_sum += sum(breath['flow'])
+                n_obs += len(breath['flow'])
+        self.mu = flow_sum / n_obs
 
         # find std scaling factor
         std_sum = 0
-        for seq in self.all_sequences:
-            std_sum += sum([((np.array(row) - mu) ** 2).sum()  for row in seq[1]])
-        std = np.sqrt(std_sum / (n_obs-1))
+        for fidx, filename in enumerate(self.raw_files):
+            gen = list(read_processed_file(filename, self.processed_files[fidx]))
+            for breath in gen:
+                std_sum += ((np.array(breath['flow']) - self.mu) ** 2).sum()
+        self.std = np.sqrt(std_sum / (n_obs-1))
 
-        # scale and pad and update array
-        for idx, seq in enumerate(self.all_sequences):
-            # you can also pad before performing ops if you just pad with mu. But
-            # for now the point is kinda moot
-            new_seq = np.array([
-                np.pad((np.array(row) - mu) / std, (0, seq_len - len(row)), 'constant')
-                if len(row) < seq_len else ((np.array(row) - mu) / std)[:seq_len]
-                for row in seq[1]
-            ]).reshape((n_breaths_in_seq, 1, seq_len))
-            self.all_sequences[idx][1] = new_seq
+        # 224 seems reasonable because it would fit well with existing img systems.
+        self.seq_len = 224
+        if dataset_type == 'breath_by_breath':
+            self.get_breath_by_breath_data()
+        elif dataset_type == 'unpadded_sequences':
+            self.get_unpadded_sequences_dataset()
 
-        # the overall dimensions correspond num breaths in sequence, num channels, num obs
         if to_pickle:
             pd.to_pickle(self.all_sequences, to_pickle)
 
         if kfold_num is not None:
             self.get_kfold_indexes()
+
+    def get_breath_by_breath_data(self):
+        """
+        Process data for patient where each component of a sub-batch is a breath padded
+        to a desired sequence length. Breaths are batched in accordance to how many
+        breaths we want clustered together
+        """
+        last_patient = None
+        for fidx, filename in enumerate(self.raw_files):
+            gen = list(read_processed_file(filename, self.processed_files[fidx]))
+            patient_id = self._get_patient_id_from_file(filename)
+            if patient_id != last_patient:
+                batch_arr = []
+                seq_vent_bns = []
+            last_patient = patient_id
+            patient_row = self.cohort[self.cohort['Patient Unique Identifier'] == patient_id]
+            patient_row = patient_row.iloc[0]
+            patho = 1 if patient_row['Pathophysiology'] == 'ARDS' else 0
+
+            # XXX need to eventually add cutoffs based on vent time or Berlin time
+            for bidx, breath in enumerate(gen):
+                b_seq = np.pad((np.array(breath['flow']) - self.mu) / self.std, (0, self.seq_len - len(breath['flow'])), 'constant') if self.seq_len - len(breath['flow']) >= 0 else (np.array(breath['flow'][:self.seq_len]) - self.mu) / self.std
+                batch_arr.append(b_seq)
+                seq_vent_bns.append(breath['vent_bn'])
+
+                if len(batch_arr) == self.n_sub_batches:
+                    if self._should_we_drop_frame(seq_vent_bns, patient_id):
+                        batch_arr = []
+                        seq_vent_bns = []
+                        continue
+                    target = np.zeros(2)
+                    target[patho] = 1
+                    self.all_sequences.append([patient_id, np.array(batch_arr), target])
+                    batch_arr = []
+                    seq_vent_bns = []
+
+    def get_unpadded_sequences_dataset(self):
+        # XXX should probably consolidate these two funcs
+        last_patient = None
+        for fidx, filename in enumerate(self.raw_files):
+            gen = list(read_processed_file(filename, self.processed_files[fidx]))
+            patient_id = self._get_patient_id_from_file(filename)
+            if patient_id != last_patient:
+                batch_arr = []
+                breath_arr = []
+                seq_vent_bns = []
+            last_patient = patient_id
+            patient_row = self.cohort[self.cohort['Patient Unique Identifier'] == patient_id]
+            patient_row = patient_row.iloc[0]
+            patho = 1 if patient_row['Pathophysiology'] == 'ARDS' else 0
+
+            for bidx, breath in enumerate(gen):
+                seq_vent_bns.append(breath['vent_bn'])
+                if len(breath['flow']) + len(breath_arr) < self.seq_len:
+                    breath_arr.extend(breath['flow'])
+                else:
+                    remaining = self.seq_len - len(breath_arr)
+                    breath_arr.extend(breath['flow'][:remaining])
+                    batch_arr.append((np.array(breath_arr) - self.mu) / self.std)
+                    breath_arr = breath['flow'][remaining:]
+
+                if len(batch_arr) == self.n_sub_batches:
+                    if self._should_we_drop_frame(seq_vent_bns, patient_id):
+                        # drop breath arr to be safe
+                        breath_arr = []
+                        batch_arr = []
+                        seq_vent_bns = []
+                        continue
+                    target = np.zeros(2)
+                    target[patho] = 1
+                    self.all_sequences.append([patient_id, np.array(batch_arr), target])
+                    batch_arr = []
+                    seq_vent_bns = []
+
+    def _get_patient_id_from_file(self, filename):
+        match = re.search(r'(0\d{3}RPI\d{10})', filename)
+        try:
+            return match.groups()[0]
+        except:
+            raise ValueError('could not find patient id in file: {}'.format(filename))
+
+    def _should_we_drop_frame(self, seq_vent_bns, patient_id):
+        seq_vent_bns = np.array(seq_vent_bns)
+        diffs = seq_vent_bns[:-1] + 1 - seq_vent_bns[1:]
+        # do not include the stack if it is discontiguous to too large a degree
+        bns_missing = sum(abs(diffs))
+        missing_thresh = int(self.n_sub_batches * self.vent_bn_frac_missing)
+        if bns_missing > missing_thresh:
+            # last vent BN possible is 65536 (2^16) I'd like to recognize if this is occurring
+            if not abs(bns_missing - (2 ** 16)) <= missing_thresh:
+                if not patient_id in self.frames_dropped:
+                    self.frames_dropped[patient_id] = 1
+                else:
+                    self.frames_dropped[patient_id] += 1
+                return True
+        return False
 
     def __getitem__(self, index):
         # This is a bit tricky because pytorch will just assume that indexing
