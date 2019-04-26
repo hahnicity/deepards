@@ -211,12 +211,11 @@ def main():
     parser.add_argument('-b', '--batch-size', type=int, default=32)
     parser.add_argument('--base-network', choices=['resnet18', 'resnet50', 'resnet101', 'resnet152'], default='resnet18')
     parser.add_argument('--loss-calc', choices=['all_breaths', 'last_breath'], default='last_breath')
-    parser.add_argument('--base-network', choices=['resnet18', 'resnet50'], default='resnet18')
     parser.add_argument('-nb', '--n-sub-batches', type=int, default=20, help=(
         "number of breath-subbatches for each breath frame. This has different "
         "meanings for different dataset types. For breath_by_breath this means the "
         "number of individual breaths in each breath frame. For unpadded_sequences "
-        "this means the number of contiguous flow measurements in each frame."
+        "this means the number of contiguous flow measurements in each frame."))
     parser.add_argument('--no-print-progress', action='store_true')
     parser.add_argument('--kfolds', type=int)
     parser.add_argument('-rip', '--resnet-initial-planes', type=int, default=64)
