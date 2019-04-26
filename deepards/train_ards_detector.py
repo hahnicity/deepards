@@ -32,7 +32,7 @@ class TrainModel(object):
         if self.args.loss_calc == 'all_breaths' and self.args.network == 'cnn_lstm':
             if self.args.batch_size > 1:
                 target = target.unsqueeze(1)
-            return self.criterion(outputs, target.repeat((1, self.args.n_breaths_in_seq, 1)))
+            return self.criterion(outputs, target.repeat((1, self.args.n_sub_batches, 1)))
         elif self.args.loss_calc == 'last_breath' and self.args.network == 'cnn_lstm':
             return self.criterion(outputs[:, -1, :], target)
         else:
@@ -107,7 +107,8 @@ class TrainModel(object):
             self.args.data_path,
             self.args.experiment_num,
             self.args.cohort_file,
-            self.args.n_breaths_in_seq,
+            self.args.n_sub_batches,
+            dataset_type=self.args.dataset_type,
             all_sequences=train_sequences,
             to_pickle=self.args.train_to_pickle,
             kfold_num=kfold_num,
@@ -129,7 +130,8 @@ class TrainModel(object):
             self.args.data_path,
             self.args.experiment_num,
             self.args.cohort_file,
-            self.args.n_breaths_in_seq,
+            self.args.n_sub_batches,
+            dataset_type=self.args.dataset_type,
             all_sequences=test_sequences,
             to_pickle=self.args.test_to_pickle,
             train=False,
@@ -152,7 +154,7 @@ class TrainModel(object):
             self.args.network,
             self.args.base_network,
             self.args.epochs,
-            self.args.n_breaths_in_seq,
+            self.args.n_sub_batches,
             self.args.loss_calc,
             self.args.resnet_initial_planes,
             self.args.lstm_vote_percent,
@@ -169,7 +171,7 @@ class TrainModel(object):
             if self.args.network == 'cnn_lstm':
                 model = self.model_cuda_wrapper(CNNLSTMNetwork(base_network))
             elif self.args.network == 'cnn_linear':
-                model = self.model_cuda_wrapper(CNNLinearNetwork(base_network, self.args.n_breaths_in_seq))
+                model = self.model_cuda_wrapper(CNNLinearNetwork(base_network, self.args.n_sub_batches))
             if self.args.optimizer == 'adam':
                 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
             elif self.args.optimizer == 'sgd':
@@ -209,7 +211,7 @@ def main():
     parser.add_argument('-b', '--batch-size', type=int, default=32)
     parser.add_argument('--base-network', choices=['resnet18', 'resnet50'], default='resnet18')
     parser.add_argument('--loss-calc', choices=['all_breaths', 'last_breath'], default='all_breaths')
-    parser.add_argument('-nb', '--n-breaths-in-seq', type=int, default=20)
+    parser.add_argument('-nb', '--n-sub-batches', type=int, default=20)
     parser.add_argument('--no-print-progress', action='store_true')
     parser.add_argument('--kfolds', type=int)
     parser.add_argument('-rip', '--resnet-initial-planes', type=int, default=64)
@@ -218,6 +220,7 @@ def main():
     parser.add_argument('--test-after-epochs', action='store_true')
     parser.add_argument('--debug', action='store_true', help='debug code and dont train')
     parser.add_argument('--optimizer', choices=['adam', 'sgd'], default='adam')
+    parser.add_argument('-dt', '--dataset-type', choices=['breath_by_breath', 'unpadded_sequences'], default='breath_by_breath')
     # XXX should probably be more explicit that we are using kfold or holdout in the future
     args = parser.parse_args()
 
