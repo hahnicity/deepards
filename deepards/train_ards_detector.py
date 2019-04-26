@@ -10,7 +10,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from deepards.metrics import DeepARDSResults, Reporting
-from deepards.models.resnet import resnet18, resnet50
+from deepards.models.resnet import resnet18, resnet50, resnet101, resnet152
 from deepards.models.torch_cnn_lstm_combo import CNNLSTMNetwork
 from deepards.models.torch_cnn_linear_network import CNNLinearNetwork
 from deepards.dataset import ARDSRawDataset
@@ -160,7 +160,7 @@ class TrainModel(object):
             self.args.optimizer,
         ))
         for run_num, (train_dataset, test_dataset) in enumerate(self.get_splits()):
-            base_network = {'resnet18': resnet18, 'resnet50': resnet50}[self.args.base_network]
+            base_network = {'resnet18': resnet18, 'resnet50': resnet50, 'resnet101': resnet101, 'resnet152': resnet152}[self.args.base_network]
             base_network = base_network(
                 initial_planes=self.args.resnet_initial_planes,
                 first_pool_type=self.args.resnet_first_pool_type,
@@ -207,8 +207,8 @@ def main():
     parser.add_argument('--test-to-pickle')
     parser.add_argument('--cuda', action='store_true')
     parser.add_argument('-b', '--batch-size', type=int, default=32)
-    parser.add_argument('--base-network', choices=['resnet18', 'resnet50'], default='resnet18')
-    parser.add_argument('--loss-calc', choices=['all_breaths', 'last_breath'], default='all_breaths')
+    parser.add_argument('--base-network', choices=['resnet18', 'resnet50', 'resnet101', 'resnet152'], default='resnet18')
+    parser.add_argument('--loss-calc', choices=['all_breaths', 'last_breath'], default='last_breath')
     parser.add_argument('-nb', '--n-breaths-in-seq', type=int, default=20)
     parser.add_argument('--no-print-progress', action='store_true')
     parser.add_argument('--kfolds', type=int)
