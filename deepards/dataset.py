@@ -53,25 +53,14 @@ class ARDSRawDataset(Dataset):
         # So I calculated out the stats on the training set. Our breaths are a mean of 140.5
         flow_sum = 0
         n_obs = 0
-        # find mean scaling factor
-        #
         # XXX there is a problem with this and we are not respecting train sets versus
         # testing sets. Everything is just scaled to the same factor. I think that we
         # should change this but for now I'm going to let it ride for a bit.
-        for fidx, filename in enumerate(self.raw_files):
-            gen = list(read_processed_file(filename, self.processed_files[fidx]))
-            for breath in gen:
-                flow_sum += sum(breath['flow'])
-                n_obs += len(breath['flow'])
-        self.mu = flow_sum / n_obs
 
-        # find std scaling factor
-        std_sum = 0
-        for fidx, filename in enumerate(self.raw_files):
-            gen = list(read_processed_file(filename, self.processed_files[fidx]))
-            for breath in gen:
-                std_sum += ((np.array(breath['flow']) - self.mu) ** 2).sum()
-        self.std = np.sqrt(std_sum / (n_obs-1))
+        # use precomputed scaling factors. These may change so we may need to compute them
+        # again
+        self.mu = -0.16998896167389502
+        self.std = 25.332015720945343
 
         # 224 seems reasonable because it would fit well with existing img systems.
         self.seq_len = 224
@@ -117,7 +106,7 @@ class ARDSRawDataset(Dataset):
                         continue
                     target = np.zeros(2)
                     target[patho] = 1
-                    self.all_sequences.append([patient_id, np.array(batch_arr), target])
+                    self.all_sequences.append([patient_id, np.array(batch_arr).reshape((self.n_sub_batches, 1, self.seq_len)), target])
                     batch_arr = []
                     seq_vent_bns = []
 
@@ -138,13 +127,16 @@ class ARDSRawDataset(Dataset):
 
             for bidx, breath in enumerate(gen):
                 seq_vent_bns.append(breath['vent_bn'])
-                if len(breath['flow']) + len(breath_arr) < self.seq_len:
+                if (len(breath['flow']) + len(breath_arr)) < self.seq_len:
                     breath_arr.extend(breath['flow'])
                 else:
                     remaining = self.seq_len - len(breath_arr)
                     breath_arr.extend(breath['flow'][:remaining])
                     batch_arr.append((np.array(breath_arr) - self.mu) / self.std)
-                    breath_arr = breath['flow'][remaining:]
+                    if len(breath['flow'][remaining:]) > self.seq_len:
+                        breath_arr = breath['flow'][remaining:remaining+self.seq_len]
+                    else:
+                        breath_arr = breath['flow'][remaining:]
 
                 if len(batch_arr) == self.n_sub_batches:
                     if self._should_we_drop_frame(seq_vent_bns, patient_id):
@@ -155,7 +147,7 @@ class ARDSRawDataset(Dataset):
                         continue
                     target = np.zeros(2)
                     target[patho] = 1
-                    self.all_sequences.append([patient_id, np.array(batch_arr), target])
+                    self.all_sequences.append([patient_id, np.array(batch_arr).reshape((self.n_sub_batches, 1, self.seq_len)), target])
                     batch_arr = []
                     seq_vent_bns = []
 
@@ -189,16 +181,8 @@ class ARDSRawDataset(Dataset):
         # like in your kfold
         if self.kfold_num is not None:
             index = self.kfold_indexes[index]
-        patient, seq, target = self.all_sequences[index]
-        return index, patient, seq, target
-
-    def collate(self, batch):
-        """
-        Stub method in case we ever want to use this. Normally just takes
-        a list of inputs from __getitem__ and converts to tensor but you
-        can add additional custom logic here too.
-        """
-        pass
+        _, seq, target = self.all_sequences[index]
+        return index, seq, target
 
     def __len__(self):
         if self.kfold_num is None:

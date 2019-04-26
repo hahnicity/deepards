@@ -43,7 +43,7 @@ class TrainModel(object):
         total_loss = 0
         with torch.enable_grad():
             print("\nrun epoch {}\n".format(epoch_num))
-            for idx, (obs_idx, patient, seq, target) in enumerate(train_loader):
+            for idx, (obs_idx, seq, target) in enumerate(train_loader):
                 model.zero_grad()
                 target_shape = target.numpy().shape
                 target = self.cuda_wrapper(target.float())
@@ -65,7 +65,7 @@ class TrainModel(object):
         preds = []
         pred_idx = []
         with torch.no_grad():
-            for idx, (obs_idx, patient, seq, target) in enumerate(test_loader):
+            for idx, (obs_idx, seq, target) in enumerate(test_loader):
                 inputs = self.cuda_wrapper(Variable(seq.float()))
                 outputs = model(inputs)
                 # With LSTM it seems like its all or nothing for the batches. It
@@ -223,7 +223,7 @@ def main():
     parser.add_argument('--lstm-vote-percent', default=70, type=int)
     parser.add_argument('--test-after-epochs', action='store_true')
     parser.add_argument('--debug', action='store_true', help='debug code and dont train')
-    parser.add_argument('--optimizer', choices=['adam', 'sgd'], default='adam')
+    parser.add_argument('--optimizer', choices=['adam', 'sgd'], default='sgd')
     parser.add_argument('-dt', '--dataset-type', choices=['breath_by_breath', 'unpadded_sequences'], default='breath_by_breath')
     # XXX should probably be more explicit that we are using kfold or holdout in the future
     args = parser.parse_args()
