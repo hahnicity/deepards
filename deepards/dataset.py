@@ -100,7 +100,7 @@ class ARDSRawDataset(Dataset):
                 batch_arr = []
                 seq_vent_bns = []
             last_patient = patient_id
-            patient_row = self.cohort[cohort['Patient Unique Identifier'] == patient_id]
+            patient_row = self.cohort[self.cohort['Patient Unique Identifier'] == patient_id]
             patient_row = patient_row.iloc[0]
             patho = 1 if patient_row['Pathophysiology'] == 'ARDS' else 0
 
@@ -111,7 +111,7 @@ class ARDSRawDataset(Dataset):
                 seq_vent_bns.append(breath['vent_bn'])
 
                 if len(batch_arr) == self.n_sub_batches:
-                    if self._should_we_drop_frame(seq_vent_bns):
+                    if self._should_we_drop_frame(seq_vent_bns, patient_id):
                         batch_arr = []
                         seq_vent_bns = []
                         continue
@@ -132,23 +132,22 @@ class ARDSRawDataset(Dataset):
                 breath_arr = []
                 seq_vent_bns = []
             last_patient = patient_id
-            patient_row = self.cohort[cohort['Patient Unique Identifier'] == patient_id]
+            patient_row = self.cohort[self.cohort['Patient Unique Identifier'] == patient_id]
             patient_row = patient_row.iloc[0]
             patho = 1 if patient_row['Pathophysiology'] == 'ARDS' else 0
 
             for bidx, breath in enumerate(gen):
                 seq_vent_bns.append(breath['vent_bn'])
-                if len(breath['flow']) + len(breath_arr) <= self.seq_len:
+                if len(breath['flow']) + len(breath_arr) < self.seq_len:
                     breath_arr.extend(breath['flow'])
                 else:
                     remaining = self.seq_len - len(breath_arr)
                     breath_arr.extend(breath['flow'][:remaining])
-                    # I checked for side effects here and it doesn't seem like theres any
-                    batch_arr.append((np.array(breath_arr) - mu) / std)
+                    batch_arr.append((np.array(breath_arr) - self.mu) / self.std)
                     breath_arr = breath['flow'][remaining:]
 
                 if len(batch_arr) == self.n_sub_batches:
-                    if self._should_we_drop_frame(seq_vent_bns):
+                    if self._should_we_drop_frame(seq_vent_bns, patient_id):
                         # drop breath arr to be safe
                         breath_arr = []
                         batch_arr = []
@@ -167,7 +166,7 @@ class ARDSRawDataset(Dataset):
         except:
             raise ValueError('could not find patient id in file: {}'.format(filename))
 
-    def _should_we_drop_frame(self, seq_vent_bns):
+    def _should_we_drop_frame(self, seq_vent_bns, patient_id):
         seq_vent_bns = np.array(seq_vent_bns)
         diffs = seq_vent_bns[:-1] + 1 - seq_vent_bns[1:]
         # do not include the stack if it is discontiguous to too large a degree
