@@ -43,7 +43,7 @@ class ARDSRawDataset(Dataset):
         if kfold_num is None:
             data_subdir = 'prototrain' if train else 'prototest'
         else:
-            data_subdir = 'training'
+            data_subdir = 'all_data'
         raw_dir = os.path.join(data_path, 'experiment{}'.format(experiment_num), data_subdir, 'raw')
         if not os.path.exists(raw_dir):
             raise Exception('No directory {} exists!'.format(raw_dir))
