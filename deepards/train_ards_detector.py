@@ -150,7 +150,7 @@ class TrainModel(object):
             yield train_dataset, test_dataset
 
     def train_and_test(self):
-        results = DeepARDSResults('{}_base{}_e{}_nb{}_lc{}_rip{}_lvp{}_rfpt{}_optim{}'.format(
+        results = DeepARDSResults('{}_base{}_e{}_nb{}_lc{}_rip{}_lvp{}_rfpt{}_optim{}_lr{}_bs{}'.format(
             self.args.network,
             self.args.base_network,
             self.args.epochs,
@@ -160,6 +160,8 @@ class TrainModel(object):
             self.args.lstm_vote_percent,
             self.args.resnet_first_pool_type,
             self.args.optimizer,
+            self.args.learning_rate,
+            self.args.batch_size,
         ))
         for run_num, (train_dataset, test_dataset) in enumerate(self.get_splits()):
             base_network = {'resnet18': resnet18, 'resnet50': resnet50, 'resnet101': resnet101, 'resnet152': resnet152}[self.args.base_network]
@@ -173,19 +175,19 @@ class TrainModel(object):
             elif self.args.network == 'cnn_linear':
                 model = self.model_cuda_wrapper(CNNLinearNetwork(base_network, self.args.n_sub_batches))
             if self.args.optimizer == 'adam':
-                optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+                optimizer = torch.optim.Adam(model.parameters(), lr=self.args.learning_rate)
             elif self.args.optimizer == 'sgd':
-                optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9, weight_decay=0.0001, nesterov=True)
+                optimizer = torch.optim.SGD(model.parameters(), lr=self.args.learning_rate, momentum=0.9, weight_decay=0.0001, nesterov=True)
             train_loader = DataLoader(train_dataset, batch_size=self.args.batch_size, shuffle=True)
             test_loader = DataLoader(test_dataset, batch_size=self.args.batch_size, shuffle=True)
             for epoch in range(self.args.epochs):
                 self.run_train_epoch(model, train_loader, optimizer, epoch+1)
-                if self.args.test_after_epochs:
+                if not self.args.no_test_after_epochs:
                     preds = self.run_test_epoch(model, test_loader)
                     y_test = test_dataset.get_ground_truth_df()
                     results.perform_patient_predictions(y_test, preds, run_num)
 
-            if not self.args.test_after_epochs:
+            if self.args.no_test_after_epochs:
                 preds = self.run_test_epoch(model, test_loader)
                 y_test = test_dataset.get_ground_truth_df()
                 results.perform_patient_predictions(y_test, preds, run_num)
@@ -208,9 +210,9 @@ def main():
     parser.add_argument('--test-from-pickle')
     parser.add_argument('--test-to-pickle')
     parser.add_argument('--cuda', action='store_true')
-    parser.add_argument('-b', '--batch-size', type=int, default=32)
+    parser.add_argument('-b', '--batch-size', type=int, default=16)
     parser.add_argument('--base-network', choices=['resnet18', 'resnet50', 'resnet101', 'resnet152'], default='resnet18')
-    parser.add_argument('--loss-calc', choices=['all_breaths', 'last_breath'], default='last_breath')
+    parser.add_argument('-lc', '--loss-calc', choices=['all_breaths', 'last_breath'], default='last_breath')
     parser.add_argument('-nb', '--n-sub-batches', type=int, default=20, help=(
         "number of breath-subbatches for each breath frame. This has different "
         "meanings for different dataset types. For breath_by_breath this means the "
@@ -221,10 +223,11 @@ def main():
     parser.add_argument('-rip', '--resnet-initial-planes', type=int, default=64)
     parser.add_argument('-rfpt', '--resnet-first-pool-type', default='max', choices=['max', 'avg'])
     parser.add_argument('--lstm-vote-percent', default=70, type=int)
-    parser.add_argument('--test-after-epochs', action='store_true')
+    parser.add_argument('--no-test-after-epochs', action='store_true')
     parser.add_argument('--debug', action='store_true', help='debug code and dont train')
     parser.add_argument('--optimizer', choices=['adam', 'sgd'], default='sgd')
     parser.add_argument('-dt', '--dataset-type', choices=['breath_by_breath', 'unpadded_sequences'], default='breath_by_breath')
+    parser.add_argument('-lr', '--learning-rate', default=0.001, type=float)
     # XXX should probably be more explicit that we are using kfold or holdout in the future
     args = parser.parse_args()
 
