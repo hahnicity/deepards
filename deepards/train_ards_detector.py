@@ -3,7 +3,7 @@ import argparse
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import classification_report
+from sklearn.metrics import accuracy_score, classification_report
 import torch
 from torch.autograd import Variable
 import torch.nn as nn
@@ -28,6 +28,20 @@ class TrainModel(object):
         if self.n_runs > 1:
             self.args.test_to_pickle = None
 
+        self.results = DeepARDSResults('{}_base{}_e{}_nb{}_lc{}_rip{}_lvp{}_rfpt{}_optim{}_lr{}_bs{}'.format(
+            self.args.network,
+            self.args.base_network,
+            self.args.epochs,
+            self.args.n_sub_batches,
+            self.args.loss_calc,
+            self.args.resnet_initial_planes,
+            self.args.lstm_vote_percent,
+            self.args.resnet_first_pool_type,
+            self.args.optimizer,
+            self.args.learning_rate,
+            self.args.batch_size,
+        ))
+
     def calc_loss(self, outputs, target):
         if self.args.loss_calc == 'all_breaths' and self.args.network == 'cnn_lstm':
             if self.args.batch_size > 1:
@@ -38,7 +52,7 @@ class TrainModel(object):
         else:
             return self.criterion(outputs, target)
 
-    def run_train_epoch(self, model, train_loader, optimizer, epoch_num):
+    def run_train_epoch(self, model, train_loader, optimizer, epoch_num, run_num):
         n_loss = 0
         total_loss = 0
         with torch.enable_grad():
@@ -55,13 +69,14 @@ class TrainModel(object):
                 optimizer.zero_grad()
                 # print individual loss and total loss
                 total_loss += loss.data
+                self.results.update_loss(run_num, loss.data)
                 n_loss += 1
                 if not self.args.no_print_progress:
                     print("batch num: {}/{}, avg loss: {}\r".format(idx+1, len(train_loader), total_loss/n_loss), end="")
                 if self.args.debug:
                     break
 
-    def run_test_epoch(self, model, test_loader):
+    def run_test_epoch(self, model, test_loader, run_num):
         preds = []
         pred_idx = []
         with torch.no_grad():
@@ -82,6 +97,8 @@ class TrainModel(object):
 
                 preds.extend(batch_preds)
                 pred_idx.extend(obs_idx.cpu().tolist())
+                accuracy = accuracy_score(target.argmax(dim=1).cpu().tolist(), batch_preds)
+                self.results.update_accuracy(run_num, accuracy)
         preds = pd.Series(preds, index=pred_idx)
         preds = preds.sort_index()
         return preds
@@ -150,19 +167,6 @@ class TrainModel(object):
             yield train_dataset, test_dataset
 
     def train_and_test(self):
-        results = DeepARDSResults('{}_base{}_e{}_nb{}_lc{}_rip{}_lvp{}_rfpt{}_optim{}_lr{}_bs{}'.format(
-            self.args.network,
-            self.args.base_network,
-            self.args.epochs,
-            self.args.n_sub_batches,
-            self.args.loss_calc,
-            self.args.resnet_initial_planes,
-            self.args.lstm_vote_percent,
-            self.args.resnet_first_pool_type,
-            self.args.optimizer,
-            self.args.learning_rate,
-            self.args.batch_size,
-        ))
         for run_num, (train_dataset, test_dataset) in enumerate(self.get_splits()):
             base_network = {'resnet18': resnet18, 'resnet50': resnet50, 'resnet101': resnet101, 'resnet152': resnet152}[self.args.base_network]
             base_network = base_network(
@@ -181,21 +185,21 @@ class TrainModel(object):
             train_loader = DataLoader(train_dataset, batch_size=self.args.batch_size, shuffle=True)
             test_loader = DataLoader(test_dataset, batch_size=self.args.batch_size, shuffle=True)
             for epoch in range(self.args.epochs):
-                self.run_train_epoch(model, train_loader, optimizer, epoch+1)
+                self.run_train_epoch(model, train_loader, optimizer, epoch+1, run_num)
                 if not self.args.no_test_after_epochs:
-                    preds = self.run_test_epoch(model, test_loader)
+                    preds = self.run_test_epoch(model, test_loader, run_num)
                     y_test = test_dataset.get_ground_truth_df()
-                    results.perform_patient_predictions(y_test, preds, run_num)
+                    self.results.perform_patient_predictions(y_test, preds, run_num)
 
             if self.args.no_test_after_epochs:
-                preds = self.run_test_epoch(model, test_loader)
+                preds = self.run_test_epoch(model, test_loader, run_num)
                 y_test = test_dataset.get_ground_truth_df()
-                results.perform_patient_predictions(y_test, preds, run_num)
+                self.results.perform_patient_predictions(y_test, preds, run_num)
 
         if self.n_runs > 1:
-            results.aggregate_all_results()
+            self.results.aggregate_all_results()
         else:
-            results.reporting.save_all()
+            self.results.reporting.save_all()
 
 
 def main():

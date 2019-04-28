@@ -270,6 +270,18 @@ class DeepARDSResults(object):
             table.add_row([row.patho, row.accuracy, row.sensitivity, row.precision, row.auc, row.f1])
         print(table)
 
+    def update_loss(self, fold_num, loss):
+        meter_name = 'loss_fold_{}'.format(fold_num)
+        if not self.reporting.does_meter_exist(meter_name):
+            self.reporting.new_meter(meter_name)
+        self.reporting.update(meter_name, loss)
+
+    def update_accuracy(self, fold_num, accuracy):
+        meter_name = 'test_accuracy_fold_{}'.format(fold_num)
+        if not self.reporting.does_meter_exist(meter_name):
+            self.reporting.new_meter(meter_name)
+        self.reporting.update(meter_name, accuracy)
+
     def perform_patient_predictions(self, y_test, predictions, fold_num):
         """
         After a group of patients is run through the model, record all necessary stats
