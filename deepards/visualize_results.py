@@ -16,7 +16,7 @@ parser.add_argument('-lc', '--loss-calc', default='last_breath')
 parser.add_argument('-rip', '--initial-planes', default=64)
 parser.add_argument('-lvp', '--lstm-vote-percentage', default=70)
 parser.add_argument('-o', '--optim', default='sgd')
-parser.add_argument('-lr', '--learning-rate', type=int, default=.001)
+parser.add_argument('-lr', '--learning-rate', type=float, default=.001)
 parser.add_argument('-b', '--batch-size', type=int, default=16)
 args = parser.parse_args()
 
