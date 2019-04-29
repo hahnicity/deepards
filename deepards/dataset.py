@@ -4,6 +4,7 @@ import re
 
 import numpy as np
 import pandas as pd
+from scipy.signal import resample
 from sklearn.model_selection import StratifiedKFold
 from torch.utils.data import Dataset, DataLoader
 from ventmap.raw_utils import extract_raw, read_processed_file
@@ -64,8 +65,10 @@ class ARDSRawDataset(Dataset):
 
         # 224 seems reasonable because it would fit well with existing img systems.
         self.seq_len = 224
-        if dataset_type == 'breath_by_breath':
-            self.get_breath_by_breath_data()
+        if dataset_type == 'padded_breath_by_breath':
+            self._get_breath_by_breath_dataset(self._pad_breath)
+        elif dataset_type == 'stretched_breath_by_breath':
+            self._get_breath_by_breath_dataset(self._stretch_breath)
         elif dataset_type == 'unpadded_sequences':
             self.get_unpadded_sequences_dataset()
 
@@ -75,7 +78,7 @@ class ARDSRawDataset(Dataset):
         if kfold_num is not None:
             self.get_kfold_indexes()
 
-    def get_breath_by_breath_data(self):
+    def _get_breath_by_breath_dataset(self, process_breath_func):
         """
         Process data for patient where each component of a sub-batch is a breath padded
         to a desired sequence length. Breaths are batched in accordance to how many
@@ -95,7 +98,8 @@ class ARDSRawDataset(Dataset):
 
             # XXX need to eventually add cutoffs based on vent time or Berlin time
             for bidx, breath in enumerate(gen):
-                b_seq = np.pad((np.array(breath['flow']) - self.mu) / self.std, (0, self.seq_len - len(breath['flow'])), 'constant') if self.seq_len - len(breath['flow']) >= 0 else (np.array(breath['flow'][:self.seq_len]) - self.mu) / self.std
+                flow = (np.array(breath['flow']) - self.mu) / self.std
+                b_seq = process_breath_func(flow)
                 batch_arr.append(b_seq)
                 seq_vent_bns.append(breath['vent_bn'])
 
@@ -109,6 +113,18 @@ class ARDSRawDataset(Dataset):
                     self.all_sequences.append([patient_id, np.array(batch_arr).reshape((self.n_sub_batches, 1, self.seq_len)), target])
                     batch_arr = []
                     seq_vent_bns = []
+
+    def _pad_breath(self, flow):
+        if self.seq_len - len(breath['flow']) >= 0:
+            return np.pad(flow, (0, self.seq_len - len(flow)), 'constant')
+        else:
+            return flow[:self.seq_len]
+
+    def _stretch_breath(self, flow):
+        if len(flow) < self.seq_len:
+            return resample(flow, self.seq_len)
+        else:
+            return flow[:self.seq_len]
 
     def get_unpadded_sequences_dataset(self):
         # XXX should probably consolidate these two funcs

@@ -216,7 +216,7 @@ def main():
     parser.add_argument('--cuda', action='store_true')
     parser.add_argument('-b', '--batch-size', type=int, default=16)
     parser.add_argument('--base-network', choices=['resnet18', 'resnet50', 'resnet101', 'resnet152'], default='resnet18')
-    parser.add_argument('-lc', '--loss-calc', choices=['all_breaths', 'last_breath'], default='last_breath')
+    parser.add_argument('-lc', '--loss-calc', choices=['all_breaths', 'last_breath'], default='all_breaths')
     parser.add_argument('-nb', '--n-sub-batches', type=int, default=100, help=(
         "number of breath-subbatches for each breath frame. This has different "
         "meanings for different dataset types. For breath_by_breath this means the "
@@ -230,7 +230,7 @@ def main():
     parser.add_argument('--no-test-after-epochs', action='store_true')
     parser.add_argument('--debug', action='store_true', help='debug code and dont train')
     parser.add_argument('--optimizer', choices=['adam', 'sgd'], default='sgd')
-    parser.add_argument('-dt', '--dataset-type', choices=['breath_by_breath', 'unpadded_sequences'], default='breath_by_breath')
+    parser.add_argument('-dt', '--dataset-type', choices=['padded_breath_by_breath', 'unpadded_sequences', 'stretched_breath_by_breath'], default='padded_breath_by_breath')
     parser.add_argument('-lr', '--learning-rate', default=0.001, type=float)
     # XXX should probably be more explicit that we are using kfold or holdout in the future
     args = parser.parse_args()
