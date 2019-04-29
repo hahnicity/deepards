@@ -69,6 +69,8 @@ class ARDSRawDataset(Dataset):
             self._get_breath_by_breath_dataset(self._pad_breath)
         elif dataset_type == 'stretched_breath_by_breath':
             self._get_breath_by_breath_dataset(self._stretch_breath)
+        elif dataset_type == 'spaced_padded_breath_by_breath':
+            self._get_breath_by_breath_dataset(self._perform_spaced_padding)
         elif dataset_type == 'unpadded_sequences':
             self.get_unpadded_sequences_dataset()
 
@@ -126,6 +128,21 @@ class ARDSRawDataset(Dataset):
         else:
             return flow[:self.seq_len]
 
+    def _perform_spaced_padding(self, flow):
+        if len(flow) < self.seq_len:
+            spacing = len(flow) / float(self.seq_len)
+            new_arr = np.zeros(self.seq_len)
+            i = 0
+            for j in range(self.seq_len):
+                if j * spacing >= i:
+                    new_arr[j] = flow[i]
+                    i += 1
+                elif j * spacing > len(flow) - 1:
+                    break
+            return new_arr
+        else:
+            return flow[:self.seq_len]
+
     def get_unpadded_sequences_dataset(self):
         # XXX should probably consolidate these two funcs
         last_patient = None
@@ -141,6 +158,7 @@ class ARDSRawDataset(Dataset):
             patient_row = patient_row.iloc[0]
             patho = 1 if patient_row['Pathophysiology'] == 'ARDS' else 0
 
+            # XXX need to eventually add cutoffs based on vent time or Berlin time
             for bidx, breath in enumerate(gen):
                 seq_vent_bns.append(breath['vent_bn'])
                 if (len(breath['flow']) + len(breath_arr)) < self.seq_len:
