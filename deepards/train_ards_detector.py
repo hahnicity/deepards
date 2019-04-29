@@ -182,8 +182,20 @@ class TrainModel(object):
                 optimizer = torch.optim.Adam(model.parameters(), lr=self.args.learning_rate)
             elif self.args.optimizer == 'sgd':
                 optimizer = torch.optim.SGD(model.parameters(), lr=self.args.learning_rate, momentum=0.9, weight_decay=0.0001, nesterov=True)
-            train_loader = DataLoader(train_dataset, batch_size=self.args.batch_size, shuffle=True)
-            test_loader = DataLoader(test_dataset, batch_size=self.args.batch_size, shuffle=True)
+            train_loader = DataLoader(
+                train_dataset,
+                batch_size=self.args.batch_size,
+                shuffle=True,
+                pin_memory=True if self.args.cuda else False,
+                num_workers=self.args.loader_threads,
+            )
+            test_loader = DataLoader(
+                test_dataset,
+                batch_size=self.args.batch_size,
+                shuffle=True,
+                pin_memory=True if self.args.cuda else False,
+                num_workers=self.args.loader_threads,
+            )
             for epoch in range(self.args.epochs):
                 self.run_train_epoch(model, train_loader, optimizer, epoch+1, run_num)
                 if not self.args.no_test_after_epochs:
@@ -232,6 +244,7 @@ def main():
     parser.add_argument('--optimizer', choices=['adam', 'sgd'], default='sgd')
     parser.add_argument('-dt', '--dataset-type', choices=['padded_breath_by_breath', 'unpadded_sequences', 'spaced_padded_breath_by_breath', 'stretched_breath_by_breath'], default='padded_breath_by_breath')
     parser.add_argument('-lr', '--learning-rate', default=0.001, type=float)
+    parser.add_argument('--loader-threads', type=int, default=4)
     # XXX should probably be more explicit that we are using kfold or holdout in the future
     args = parser.parse_args()
 
