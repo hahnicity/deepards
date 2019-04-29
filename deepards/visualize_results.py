@@ -10,7 +10,7 @@ import torch
 parser = argparse.ArgumentParser()
 parser.add_argument('-n', '--network', default='cnn_lstm')
 parser.add_argument('-bn', '--base-network', default='resnet18')
-parser.add_argument('-e', '--epochs', default='resnet18')
+parser.add_argument('-e', '--epochs', default=10, type=int)
 parser.add_argument('-nb', '--num-sub-batches', default=100)
 parser.add_argument('-lc', '--loss-calc', default='all_breaths')
 parser.add_argument('-rip', '--initial-planes', default=64)
@@ -23,7 +23,7 @@ args = parser.parse_args()
 get_moving_average = lambda x, N: np.convolve(x, np.ones((N,))/N, mode='valid')
 
 all_vals = None
-glob_search = 'results/test_auc*_{network}_base{base_network}_e{epochs}_nb{num_sub_batches}_lc{loss_calc}_rip{initial_planes}_lvp{lstm_vote_percentage}_rfptmax_optim{optim}_lr{learning_rate}_bs{batch_size}*'
+glob_search = 'results/test_auc*_{network}_base{base_network}_e{epochs}_nb{num_sub_batches}_lc{loss_calc}_rip{initial_planes}_lvp{lstm_vote_percentage}_rfptmax_optim{optim}*'#_lr{learning_rate}_bs{batch_size}*'
 glob_search = glob_search.format(**args.__dict__)
 print('searching for results with params:')
 pprint(args.__dict__)
