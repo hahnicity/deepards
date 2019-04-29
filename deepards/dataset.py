@@ -7,6 +7,8 @@ import pandas as pd
 from scipy.signal import resample
 from sklearn.model_selection import StratifiedKFold
 from torch.utils.data import Dataset, DataLoader
+from ventmap.breath_meta import get_production_breath_meta
+from ventmap.constants import META_HEADER
 from ventmap.raw_utils import extract_raw, read_processed_file
 
 
@@ -46,10 +48,12 @@ class ARDSRawDataset(Dataset):
         else:
             data_subdir = 'all_data'
         raw_dir = os.path.join(data_path, 'experiment{}'.format(experiment_num), data_subdir, 'raw')
+        self.meta_dir = os.path.join(data_path, 'experiment{}'.format(experiment_num), data_subdir, 'meta')
         if not os.path.exists(raw_dir):
             raise Exception('No directory {} exists!'.format(raw_dir))
         self.raw_files = sorted(glob(os.path.join(raw_dir, '*/*.raw.npy')))
         self.processed_files = sorted(glob(os.path.join(raw_dir, '*/*.processed.npy')))
+        self.meta_files = sorted(glob(os.path.join(self.meta_dir, '*/*.csv')))
 
         # So I calculated out the stats on the training set. Our breaths are a mean of 140.5
         flow_sum = 0
@@ -73,6 +77,8 @@ class ARDSRawDataset(Dataset):
             self._get_breath_by_breath_dataset(self._perform_spaced_padding)
         elif dataset_type == 'unpadded_sequences':
             self.get_unpadded_sequences_dataset()
+        elif dataset_type == 'padded_breath_by_breath_with_bm':
+            self._get_breath_by_breath_with_breath_meta_target(self._pad_breath)
 
         if to_pickle:
             pd.to_pickle(self.all_sequences, to_pickle)
@@ -80,7 +86,62 @@ class ARDSRawDataset(Dataset):
         if kfold_num is not None:
             self.get_kfold_indexes()
 
-    def _get_breath_by_breath_dataset(self, process_breath_func):
+    def _get_breath_by_breath_with_breath_meta_target(self, process_breath_func):
+        # XXX probably can consolidate this too
+        last_patient = None
+        desired_features = ['iTime', 'eTime', 'inst_RR', 'maxF', 'I:E ratio', 'tve:tvi ratio']
+        indices = [META_HEADER.index(feature) for feature in desired_features]
+        for fidx, filename in enumerate(self.raw_files):
+            gen = read_processed_file(filename, self.processed_files[fidx])
+            patient_id = self._get_patient_id_from_file(filename)
+            if patient_id != last_patient:
+                print(patient_id)
+                batch_arr = []
+                seq_vent_bns = []
+                target_arr = []
+            last_patient = patient_id
+
+            matching_meta = os.path.join(self.meta_dir, patient_id, 'breath_meta_' + os.path.basename(filename).replace('.raw.npy', '.csv'))
+            if matching_meta in self.meta_files:
+                try:
+                    processed_meta = pd.read_csv(matching_meta, header=None).values
+                except pd.errors.EmptyDataError:
+                    has_preprocessed_meta = False
+                else:
+                    has_preprocessed_meta = True
+            else:
+                has_preprocessed_meta = False
+
+            # XXX need to eventually add cutoffs based on vent time or Berlin time
+            for bidx, breath in enumerate(gen):
+                flow = (np.array(breath['flow']) - self.mu) / self.std
+                b_seq = process_breath_func(flow)
+                if has_preprocessed_meta:
+                    try:
+                        meta = processed_meta[bidx]
+                    except IndexError:
+                        meta = np.array(get_production_breath_meta(breath))
+                    # sanity check
+                    if int(meta[0]) != breath['rel_bn']:
+                        meta = np.array(get_production_breath_meta(breath))
+                else:
+                    meta = np.array(get_production_breath_meta(breath))
+                target_arr.append(meta[indices])
+                batch_arr.append(b_seq)
+                seq_vent_bns.append(breath['vent_bn'])
+
+                if len(batch_arr) == self.n_sub_batches:
+                    if self._should_we_drop_frame(seq_vent_bns, patient_id):
+                        batch_arr = []
+                        seq_vent_bns = []
+                        target_arr = []
+                        continue
+                    self.all_sequences.append([patient_id, np.array(batch_arr).reshape((self.n_sub_batches, 1, self.seq_len)), np.array(target_arr).astype(np.float)])
+                    batch_arr = []
+                    seq_vent_bns = []
+                    target_arr = []
+
+    def _get_breath_by_breath_dataset(self, process_breath_func, objective_func):
         """
         Process data for patient where each component of a sub-batch is a breath padded
         to a desired sequence length. Breaths are batched in accordance to how many
@@ -88,7 +149,7 @@ class ARDSRawDataset(Dataset):
         """
         last_patient = None
         for fidx, filename in enumerate(self.raw_files):
-            gen = list(read_processed_file(filename, self.processed_files[fidx]))
+            gen = read_processed_file(filename, self.processed_files[fidx])
             patient_id = self._get_patient_id_from_file(filename)
             if patient_id != last_patient:
                 batch_arr = []
@@ -117,7 +178,7 @@ class ARDSRawDataset(Dataset):
                     seq_vent_bns = []
 
     def _pad_breath(self, flow):
-        if self.seq_len - len(breath['flow']) >= 0:
+        if self.seq_len - len(flow) >= 0:
             return np.pad(flow, (0, self.seq_len - len(flow)), 'constant')
         else:
             return flow[:self.seq_len]
@@ -147,7 +208,7 @@ class ARDSRawDataset(Dataset):
         # XXX should probably consolidate these two funcs
         last_patient = None
         for fidx, filename in enumerate(self.raw_files):
-            gen = list(read_processed_file(filename, self.processed_files[fidx]))
+            gen = read_processed_file(filename, self.processed_files[fidx])
             patient_id = self._get_patient_id_from_file(filename)
             if patient_id != last_patient:
                 batch_arr = []
