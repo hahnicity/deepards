@@ -23,7 +23,7 @@ args = parser.parse_args()
 get_moving_average = lambda x, N: np.convolve(x, np.ones((N,))/N, mode='valid')
 
 all_vals = None
-glob_search = 'results/test_auc*_{network}_base{base_network}_e{epochs}_nb{num_sub_batches}_lc{loss_calc}_rip{initial_planes}_lvp{lstm_vote_percentage}_rfptmax_optim{optim}*'#_lr{learning_rate}_bs{batch_size}*'
+glob_search = 'results/test_auc*_{network}_base{base_network}_e{epochs}_nb{num_sub_batches}_lc{loss_calc}_rip{initial_planes}_lvp{lstm_vote_percentage}_rfptmax_optim{optim}_lr{learning_rate}_bs{batch_size}*'
 glob_search = glob_search.format(**args.__dict__)
 print('searching for results with params:')
 pprint(args.__dict__)

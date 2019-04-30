@@ -111,6 +111,9 @@ class TrainModel(object):
             mae = mean_absolute_error(target, batch_preds)
             self.results.update_meter('test_mae', run_num, mae)
             self.results.print_meter_results('test_mae', run_num)
+            mse = np.sum((batch_preds - target) ** 2) / len(batch_preds)
+            self.results.update_meter('test_mse', run_num, mae)
+            self.results.print_meter_results('test_mse', run_num)
 
     def _process_test_batch_predictions(self, outputs):
         if self.args.network == 'cnn_lstm':
@@ -187,20 +190,20 @@ class TrainModel(object):
                 print('--- Run Fold {} ---'.format(i+1))
                 train_dataset.get_kfold_indexes_for_fold(i)
                 test_dataset.get_kfold_indexes_for_fold(i)
-                train_loader = DataLoader(
-                    train_dataset,
-                    batch_size=self.args.batch_size,
-                    shuffle=True,
-                    pin_memory=self.args.cuda,
-                    num_workers=self.args.loader_threads,
-                )
-                test_loader = DataLoader(
-                    test_dataset,
-                    batch_size=self.args.batch_size,
-                    shuffle=True,
-                    pin_memory=self.args.cuda,
-                    num_workers=self.args.loader_threads,
-                )
+            train_loader = DataLoader(
+                train_dataset,
+                batch_size=self.args.batch_size,
+                shuffle=True,
+                pin_memory=self.args.cuda,
+                num_workers=self.args.loader_threads,
+            )
+            test_loader = DataLoader(
+                test_dataset,
+                batch_size=self.args.batch_size,
+                shuffle=True,
+                pin_memory=self.args.cuda,
+                num_workers=self.args.loader_threads,
+            )
             yield train_loader, test_loader
 
     def train_and_test(self):
