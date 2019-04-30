@@ -3,7 +3,7 @@ import argparse
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import accuracy_score, classification_report, r2_score
+from sklearn.metrics import accuracy_score, classification_report, mean_absolute_error, r2_score
 import torch
 from torch.autograd import Variable
 import torch.nn as nn
@@ -27,7 +27,7 @@ class TrainModel(object):
         else:
             self.criterion = torch.nn.BCELoss()
 
-
+        self.is_classification = self.args.network != 'cnn_regressor'
         self.n_runs = self.args.kfolds if self.args.kfolds is not None else 1
         # Train and test both load from the same dataset in the case of kfold
         if self.n_runs > 1:
@@ -102,15 +102,17 @@ class TrainModel(object):
                         1 if int(outputs[batch_num].argmax(dim=1).sum()) >= self.args.lstm_vote_percent else 0
                         for batch_num in range(outputs.shape[0])
                     ]
+
                 elif self.args.network == 'cnn_linear':
                     batch_preds = outputs.argmax(dim=1).cpu().tolist()
+
                 elif self.args.network == 'cnn_regressor':
                     batch_preds = outputs.view((-1, 6)).cpu().numpy()
-                    r2 = r2_score(target.view((-1, 6)).cpu().numpy(), batch_preds)
-                    self.results.update_r2(run_num, r2)
+                    target = target.view((-1, 6)).cpu().numpy()
+                    mae = mean_absolute_error(target, batch_preds)
+                    self.results.update_meter('test_mae', run_num, mae)
                     preds.extend(batch_preds)
-                    # XXX this is hacky
-                    print(self.results.reporting.meters['test_r2_fold_0'])
+                    self.results.print_meter_results('test_mae', run_num)
                     continue
 
                 pred_idx.extend(obs_idx.cpu().tolist())
@@ -195,20 +197,7 @@ class TrainModel(object):
                 initial_planes=self.args.resnet_initial_planes,
                 first_pool_type=self.args.resnet_first_pool_type,
             )
-
-            # XXX this needs to be its own method
-            if self.args.network == 'cnn_lstm':
-                model = self.model_cuda_wrapper(CNNLSTMNetwork(base_network))
-            elif self.args.network == 'cnn_linear':
-                model = self.model_cuda_wrapper(CNNLinearNetwork(base_network, self.args.n_sub_batches))
-            elif self.args.network == 'cnn_regressor':
-                model = self.model_cuda_wrapper(CNNRegressor(base_network))
-
-            # XXX this needs to be its own method
-            if self.args.optimizer == 'adam':
-                optimizer = torch.optim.Adam(model.parameters(), lr=self.args.learning_rate)
-            elif self.args.optimizer == 'sgd':
-                optimizer = torch.optim.SGD(model.parameters(), lr=self.args.learning_rate, momentum=0.9, weight_decay=0.0001, nesterov=True)
+            model = self._get_model(base_network)
             train_loader = DataLoader(
                 train_dataset,
                 batch_size=self.args.batch_size,
@@ -223,28 +212,41 @@ class TrainModel(object):
                 pin_memory=True if self.args.cuda else False,
                 num_workers=self.args.loader_threads,
             )
+            optimizer = self._get_optimizer(model)
             for epoch in range(self.args.epochs):
                 self.run_train_epoch(model, train_loader, optimizer, epoch+1, run_num)
-                # XXX this whole deal needs to be refactored
-                if not self.args.no_test_after_epochs:
-                    preds = self.run_test_epoch(model, test_loader, run_num)
-                    if self.args.network in ['cnn_lstm', 'cnn_linear']:
-                        y_test = test_dataset.get_ground_truth_df()
-                        self.results.perform_patient_predictions(y_test, preds, run_num)
-
-            if self.args.no_test_after_epochs:
-                preds = self.run_test_epoch(model, test_loader, run_num)
-                if self.args.network in ['cnn_lstm', 'cnn_linear']:
-                    y_test = test_dataset.get_ground_truth_df()
-                    self.results.perform_patient_predictions(y_test, preds, run_num)
+                self._perform_testing(epoch, model, test_loader, run_num)
 
         if self.args.save_model:
             torch.save(model, self.args.save_model)
 
-        if self.n_runs > 1 and self.args.network in ['cnn_lstm', 'cnn_linear']:
-            self.results.aggregate_all_results()
+        if self.n_runs > 1 and self.is_classification:
+            self.results.aggregate_classification_results()
         else:
             self.results.reporting.save_all()
+
+    def _perform_testing(self, epoch_num, model, test_loader, run_num):
+        if not self.args.no_test_after_epochs or epoch_num == self.args.epochs - 1:
+            preds = self.run_test_epoch(model, test_loader, run_num)
+            if self.args.network in ['cnn_lstm', 'cnn_linear']:
+                y_test = test_dataset.get_ground_truth_df()
+                self.results.perform_patient_predictions(y_test, preds, run_num)
+
+    def _get_model(self, base_network):
+        if self.args.network == 'cnn_lstm':
+            model = self.model_cuda_wrapper(CNNLSTMNetwork(base_network))
+        elif self.args.network == 'cnn_linear':
+            model = self.model_cuda_wrapper(CNNLinearNetwork(base_network, self.args.n_sub_batches))
+        elif self.args.network == 'cnn_regressor':
+            model = self.model_cuda_wrapper(CNNRegressor(base_network))
+        return model
+
+    def _get_optimizer(self, model):
+        if self.args.optimizer == 'adam':
+            optimizer = torch.optim.Adam(model.parameters(), lr=self.args.learning_rate)
+        elif self.args.optimizer == 'sgd':
+            optimizer = torch.optim.SGD(model.parameters(), lr=self.args.learning_rate, momentum=0.9, weight_decay=0.0001, nesterov=True)
+        return optimizer
 
 
 def main():

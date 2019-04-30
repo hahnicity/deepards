@@ -220,7 +220,7 @@ class DeepARDSResults(object):
         self.results = pd.DataFrame([], columns=results_cols)
         self.reporting = Reporting(os.path.join(os.path.dirname(__file__), 'results/'), reporting_suffix)
 
-    def aggregate_all_results(self):
+    def aggregate_classification_results(self):
         """
         Aggregate final results for all patients into a friendly data frame
         """
@@ -271,22 +271,23 @@ class DeepARDSResults(object):
         print(table)
 
     def update_loss(self, fold_num, loss):
-        meter_name = 'loss_fold_{}'.format(fold_num)
-        if not self.reporting.does_meter_exist(meter_name):
-            self.reporting.new_meter(meter_name)
-        self.reporting.update(meter_name, loss)
+        self.update_meter('loss', fold_num, loss)
 
     def update_accuracy(self, fold_num, accuracy):
-        meter_name = 'test_accuracy_fold_{}'.format(fold_num)
-        if not self.reporting.does_meter_exist(meter_name):
-            self.reporting.new_meter(meter_name)
-        self.reporting.update(meter_name, accuracy)
+        self.update_meter('test_accuracy', fold_num, accuracy)
 
     def update_r2(self, fold_num, r2):
-        meter_name = 'test_r2_fold_{}'.format(fold_num)
+        self.update_meter('test_r2', fold_num, r2)
+
+    def update_meter(self, metric_name, fold_num, val):
+        meter_name = '{}_fold_{}'.format(metric_name, fold_num)
         if not self.reporting.does_meter_exist(meter_name):
             self.reporting.new_meter(meter_name)
-        self.reporting.update(meter_name, r2)
+        self.reporting.update(meter_name, val)
+
+    def print_meter_results(self, metric_name, fold_num):
+        meter_name = '{}_fold_{}'.format(metric_name, fold_num)
+        print(self.reporting.meters[meter_name])
 
     def perform_patient_predictions(self, y_test, predictions, fold_num):
         """

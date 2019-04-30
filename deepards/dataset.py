@@ -90,6 +90,7 @@ class ARDSRawDataset(Dataset):
         # XXX probably can consolidate this too
         last_patient = None
         desired_features = ['iTime', 'eTime', 'inst_RR', 'maxF', 'I:E ratio', 'tve:tvi ratio']
+        ratio_indices = [desired_features.index(f) for f in ['I:E ratio', 'tve:tvi ratio']]
         indices = [META_HEADER.index(feature) for feature in desired_features]
         for fidx, filename in enumerate(self.raw_files):
             gen = read_processed_file(filename, self.processed_files[fidx])
@@ -113,8 +114,6 @@ class ARDSRawDataset(Dataset):
 
             # XXX need to eventually add cutoffs based on vent time or Berlin time
             for bidx, breath in enumerate(gen):
-                flow = (np.array(breath['flow']) - self.mu) / self.std
-                b_seq = process_breath_func(flow)
                 if has_preprocessed_meta:
                     try:
                         meta = processed_meta[bidx]
@@ -125,7 +124,19 @@ class ARDSRawDataset(Dataset):
                         meta = np.array(get_production_breath_meta(breath))
                 else:
                     meta = np.array(get_production_breath_meta(breath))
-                target_arr.append(meta[indices])
+
+                meta = meta[indices].astype(np.float)
+                if np.any(np.isinf(meta) | np.isnan(meta)):
+                    continue
+                # clip any breaths with ratios > 100. These breaths have proven their
+                # ability to totally blow up gradients. 100 was chosen because it is > 3*std
+                # for the tve:tvi ratios we have
+                if np.any(np.abs(meta[ratio_indices]) > 100):
+                    continue
+                target_arr.append(meta)
+
+                flow = (np.array(breath['flow']) - self.mu) / self.std
+                b_seq = process_breath_func(flow)
                 batch_arr.append(b_seq)
                 seq_vent_bns.append(breath['vent_bn'])
 
@@ -135,7 +146,7 @@ class ARDSRawDataset(Dataset):
                         seq_vent_bns = []
                         target_arr = []
                         continue
-                    self.all_sequences.append([patient_id, np.array(batch_arr).reshape((self.n_sub_batches, 1, self.seq_len)), np.array(target_arr).astype(np.float)])
+                    self.all_sequences.append([patient_id, np.array(batch_arr).reshape((self.n_sub_batches, 1, self.seq_len)), np.array(target_arr)])
                     batch_arr = []
                     seq_vent_bns = []
                     target_arr = []
