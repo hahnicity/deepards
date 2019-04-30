@@ -95,7 +95,6 @@ class ARDSRawDataset(Dataset):
             gen = read_processed_file(filename, self.processed_files[fidx])
             patient_id = self._get_patient_id_from_file(filename)
             if patient_id != last_patient:
-                print(patient_id)
                 batch_arr = []
                 seq_vent_bns = []
                 target_arr = []
