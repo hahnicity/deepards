@@ -91,41 +91,40 @@ class TrainModel(object):
             for idx, (obs_idx, seq, target) in enumerate(test_loader):
                 inputs = self.cuda_wrapper(Variable(seq.float()))
                 outputs = model(inputs)
-                # With LSTM it seems like its all or nothing for the batches. It
-                # doesn't frequently change prediction frequently across them, although a
-                # small minority do have changes, one stack was even fairly mixed
-                # (47 ARDS v 53 OTHER)
-                #
-                # XXX what to do with results should be abstracted away
-                if self.args.network == 'cnn_lstm':
-                    batch_preds = [
-                        1 if int(outputs[batch_num].argmax(dim=1).sum()) >= self.args.lstm_vote_percent else 0
-                        for batch_num in range(outputs.shape[0])
-                    ]
-
-                elif self.args.network == 'cnn_linear':
-                    batch_preds = outputs.argmax(dim=1).cpu().tolist()
-
-                elif self.args.network == 'cnn_regressor':
-                    batch_preds = outputs.view((-1, 6)).cpu().numpy()
-                    target = target.view((-1, 6)).cpu().numpy()
-                    mae = mean_absolute_error(target, batch_preds)
-                    self.results.update_meter('test_mae', run_num, mae)
+                batch_preds = self._process_test_batch_predictions(outputs)
+                if self.is_classification:
+                    pred_idx.extend(obs_idx.cpu().tolist())
                     preds.extend(batch_preds)
-                    self.results.print_meter_results('test_mae', run_num)
-                    continue
+                self._record_test_batch_results(batch_preds, target, run_num)
 
-                pred_idx.extend(obs_idx.cpu().tolist())
-                preds.extend(batch_preds)
-                accuracy = accuracy_score(target.argmax(dim=1).cpu().tolist(), batch_preds)
-                self.results.update_accuracy(run_num, accuracy)
-
-        if self.args.network in ['cnn_linear', 'cnn_lstm']:
+        if self.is_classification:
             preds = pd.Series(preds, index=pred_idx)
-        elif self.args.network == 'cnn_regressor':
-            preds = pd.DataFrame(np.array(preds))
-        preds = preds.sort_index()
+            preds = preds.sort_index()
         return preds
+
+    def _record_test_batch_results(self, batch_preds, target, run_num):
+        if self.is_classification:
+            accuracy = accuracy_score(target.argmax(dim=1).cpu().tolist(), batch_preds)
+            self.results.update_accuracy(run_num, accuracy)
+        else:
+            target = target.view((-1, 6)).cpu().numpy()
+            mae = mean_absolute_error(target, batch_preds)
+            self.results.update_meter('test_mae', run_num, mae)
+            self.results.print_meter_results('test_mae', run_num)
+
+    def _process_test_batch_predictions(self, outputs):
+        if self.args.network == 'cnn_lstm':
+            batch_preds = [
+                1 if int(outputs[batch_num].argmax(dim=1).sum()) >= self.args.lstm_vote_percent else 0
+                for batch_num in range(outputs.shape[0])
+            ]
+
+        elif self.args.network == 'cnn_linear':
+            batch_preds = outputs.argmax(dim=1).cpu().tolist()
+
+        elif self.args.network == 'cnn_regressor':
+            batch_preds = outputs.view((-1, 6)).cpu().numpy()
+        return batch_preds
 
     def get_base_datasets(self):
         # We are doing things this way by loading sequence information here so that
@@ -188,30 +187,30 @@ class TrainModel(object):
                 print('--- Run Fold {} ---'.format(i+1))
                 train_dataset.get_kfold_indexes_for_fold(i)
                 test_dataset.get_kfold_indexes_for_fold(i)
-            yield train_dataset, test_dataset
+                train_loader = DataLoader(
+                    train_dataset,
+                    batch_size=self.args.batch_size,
+                    shuffle=True,
+                    pin_memory=self.args.cuda,
+                    num_workers=self.args.loader_threads,
+                )
+                test_loader = DataLoader(
+                    test_dataset,
+                    batch_size=self.args.batch_size,
+                    shuffle=True,
+                    pin_memory=self.args.cuda,
+                    num_workers=self.args.loader_threads,
+                )
+            yield train_loader, test_loader
 
     def train_and_test(self):
-        for run_num, (train_dataset, test_dataset) in enumerate(self.get_splits()):
+        for run_num, (train_loader, test_loader) in enumerate(self.get_splits()):
             base_network = {'resnet18': resnet18, 'resnet50': resnet50, 'resnet101': resnet101, 'resnet152': resnet152}[self.args.base_network]
             base_network = base_network(
                 initial_planes=self.args.resnet_initial_planes,
                 first_pool_type=self.args.resnet_first_pool_type,
             )
             model = self._get_model(base_network)
-            train_loader = DataLoader(
-                train_dataset,
-                batch_size=self.args.batch_size,
-                shuffle=True,
-                pin_memory=True if self.args.cuda else False,
-                num_workers=self.args.loader_threads,
-            )
-            test_loader = DataLoader(
-                test_dataset,
-                batch_size=self.args.batch_size,
-                shuffle=True,
-                pin_memory=True if self.args.cuda else False,
-                num_workers=self.args.loader_threads,
-            )
             optimizer = self._get_optimizer(model)
             for epoch in range(self.args.epochs):
                 self.run_train_epoch(model, train_loader, optimizer, epoch+1, run_num)
