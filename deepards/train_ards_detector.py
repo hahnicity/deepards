@@ -3,7 +3,7 @@ import argparse
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.metrics import accuracy_score, classification_report, r2_score
 import torch
 from torch.autograd import Variable
 import torch.nn as nn
@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader
 from deepards.metrics import DeepARDSResults, Reporting
 from deepards.models.resnet import resnet18, resnet50, resnet101, resnet152
 from deepards.models.torch_cnn_lstm_combo import CNNLSTMNetwork
+from deepards.models.torch_cnn_bm_regressor import CNNRegressor
 from deepards.models.torch_cnn_linear_network import CNNLinearNetwork
 from deepards.dataset import ARDSRawDataset
 
@@ -21,12 +22,19 @@ class TrainModel(object):
         self.args = args
         self.cuda_wrapper = lambda x: x.cuda() if args.cuda else x
         self.model_cuda_wrapper = lambda x: nn.DataParallel(x).cuda() if args.cuda else x
-        self.criterion = torch.nn.BCELoss()
+        if self.args.network == 'cnn_regressor':
+            self.criterion = torch.nn.MSELoss()
+        else:
+            self.criterion = torch.nn.BCELoss()
+
 
         self.n_runs = self.args.kfolds if self.args.kfolds is not None else 1
         # Train and test both load from the same dataset in the case of kfold
         if self.n_runs > 1:
             self.args.test_to_pickle = None
+
+        if self.args.save_model and self.n_runs > 1:
+            raise NotImplementedError('We currently do not support saving kfold models')
 
         self.results = DeepARDSResults('{}_base{}_e{}_nb{}_lc{}_rip{}_lvp{}_rfpt{}_optim{}_lr{}_bs{}'.format(
             self.args.network,
@@ -87,6 +95,8 @@ class TrainModel(object):
                 # doesn't frequently change prediction frequently across them, although a
                 # small minority do have changes, one stack was even fairly mixed
                 # (47 ARDS v 53 OTHER)
+                #
+                # XXX what to do with results should be abstracted away
                 if self.args.network == 'cnn_lstm':
                     batch_preds = [
                         1 if int(outputs[batch_num].argmax(dim=1).sum()) >= self.args.lstm_vote_percent else 0
@@ -94,12 +104,24 @@ class TrainModel(object):
                     ]
                 elif self.args.network == 'cnn_linear':
                     batch_preds = outputs.argmax(dim=1).cpu().tolist()
+                elif self.args.network == 'cnn_regressor':
+                    batch_preds = outputs.view((-1, 6)).cpu().numpy()
+                    r2 = r2_score(target.view((-1, 6)).cpu().numpy(), batch_preds)
+                    self.results.update_r2(run_num, r2)
+                    preds.extend(batch_preds)
+                    # XXX this is hacky
+                    print(self.results.reporting.meters['test_r2_fold_0'])
+                    continue
 
-                preds.extend(batch_preds)
                 pred_idx.extend(obs_idx.cpu().tolist())
+                preds.extend(batch_preds)
                 accuracy = accuracy_score(target.argmax(dim=1).cpu().tolist(), batch_preds)
                 self.results.update_accuracy(run_num, accuracy)
-        preds = pd.Series(preds, index=pred_idx)
+
+        if self.args.network in ['cnn_linear', 'cnn_lstm']:
+            preds = pd.Series(preds, index=pred_idx)
+        elif self.args.network == 'cnn_regressor':
+            preds = pd.DataFrame(np.array(preds))
         preds = preds.sort_index()
         return preds
 
@@ -174,10 +196,15 @@ class TrainModel(object):
                 first_pool_type=self.args.resnet_first_pool_type,
             )
 
+            # XXX this needs to be its own method
             if self.args.network == 'cnn_lstm':
                 model = self.model_cuda_wrapper(CNNLSTMNetwork(base_network))
             elif self.args.network == 'cnn_linear':
                 model = self.model_cuda_wrapper(CNNLinearNetwork(base_network, self.args.n_sub_batches))
+            elif self.args.network == 'cnn_regressor':
+                model = self.model_cuda_wrapper(CNNRegressor(base_network))
+
+            # XXX this needs to be its own method
             if self.args.optimizer == 'adam':
                 optimizer = torch.optim.Adam(model.parameters(), lr=self.args.learning_rate)
             elif self.args.optimizer == 'sgd':
@@ -198,17 +225,23 @@ class TrainModel(object):
             )
             for epoch in range(self.args.epochs):
                 self.run_train_epoch(model, train_loader, optimizer, epoch+1, run_num)
+                # XXX this whole deal needs to be refactored
                 if not self.args.no_test_after_epochs:
                     preds = self.run_test_epoch(model, test_loader, run_num)
-                    y_test = test_dataset.get_ground_truth_df()
-                    self.results.perform_patient_predictions(y_test, preds, run_num)
+                    if self.args.network in ['cnn_lstm', 'cnn_linear']:
+                        y_test = test_dataset.get_ground_truth_df()
+                        self.results.perform_patient_predictions(y_test, preds, run_num)
 
             if self.args.no_test_after_epochs:
                 preds = self.run_test_epoch(model, test_loader, run_num)
-                y_test = test_dataset.get_ground_truth_df()
-                self.results.perform_patient_predictions(y_test, preds, run_num)
+                if self.args.network in ['cnn_lstm', 'cnn_linear']:
+                    y_test = test_dataset.get_ground_truth_df()
+                    self.results.perform_patient_predictions(y_test, preds, run_num)
 
-        if self.n_runs > 1:
+        if self.args.save_model:
+            torch.save(model, self.args.save_model)
+
+        if self.n_runs > 1 and self.args.network in ['cnn_lstm', 'cnn_linear']:
             self.results.aggregate_all_results()
         else:
             self.results.reporting.save_all()
@@ -219,7 +252,7 @@ def main():
     parser.add_argument('-dp', '--data-path', default='/fastdata/ardsdetection', help='Path to ARDS detection dataset')
     parser.add_argument('-en', '--experiment-num', type=int, default=1)
     parser.add_argument('-c', '--cohort-file', default='cohort-description.csv')
-    parser.add_argument('-n', '--network', choices=['cnn_lstm', 'cnn_linear'], default='cnn_lstm')
+    parser.add_argument('-n', '--network', choices=['cnn_lstm', 'cnn_linear', 'cnn_regressor'], default='cnn_lstm')
     parser.add_argument('-e', '--epochs', type=int, default=5)
     parser.add_argument('-p', '--train-from-pickle')
     parser.add_argument('--train-to-pickle')
@@ -245,6 +278,7 @@ def main():
     parser.add_argument('-dt', '--dataset-type', choices=['padded_breath_by_breath', 'unpadded_sequences', 'spaced_padded_breath_by_breath', 'stretched_breath_by_breath', 'padded_breath_by_breath_with_bm'], default='padded_breath_by_breath')
     parser.add_argument('-lr', '--learning-rate', default=0.001, type=float)
     parser.add_argument('--loader-threads', type=int, default=4)
+    parser.add_argument('--save-model', help='save the model to a specific file')
     # XXX should probably be more explicit that we are using kfold or holdout in the future
     args = parser.parse_args()
 

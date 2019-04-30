@@ -282,6 +282,12 @@ class DeepARDSResults(object):
             self.reporting.new_meter(meter_name)
         self.reporting.update(meter_name, accuracy)
 
+    def update_r2(self, fold_num, r2):
+        meter_name = 'test_r2_fold_{}'.format(fold_num)
+        if not self.reporting.does_meter_exist(meter_name):
+            self.reporting.new_meter(meter_name)
+        self.reporting.update(meter_name, r2)
+
     def perform_patient_predictions(self, y_test, predictions, fold_num):
         """
         After a group of patients is run through the model, record all necessary stats
