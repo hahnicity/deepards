@@ -79,6 +79,9 @@ class TrainModel(object):
                 total_loss += loss.data
                 self.results.update_loss(run_num, loss.data)
                 n_loss += 1
+                # If the average loss jumps by > 100% then drop into debugger
+                if n_loss > 1 and (total_loss / n_loss) / ((total_loss-loss.data) / (n_loss-1)) > 1.5:
+                    import IPython; IPython.embed()
                 if not self.args.no_print_progress:
                     print("batch num: {}/{}, avg loss: {}\r".format(idx+1, len(train_loader), total_loss/n_loss), end="")
                 if self.args.debug:
@@ -204,10 +207,10 @@ class TrainModel(object):
                 pin_memory=self.args.cuda,
                 num_workers=self.args.loader_threads,
             )
-            yield train_loader, test_loader
+            yield train_dataset, train_loader, test_dataset, test_loader
 
     def train_and_test(self):
-        for run_num, (train_loader, test_loader) in enumerate(self.get_splits()):
+        for run_num, (train_dataset, train_loader, test_dataset, test_loader) in enumerate(self.get_splits()):
             base_network = {'resnet18': resnet18, 'resnet50': resnet50, 'resnet101': resnet101, 'resnet152': resnet152}[self.args.base_network]
             base_network = base_network(
                 initial_planes=self.args.resnet_initial_planes,
@@ -217,7 +220,7 @@ class TrainModel(object):
             optimizer = self._get_optimizer(model)
             for epoch in range(self.args.epochs):
                 self.run_train_epoch(model, train_loader, optimizer, epoch+1, run_num)
-                self._perform_testing(epoch, model, test_loader, run_num)
+                self._perform_testing(epoch, model, test_dataset, test_loader, run_num)
 
         if self.args.save_model:
             torch.save(model, self.args.save_model)
@@ -227,21 +230,31 @@ class TrainModel(object):
         else:
             self.results.reporting.save_all()
 
-    def _perform_testing(self, epoch_num, model, test_loader, run_num):
+    def _perform_testing(self, epoch_num, model, test_dataset, test_loader, run_num):
         if not self.args.no_test_after_epochs or epoch_num == self.args.epochs - 1:
             preds = self.run_test_epoch(model, test_loader, run_num)
-            if self.args.network in ['cnn_lstm', 'cnn_linear']:
+            if self.is_classification:
                 y_test = test_dataset.get_ground_truth_df()
                 self.results.perform_patient_predictions(y_test, preds, run_num)
 
     def _get_model(self, base_network):
         if self.args.network == 'cnn_lstm':
-            model = self.model_cuda_wrapper(CNNLSTMNetwork(base_network))
+            model = CNNLSTMNetwork(base_network)
         elif self.args.network == 'cnn_linear':
-            model = self.model_cuda_wrapper(CNNLinearNetwork(base_network, self.args.n_sub_batches))
+            model = CNNLinearNetwork(base_network, self.args.n_sub_batches)
         elif self.args.network == 'cnn_regressor':
-            model = self.model_cuda_wrapper(CNNRegressor(base_network))
-        return model
+            if self.args.dataset_type == 'padded_breath_by_breath_with_limited_bm':
+                n_features = 3
+            elif self.dataset_type == 'padded_breath_by_breath_with_full_bm':
+                n_features = 6
+            model = CNNRegressor(base_network, n_features)
+
+        if self.args.load_pretrained:
+            saved_model = torch.load(self.args.load_pretrained)
+            if isinstance(saved_model, torch.nn.DataParallel):
+                saved_model = saved_model.module
+            model.breath_block.load_state_dict(saved_model.breath_block.state_dict())
+        return self.model_cuda_wrapper(model)
 
     def _get_optimizer(self, model):
         if self.args.optimizer == 'adam':
@@ -279,10 +292,11 @@ def main():
     parser.add_argument('--no-test-after-epochs', action='store_true')
     parser.add_argument('--debug', action='store_true', help='debug code and dont train')
     parser.add_argument('--optimizer', choices=['adam', 'sgd'], default='sgd')
-    parser.add_argument('-dt', '--dataset-type', choices=['padded_breath_by_breath', 'unpadded_sequences', 'spaced_padded_breath_by_breath', 'stretched_breath_by_breath', 'padded_breath_by_breath_with_bm'], default='padded_breath_by_breath')
+    parser.add_argument('-dt', '--dataset-type', choices=['padded_breath_by_breath', 'unpadded_sequences', 'spaced_padded_breath_by_breath', 'stretched_breath_by_breath', 'padded_breath_by_breath_with_full_bm', 'padded_breath_by_breath_with_limited_bm'], default='padded_breath_by_breath')
     parser.add_argument('-lr', '--learning-rate', default=0.001, type=float)
     parser.add_argument('--loader-threads', type=int, default=4)
     parser.add_argument('--save-model', help='save the model to a specific file')
+    parser.add_argument('--load-pretrained', help='load breath block from a saved model')
     # XXX should probably be more explicit that we are using kfold or holdout in the future
     args = parser.parse_args()
 

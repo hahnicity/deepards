@@ -77,8 +77,10 @@ class ARDSRawDataset(Dataset):
             self._get_breath_by_breath_dataset(self._perform_spaced_padding)
         elif dataset_type == 'unpadded_sequences':
             self.get_unpadded_sequences_dataset()
-        elif dataset_type == 'padded_breath_by_breath_with_bm':
-            self._get_breath_by_breath_with_breath_meta_target(self._pad_breath)
+        elif dataset_type == 'padded_breath_by_breath_with_full_bm':
+            self._get_breath_by_breath_with_breath_meta_target(self._pad_breath, ['iTime', 'eTime', 'inst_RR', 'maxF', 'I:E ratio', 'tve:tvi ratio'])
+        elif dataset_type == 'padded_breath_by_breath_with_limited_bm':
+            self._get_breath_by_breath_with_breath_meta_target(self._pad_breath, ['iTime', 'eTime', 'inst_RR'])
 
         if to_pickle:
             pd.to_pickle(self.all_sequences, to_pickle)
@@ -86,18 +88,18 @@ class ARDSRawDataset(Dataset):
         if kfold_num is not None:
             self.get_kfold_indexes()
 
-    def _get_breath_by_breath_with_breath_meta_target(self, process_breath_func):
-        # XXX probably can consolidate this too
+    def _get_breath_by_breath_with_breath_meta_target(self, process_breath_func, bm_features):
         last_patient = None
-        desired_features = ['iTime', 'eTime', 'inst_RR', 'maxF', 'I:E ratio', 'tve:tvi ratio']
-        ratio_indices = [desired_features.index(f) for f in ['I:E ratio', 'tve:tvi ratio']]
-        indices = [META_HEADER.index(feature) for feature in desired_features]
+        try:
+            ratio_indices = [bm_features.index(f) for f in ['I:E ratio', 'tve:tvi ratio']]
+        except ValueError:
+            ratio_indices = []
+        indices = [META_HEADER.index(feature) for feature in bm_features]
         for fidx, filename in enumerate(self.raw_files):
             gen = read_processed_file(filename, self.processed_files[fidx])
             patient_id = self._get_patient_id_from_file(filename)
             if patient_id != last_patient:
                 batch_arr = []
-                seq_vent_bns = []
                 target_arr = []
             last_patient = patient_id
 
@@ -112,8 +114,16 @@ class ARDSRawDataset(Dataset):
             else:
                 has_preprocessed_meta = False
 
-            # XXX need to eventually add cutoffs based on vent time or Berlin time
             for bidx, breath in enumerate(gen):
+                # cutoff breaths if they have too few points. It is unlikely ML
+                # will ever learn anything useful from them. 21 is chosen because the mean
+                # number of unpadded obs we have in our train set is 138.78 and the std
+                # is 38.23. So 21 is < mu - 3*std and is divisible with 7.
+                #
+                # XXX is this not good? Should I be keeping these outliers to act as
+                # regularizers? Ultimately you have to rely on your testing+validation sets
+                if len(breath['flow']) < 21:
+                    continue
                 if has_preprocessed_meta:
                     try:
                         meta = processed_meta[bidx]
@@ -133,25 +143,12 @@ class ARDSRawDataset(Dataset):
                 # for the tve:tvi ratios we have
                 if np.any(np.abs(meta[ratio_indices]) > 100):
                     continue
-                target_arr.append(meta)
 
                 flow = (np.array(breath['flow']) - self.mu) / self.std
                 b_seq = process_breath_func(flow)
-                batch_arr.append(b_seq)
-                seq_vent_bns.append(breath['vent_bn'])
+                self.all_sequences.append([patient_id, b_seq.reshape((1, self.seq_len)), meta])
 
-                if len(batch_arr) == self.n_sub_batches:
-                    if self._should_we_drop_frame(seq_vent_bns, patient_id):
-                        batch_arr = []
-                        seq_vent_bns = []
-                        target_arr = []
-                        continue
-                    self.all_sequences.append([patient_id, np.array(batch_arr).reshape((self.n_sub_batches, 1, self.seq_len)), np.array(target_arr)])
-                    batch_arr = []
-                    seq_vent_bns = []
-                    target_arr = []
-
-    def _get_breath_by_breath_dataset(self, process_breath_func, objective_func):
+    def _get_breath_by_breath_dataset(self, process_breath_func):
         """
         Process data for patient where each component of a sub-batch is a breath padded
         to a desired sequence length. Breaths are batched in accordance to how many
@@ -171,6 +168,12 @@ class ARDSRawDataset(Dataset):
 
             # XXX need to eventually add cutoffs based on vent time or Berlin time
             for bidx, breath in enumerate(gen):
+                # cutoff breaths if they have too few points. It is unlikely ML
+                # will ever learn anything useful from them. 21 is chosen because the mean
+                # number of unpadded obs we have in our train set is 138.78 and the std
+                # is 38.23. So 21 is < mu - 3*std and is divisible with 7.
+                if len(breath['flow']) < 21:
+                    continue
                 flow = (np.array(breath['flow']) - self.mu) / self.std
                 b_seq = process_breath_func(flow)
                 batch_arr.append(b_seq)
@@ -231,6 +234,12 @@ class ARDSRawDataset(Dataset):
 
             # XXX need to eventually add cutoffs based on vent time or Berlin time
             for bidx, breath in enumerate(gen):
+                # cutoff breaths if they have too few points. It is unlikely ML
+                # will ever learn anything useful from them. 21 is chosen because the mean
+                # number of unpadded obs we have in our train set is 138.78 and the std
+                # is 38.23. So 21 is < mu - 3*std and is divisible with 7.
+                if len(breath['flow']) < 21:
+                    continue
                 seq_vent_bns.append(breath['vent_bn'])
                 if (len(breath['flow']) + len(breath_arr)) < self.seq_len:
                     breath_arr.extend(breath['flow'])

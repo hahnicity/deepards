@@ -22,6 +22,21 @@ args = parser.parse_args()
 
 get_moving_average = lambda x, N: np.convolve(x, np.ones((N,))/N, mode='valid')
 
+glob_search = 'results/loss*_{network}_base{base_network}_e{epochs}_nb{num_sub_batches}_lc{loss_calc}_rip{initial_planes}_lvp{lstm_vote_percentage}_rfptmax_optim{optim}_lr{learning_rate}_bs{batch_size}*'
+glob_search = glob_search.format(**args.__dict__)
+results_files = glob(glob_search)
+if len(results_files) == 0:
+    raise Exception('No loss results files found')
+
+for i, f in enumerate(sorted(results_files)):
+    vals = torch.load(f).values.numpy()
+    ma = get_moving_average(vals, 1000)
+    plt.plot(ma, label='Loss Fold {}'.format(i+1))
+plt.legend()
+plt.grid()
+plt.ylabel('loss')
+plt.show()
+
 all_vals = None
 glob_search = 'results/test_auc*_{network}_base{base_network}_e{epochs}_nb{num_sub_batches}_lc{loss_calc}_rip{initial_planes}_lvp{lstm_vote_percentage}_rfptmax_optim{optim}_lr{learning_rate}_bs{batch_size}*'
 glob_search = glob_search.format(**args.__dict__)
@@ -29,7 +44,7 @@ print('searching for results with params:')
 pprint(args.__dict__)
 results_files = glob(glob_search)
 if len(results_files) == 0:
-    raise Exception('No results files found')
+    raise Exception('No AUC results files found')
 
 for i, f in enumerate(sorted(results_files)):
     vals = torch.load(f).values.numpy()
@@ -66,19 +81,4 @@ plt.ylabel('Accuracy')
 plt.ylim(.5, 1)
 plt.yticks(np.arange(.5, 1.01, .05))
 #plt.title(
-plt.show()
-
-glob_search = 'results/loss*_{network}_base{base_network}_e{epochs}_nb{num_sub_batches}_lc{loss_calc}_rip{initial_planes}_lvp{lstm_vote_percentage}_rfptmax_optim{optim}_lr{learning_rate}_bs{batch_size}*'
-glob_search = glob_search.format(**args.__dict__)
-results_files = glob(glob_search)
-if len(results_files) == 0:
-    raise Exception('No loss results files found')
-
-for i, f in enumerate(sorted(results_files)):
-    vals = torch.load(f).values.numpy()
-    ma = get_moving_average(vals, 1000)
-    plt.plot(ma, label='Loss Fold {}'.format(i+1))
-plt.legend()
-plt.grid()
-plt.ylabel('loss')
 plt.show()

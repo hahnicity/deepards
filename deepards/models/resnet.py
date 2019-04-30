@@ -86,10 +86,14 @@ class ResNet(nn.Module):
         self.expansion = block.expansion
         super(ResNet, self).__init__()
         # This divides the input by 2 so your output shape will be (batches, chans, 112)
-        self.conv1 = nn.Conv1d(1, self.inplanes, kernel_size=7, stride=2, padding=3,
+        self.conv1 = nn.Conv1d(1, self.inplanes, kernel_size=3, stride=1, padding=1,
                                bias=False)
-
         self.bn1 = nn.BatchNorm1d(self.inplanes)
+
+        self.conv2 = nn.Conv1d(self.inplanes, self.inplanes, kernel_size=4, stride=2, padding=1,
+                               bias=False)
+        self.bn2 = nn.BatchNorm1d(self.inplanes)
+
         self.relu = nn.ReLU(inplace=True)
         # This also divides the input by 2 so your output shape will be (batches, chans, 56)
         if first_pool_type == 'max':
@@ -134,6 +138,11 @@ class ResNet(nn.Module):
     def forward(self, x):
         x = self.conv1(x)
         x = self.bn1(x)
+
+        # conv2 is experimental
+        x = self.conv2(x)
+        x = self.bn2(x)
+
         x = self.relu(x)
         x = self.first_pool(x)
 
