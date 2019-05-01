@@ -26,6 +26,10 @@ class TrainModel(object):
             self.criterion = torch.nn.MSELoss()
         else:
             self.criterion = torch.nn.BCELoss()
+        if self.args.dataset_type == 'padded_breath_by_breath_with_limited_bm':
+            self.n_bm_features = 3
+        elif self.dataset_type == 'padded_breath_by_breath_with_full_bm':
+            self.n_bm_features = 6
 
         self.is_classification = self.args.network != 'cnn_regressor'
         self.n_runs = self.args.kfolds if self.args.kfolds is not None else 1
@@ -36,7 +40,7 @@ class TrainModel(object):
         if self.args.save_model and self.n_runs > 1:
             raise NotImplementedError('We currently do not support saving kfold models')
 
-        self.results = DeepARDSResults('{}_base{}_e{}_nb{}_lc{}_rip{}_lvp{}_rfpt{}_optim{}_lr{}_bs{}'.format(
+        self.results = DeepARDSResults('{}_base{}_e{}_nb{}_lc{}_rip{}_lvp{}_rfpt{}_optim{}_lr{}_bs{}_rdc{}'.format(
             self.args.network,
             self.args.base_network,
             self.args.epochs,
@@ -48,6 +52,7 @@ class TrainModel(object):
             self.args.optimizer,
             self.args.learning_rate,
             self.args.batch_size,
+            self.args.resnet_double_conv,
         ))
 
     def calc_loss(self, outputs, target):
@@ -80,8 +85,8 @@ class TrainModel(object):
                 self.results.update_loss(run_num, loss.data)
                 n_loss += 1
                 # If the average loss jumps by > 100% then drop into debugger
-                if n_loss > 1 and (total_loss / n_loss) / ((total_loss-loss.data) / (n_loss-1)) > 1.5:
-                    import IPython; IPython.embed()
+                #if n_loss > 1 and (total_loss / n_loss) / ((total_loss-loss.data) / (n_loss-1)) > 1.5:
+                #    import IPython; IPython.embed()
                 if not self.args.no_print_progress:
                     print("batch num: {}/{}, avg loss: {}\r".format(idx+1, len(train_loader), total_loss/n_loss), end="")
                 if self.args.debug:
@@ -103,6 +108,9 @@ class TrainModel(object):
         if self.is_classification:
             preds = pd.Series(preds, index=pred_idx)
             preds = preds.sort_index()
+        else:
+            self.results.print_meter_results('test_mae', run_num)
+
         return preds
 
     def _record_test_batch_results(self, batch_preds, target, run_num):
@@ -110,13 +118,9 @@ class TrainModel(object):
             accuracy = accuracy_score(target.argmax(dim=1).cpu().tolist(), batch_preds)
             self.results.update_accuracy(run_num, accuracy)
         else:
-            target = target.view((-1, 6)).cpu().numpy()
+            target = target.cpu().numpy()
             mae = mean_absolute_error(target, batch_preds)
             self.results.update_meter('test_mae', run_num, mae)
-            self.results.print_meter_results('test_mae', run_num)
-            mse = np.sum((batch_preds - target) ** 2) / len(batch_preds)
-            self.results.update_meter('test_mse', run_num, mae)
-            self.results.print_meter_results('test_mse', run_num)
 
     def _process_test_batch_predictions(self, outputs):
         if self.args.network == 'cnn_lstm':
@@ -129,7 +133,8 @@ class TrainModel(object):
             batch_preds = outputs.argmax(dim=1).cpu().tolist()
 
         elif self.args.network == 'cnn_regressor':
-            batch_preds = outputs.view((-1, 6)).cpu().numpy()
+            batch_preds = outputs.cpu().numpy()
+
         return batch_preds
 
     def get_base_datasets(self):
@@ -215,6 +220,7 @@ class TrainModel(object):
             base_network = base_network(
                 initial_planes=self.args.resnet_initial_planes,
                 first_pool_type=self.args.resnet_first_pool_type,
+                double_conv_first=self.args.resnet_double_conv,
             )
             model = self._get_model(base_network)
             optimizer = self._get_optimizer(model)
@@ -243,11 +249,7 @@ class TrainModel(object):
         elif self.args.network == 'cnn_linear':
             model = CNNLinearNetwork(base_network, self.args.n_sub_batches)
         elif self.args.network == 'cnn_regressor':
-            if self.args.dataset_type == 'padded_breath_by_breath_with_limited_bm':
-                n_features = 3
-            elif self.dataset_type == 'padded_breath_by_breath_with_full_bm':
-                n_features = 6
-            model = CNNRegressor(base_network, n_features)
+            model = CNNRegressor(base_network, self.n_bm_features)
 
         if self.args.load_pretrained:
             saved_model = torch.load(self.args.load_pretrained)
@@ -297,6 +299,7 @@ def main():
     parser.add_argument('--loader-threads', type=int, default=4)
     parser.add_argument('--save-model', help='save the model to a specific file')
     parser.add_argument('--load-pretrained', help='load breath block from a saved model')
+    parser.add_argument('-rdc','--resnet-double-conv', action='store_true')
     # XXX should probably be more explicit that we are using kfold or holdout in the future
     args = parser.parse_args()
 

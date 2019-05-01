@@ -81,18 +81,21 @@ class Bottleneck(nn.Module):
 
 class ResNet(nn.Module):
 
-    def __init__(self, block, layers, initial_planes=64, first_pool_type='max'):
+    def __init__(self, block, layers, initial_planes=64, first_pool_type='max', double_conv_first=False):
         self.inplanes = initial_planes
         self.expansion = block.expansion
         super(ResNet, self).__init__()
         # This divides the input by 2 so your output shape will be (batches, chans, 112)
-        self.conv1 = nn.Conv1d(1, self.inplanes, kernel_size=3, stride=1, padding=1,
+        self.conv1 = nn.Conv1d(1, self.inplanes, kernel_size=7, stride=2, padding=3,
+                               bias=False)
+        self.conv1_alt = nn.Conv1d(1, self.inplanes, kernel_size=3, stride=1, padding=1,
                                bias=False)
         self.bn1 = nn.BatchNorm1d(self.inplanes)
 
-        self.conv2 = nn.Conv1d(self.inplanes, self.inplanes, kernel_size=4, stride=2, padding=1,
+        self.conv2 = nn.Conv1d(self.inplanes, self.inplanes, kernel_size=7, stride=2, padding=3,
                                bias=False)
         self.bn2 = nn.BatchNorm1d(self.inplanes)
+        self.double_conv_first = double_conv_first
 
         self.relu = nn.ReLU(inplace=True)
         # This also divides the input by 2 so your output shape will be (batches, chans, 56)
@@ -136,12 +139,14 @@ class ResNet(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
-        x = self.conv1(x)
-        x = self.bn1(x)
-
-        # conv2 is experimental
-        x = self.conv2(x)
-        x = self.bn2(x)
+        if not self.double_conv_first:
+            x = self.conv1(x)
+            x = self.bn1(x)
+        else:
+            x = self.conv1_alt(x)
+            x = self.bn1(x)
+            x = self.conv2(x)
+            x = self.bn2(x)
 
         x = self.relu(x)
         x = self.first_pool(x)
