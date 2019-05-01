@@ -1,5 +1,6 @@
 from __future__ import print_function
 import argparse
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -42,21 +43,10 @@ class TrainModel(object):
         if self.args.save_model and self.n_runs > 1:
             raise NotImplementedError('We currently do not support saving kfold models')
 
-        self.results = DeepARDSResults('{}_base{}_e{}_nb{}_lc{}_rip{}_lvp{}_rfpt{}_optim{}_lr{}_bs{}_rdc{}_pretrained{}'.format(
-            self.args.network,
-            self.args.base_network,
-            self.args.epochs,
-            self.args.n_sub_batches,
-            self.args.loss_calc,
-            self.args.resnet_initial_planes,
-            self.args.lstm_vote_percent,
-            self.args.resnet_first_pool_type,
-            self.args.optimizer,
-            self.args.learning_rate,
-            self.args.batch_size,
-            self.args.resnet_double_conv,
-            self.args.load_pretrained,
-        ))
+        self.start_time = datetime.now().strftime('%s')
+        results_file_suffix = 'deepards_start_{}'.format(self.start_time)
+        self.results = DeepARDSResults(results_file_suffix)
+        print('Run start time: {}'.format(self.start_time))
 
     def calc_loss(self, outputs, target):
         if self.args.loss_calc == 'all_breaths' and self.args.network == 'cnn_lstm':
@@ -238,6 +228,7 @@ class TrainModel(object):
             self.results.aggregate_classification_results()
         else:
             self.results.reporting.save_all()
+        print('Run start time: {}'.format(self.start_time))
 
     def _perform_testing(self, epoch_num, model, test_dataset, test_loader, run_num):
         if not self.args.no_test_after_epochs or epoch_num == self.args.epochs - 1:
