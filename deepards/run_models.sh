@@ -8,10 +8,10 @@ do
         do
             for rip in 8 16 64
             do
-                for bs in 256
+                for bs in 16 32
                 do
-                    ts python train_ards_detector.py -p padded_breath_by_breath_with_limited_bm-nb100-train.pkl --test-from-pickle padded_breath_by_breath_with_limited_bm-nb100-test.pkl -dt padded_breath_by_breath_with_limited_bm -n cnn_regressor -rdc --cuda -rip ${rip} -b ${bs} --save-model resnet18-bm-limited-rip${rip}-rdc.pth -rdc -e 12
-                    ts python train_ards_detector.py -p padded_breath_by_breath_with_limited_bm-nb100-train.pkl --test-from-pickle padded_breath_by_breath_with_limited_bm-nb100-test.pkl -dt padded_breath_by_breath_with_limited_bm -n cnn_regressor -rdc --cuda -rip ${rip} -b ${bs} --save-model resnet18-bm-limited-rip${rip}.pth -e 12
+                    ts python train_ards_detector.py -p /fastdata/deepards/padded_breath_by_breath-nb100-kfold.pkl -dt padded_breath_by_breath -n cnn_lstm --cuda -rip ${rip} -b ${bs} --load-pretrained resnet18-bm-limited-rip${rip}-rdc.pth -e 15 -rdc --no-print-progress
+                    ts python train_ards_detector.py -p /fastdata/deepards/padded_breath_by_breath-nb100-kfold.pkl -dt padded_breath_by_breath -n cnn_lstm --cuda -rip ${rip} -b ${bs} --load-pretrained resnet18-bm-limited-rip${rip}.pth -e 15 --no-print-progress
                 done
             done
         done

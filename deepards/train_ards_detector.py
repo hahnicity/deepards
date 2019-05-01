@@ -22,13 +22,15 @@ class TrainModel(object):
         self.args = args
         self.cuda_wrapper = lambda x: x.cuda() if args.cuda else x
         self.model_cuda_wrapper = lambda x: nn.DataParallel(x).cuda() if args.cuda else x
+
         if self.args.network == 'cnn_regressor':
             self.criterion = torch.nn.MSELoss()
         else:
             self.criterion = torch.nn.BCELoss()
+
         if self.args.dataset_type == 'padded_breath_by_breath_with_limited_bm':
             self.n_bm_features = 3
-        elif self.dataset_type == 'padded_breath_by_breath_with_full_bm':
+        elif self.args.dataset_type == 'padded_breath_by_breath_with_full_bm':
             self.n_bm_features = 6
 
         self.is_classification = self.args.network != 'cnn_regressor'
@@ -40,7 +42,7 @@ class TrainModel(object):
         if self.args.save_model and self.n_runs > 1:
             raise NotImplementedError('We currently do not support saving kfold models')
 
-        self.results = DeepARDSResults('{}_base{}_e{}_nb{}_lc{}_rip{}_lvp{}_rfpt{}_optim{}_lr{}_bs{}_rdc{}'.format(
+        self.results = DeepARDSResults('{}_base{}_e{}_nb{}_lc{}_rip{}_lvp{}_rfpt{}_optim{}_lr{}_bs{}_rdc{}_pretrained{}'.format(
             self.args.network,
             self.args.base_network,
             self.args.epochs,
@@ -53,6 +55,7 @@ class TrainModel(object):
             self.args.learning_rate,
             self.args.batch_size,
             self.args.resnet_double_conv,
+            self.args.load_pretrained,
         ))
 
     def calc_loss(self, outputs, target):

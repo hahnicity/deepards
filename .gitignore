@@ -6,6 +6,7 @@ __pycache__/
 *.pkl
 *pkl.gz
 results/
+*.pth
 
 # C extensions
 *.so
