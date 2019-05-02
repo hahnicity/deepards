@@ -11,7 +11,7 @@ class CNNRegressor(nn.Module):
         self.breath_block = breath_block
         self.linear_final = nn.Linear(breath_block.inplanes, n_final_features)
 
-    def forward(self, x):
+    def forward(self, x, metadata):
         # input should be in shape: (batches, breaths in seq, chans, 224)
         if x.shape[-1] != 224:
             raise Exception('input breaths must have sequence length of 224')

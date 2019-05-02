@@ -12,10 +12,11 @@ class CNNLinearNetwork(nn.Module):
         self.linear_final = nn.Linear(self.breath_block.inplanes * sequence_size, 2)
         self.softmax = nn.Softmax(dim=-1)
 
-    def forward(self, x):
+    def forward(self, x, metadata):
         # input should be in shape: (batches, breaths in seq, chans, 224)
         if x.shape[-1] != 224:
             raise Exception('input breaths must have sequence length of 224')
+        # XXX add logic to handle metadata eventually
         batches = x.shape[0]
         breaths = x.shape[1]
         outputs = self.linear_final(self.breath_block(x[0]).view(-1)).unsqueeze(0)

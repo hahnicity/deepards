@@ -29,9 +29,9 @@ class TrainModel(object):
         else:
             self.criterion = torch.nn.BCELoss()
 
-        if self.args.dataset_type == 'padded_breath_by_breath_with_limited_bm':
+        if self.args.dataset_type == 'padded_breath_by_breath_with_limited_bm_target':
             self.n_bm_features = 3
-        elif self.args.dataset_type == 'padded_breath_by_breath_with_full_bm':
+        elif self.args.dataset_type == 'padded_breath_by_breath_with_full_bm_target':
             self.n_bm_features = 6
 
         self.is_classification = self.args.network != 'cnn_regressor'
@@ -63,7 +63,7 @@ class TrainModel(object):
         total_loss = 0
         with torch.enable_grad():
             print("\nrun epoch {}\n".format(epoch_num))
-            for idx, (obs_idx, seq, target) in enumerate(train_loader):
+            for idx, (obs_idx, seq, metadata, target) in enumerate(train_loader):
                 model.zero_grad()
                 target_shape = target.numpy().shape
                 target = self.cuda_wrapper(target.float())
@@ -89,7 +89,7 @@ class TrainModel(object):
         preds = []
         pred_idx = []
         with torch.no_grad():
-            for idx, (obs_idx, seq, target) in enumerate(test_loader):
+            for idx, (obs_idx, seq, metadata, target) in enumerate(test_loader):
                 inputs = self.cuda_wrapper(Variable(seq.float()))
                 outputs = model(inputs)
                 batch_preds = self._process_test_batch_predictions(outputs)
@@ -288,7 +288,7 @@ def main():
     parser.add_argument('--no-test-after-epochs', action='store_true')
     parser.add_argument('--debug', action='store_true', help='debug code and dont train')
     parser.add_argument('--optimizer', choices=['adam', 'sgd'], default='sgd')
-    parser.add_argument('-dt', '--dataset-type', choices=['padded_breath_by_breath', 'unpadded_sequences', 'spaced_padded_breath_by_breath', 'stretched_breath_by_breath', 'padded_breath_by_breath_with_full_bm', 'padded_breath_by_breath_with_limited_bm'], default='padded_breath_by_breath')
+    parser.add_argument('-dt', '--dataset-type', choices=['padded_breath_by_breath', 'unpadded_sequences', 'spaced_padded_breath_by_breath', 'stretched_breath_by_breath', 'padded_breath_by_breath_with_full_bm_target', 'padded_breath_by_breath_with_limited_bm_target', 'padded_breath_by_breath_with_flow_time_features'], default='padded_breath_by_breath')
     parser.add_argument('-lr', '--learning-rate', default=0.001, type=float)
     parser.add_argument('--loader-threads', type=int, default=4)
     parser.add_argument('--save-model', help='save the model to a specific file')

@@ -11,6 +11,10 @@ from ventmap.breath_meta import get_production_breath_meta
 from ventmap.constants import META_HEADER
 from ventmap.raw_utils import extract_raw, read_processed_file
 
+# We will mainline all the experimental work after publication. Probably rename it as well.
+from algorithms.breath_meta import get_experimental_breath_meta
+from algorithms.constants import EXPERIMENTAL_META_HEADER
+
 
 class ARDSRawDataset(Dataset):
 
@@ -77,10 +81,24 @@ class ARDSRawDataset(Dataset):
             self._get_breath_by_breath_dataset(self._perform_spaced_padding)
         elif dataset_type == 'unpadded_sequences':
             self.get_unpadded_sequences_dataset()
-        elif dataset_type == 'padded_breath_by_breath_with_full_bm':
+        elif dataset_type == 'padded_breath_by_breath_with_full_bm_target':
             self._get_breath_by_breath_with_breath_meta_target(self._pad_breath, ['iTime', 'eTime', 'inst_RR', 'maxF', 'I:E ratio', 'tve:tvi ratio'])
-        elif dataset_type == 'padded_breath_by_breath_with_limited_bm':
+        elif dataset_type == 'padded_breath_by_breath_with_limited_bm target':
             self._get_breath_by_breath_with_breath_meta_target(self._pad_breath, ['iTime', 'eTime', 'inst_RR'])
+        elif dataset_type == 'padded_breath_by_breath_with_flow_time_features':
+            self._get_breath_by_breath_with_flow_time_features(
+                self._pad_breath, [
+                    'mean_flow_from_pef',
+                    'inst_RR',
+                    'slope_minF_to_zero',
+                    'pef_+0.16_to_zero',
+                    'iTime',
+                    'eTime',
+                    'I:E ratio',
+                    'dyn_compliance',
+                    'tve:tvi ratio',
+                ]
+            )
 
         if to_pickle:
             pd.to_pickle(self.all_sequences, to_pickle)
@@ -88,31 +106,35 @@ class ARDSRawDataset(Dataset):
         if kfold_num is not None:
             self.get_kfold_indexes()
 
-    def _get_breath_by_breath_with_breath_meta_target(self, process_breath_func, bm_features):
+    def _get_breath_by_breath_with_flow_time_features(self, process_breath_func, bm_features):
+        # XXX there is a bunch of stuff here I can abstract
         last_patient = None
         try:
             ratio_indices = [bm_features.index(f) for f in ['I:E ratio', 'tve:tvi ratio']]
         except ValueError:
             ratio_indices = []
-        indices = [META_HEADER.index(feature) for feature in bm_features]
+        indices = [EXPERIMENTAL_META_HEADER.index(feature) for feature in bm_features]
+
         for fidx, filename in enumerate(self.raw_files):
             gen = read_processed_file(filename, self.processed_files[fidx])
             patient_id = self._get_patient_id_from_file(filename)
             if patient_id != last_patient:
                 batch_arr = []
-                target_arr = []
+                seq_vent_bns = []
+                meta_arr = []
             last_patient = patient_id
+            patient_row = self.cohort[self.cohort['Patient Unique Identifier'] == patient_id]
+            patient_row = patient_row.iloc[0]
+            patho = 1 if patient_row['Pathophysiology'] == 'ARDS' else 0
 
             matching_meta = os.path.join(self.meta_dir, patient_id, 'breath_meta_' + os.path.basename(filename).replace('.raw.npy', '.csv'))
+            has_preprocessed_meta = False
             if matching_meta in self.meta_files:
                 try:
                     processed_meta = pd.read_csv(matching_meta, header=None).values
-                except pd.errors.EmptyDataError:
-                    has_preprocessed_meta = False
-                else:
                     has_preprocessed_meta = True
-            else:
-                has_preprocessed_meta = False
+                except pd.errors.EmptyDataError:
+                    pass
 
             for bidx, breath in enumerate(gen):
                 # cutoff breaths if they have too few points. It is unlikely ML
@@ -124,6 +146,75 @@ class ARDSRawDataset(Dataset):
                 # regularizers? Ultimately you have to rely on your testing+validation sets
                 if len(breath['flow']) < 21:
                     continue
+                if has_preprocessed_meta:
+                    try:
+                        meta = processed_meta[bidx]
+                    except IndexError:
+                        meta = np.array(get_experimental_breath_meta(breath))
+                    # sanity check
+                    if int(meta[0]) != breath['rel_bn']:
+                        meta = np.array(get_experimental_breath_meta(breath))
+                else:
+                    meta = np.array(get_experimental_breath_meta(breath))
+
+                meta = meta[indices].astype(np.float)
+                if np.any(np.isinf(meta) | np.isnan(meta)):
+                    continue
+                # clip any breaths with ratios > 100. These breaths have proven their
+                # ability to totally blow up gradients. 100 was chosen because it is > 3*std
+                # for the tve:tvi ratios we have
+                if np.any(np.abs(meta[ratio_indices]) > 100):
+                    continue
+
+                flow = (np.array(breath['flow']) - self.mu) / self.std
+                b_seq = process_breath_func(flow)
+                batch_arr.append(b_seq)
+                seq_vent_bns.append(breath['vent_bn'])
+                meta_arr.append(meta)
+
+                if len(batch_arr) == self.n_sub_batches:
+                    if self._should_we_drop_frame(seq_vent_bns, patient_id):
+                        batch_arr = []
+                        seq_vent_bns = []
+                        meta_arr = []
+                        continue
+                    target = np.zeros(2)
+                    target[patho] = 1
+                    self.all_sequences.append([patient_id, np.array(batch_arr).reshape((self.n_sub_batches, 1, self.seq_len)), np.array(meta_arr), target])
+                    batch_arr = []
+                    seq_vent_bns = []
+                    meta_arr = []
+
+    def _get_breath_by_breath_with_breath_meta_target(self, process_breath_func, bm_features):
+        try:
+            ratio_indices = [bm_features.index(f) for f in ['I:E ratio', 'tve:tvi ratio']]
+        except ValueError:
+            ratio_indices = []
+        indices = [META_HEADER.index(feature) for feature in bm_features]
+        for fidx, filename in enumerate(self.raw_files):
+            gen = read_processed_file(filename, self.processed_files[fidx])
+            patient_id = self._get_patient_id_from_file(filename)
+
+            matching_meta = os.path.join(self.meta_dir, patient_id, 'breath_meta_' + os.path.basename(filename).replace('.raw.npy', '.csv'))
+            has_preprocessed_meta = False
+            if matching_meta in self.meta_files:
+                try:
+                    processed_meta = pd.read_csv(matching_meta, header=None).values
+                    has_preprocessed_meta = True
+                except pd.errors.EmptyDataError:
+                    pass
+
+            for bidx, breath in enumerate(gen):
+                # cutoff breaths if they have too few points. It is unlikely ML
+                # will ever learn anything useful from them. 21 is chosen because the mean
+                # number of unpadded obs we have in our train set is 138.78 and the std
+                # is 38.23. So 21 is < mu - 3*std and is divisible with 7.
+                #
+                # XXX is this not good? Should I be keeping these outliers to act as
+                # regularizers? Ultimately you have to rely on your testing+validation sets
+                if len(breath['flow']) < 21:
+                    continue
+                # XXX I should abstract this whole section where we extract a row of metadata
                 if has_preprocessed_meta:
                     try:
                         meta = processed_meta[bidx]
@@ -295,8 +386,13 @@ class ARDSRawDataset(Dataset):
         # like in your kfold
         if self.kfold_num is not None:
             index = self.kfold_indexes[index]
-        _, seq, target = self.all_sequences[index]
-        return index, seq, target
+        seq = self.all_sequences[index]
+        if len(seq) == 3:
+            _, data, target = seq
+            meta = np.nan
+        elif len(seq) == 4:
+            _, data, meta, target = seq
+        return index, data, meta, target
 
     def __len__(self):
         if self.kfold_num is None:
@@ -312,14 +408,22 @@ class ARDSRawDataset(Dataset):
 
     def _get_all_sequence_ground_truth(self):
         rows = []
-        for patient, _, target in self.all_sequences:
+        for seq in self.all_sequences:
+            if len(seq) == 3:
+                patient, _, target = seq
+            elif len(seq) == 4:
+                patient, _, __, target = seq
             rows.append([patient, np.argmax(target, axis=0)])
         return pd.DataFrame(rows, columns=['patient', 'y'])
 
     def _get_kfold_ground_truth(self):
         rows = []
         for idx in self.kfold_indexes:
-            patient, _, target = self.all_sequences[idx]
+            seq = self.all_sequences[idx]
+            if len(seq) == 3:
+                patient, _, target = seq
+            elif len(seq) == 4:
+                patient, _, __, target = seq
             rows.append([patient, np.argmax(target, axis=0)])
         return pd.DataFrame(rows, columns=['patient', 'y'], index=self.kfold_indexes)
 
