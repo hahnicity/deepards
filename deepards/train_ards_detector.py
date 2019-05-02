@@ -34,6 +34,11 @@ class TrainModel(object):
         elif self.args.dataset_type == 'padded_breath_by_breath_with_full_bm_target':
             self.n_bm_features = 6
 
+        if self.args.dataset_type == 'padded_breath_by_breath_with_flow_time_features':
+            self.n_metadata_inputs = 9
+        else:
+            self.n_metadata_inputs = 0
+
         self.is_classification = self.args.network != 'cnn_regressor'
         self.n_runs = self.args.kfolds if self.args.kfolds is not None else 1
         # Train and test both load from the same dataset in the case of kfold
@@ -68,7 +73,8 @@ class TrainModel(object):
                 target_shape = target.numpy().shape
                 target = self.cuda_wrapper(target.float())
                 inputs = self.cuda_wrapper(Variable(seq.float()))
-                outputs = model(inputs)
+                metadata = self.cuda_wrapper(Variable(metadata.float()))
+                outputs = model(inputs, metadata)
                 loss = self.calc_loss(outputs, target)
                 loss.backward()
                 optimizer.step()
@@ -239,9 +245,9 @@ class TrainModel(object):
 
     def _get_model(self, base_network):
         if self.args.network == 'cnn_lstm':
-            model = CNNLSTMNetwork(base_network)
+            model = CNNLSTMNetwork(base_network, self.n_metadata_inputs)
         elif self.args.network == 'cnn_linear':
-            model = CNNLinearNetwork(base_network, self.args.n_sub_batches)
+            model = CNNLinearNetwork(base_network, self.args.n_sub_batches, self.n_metadata_inputs)
         elif self.args.network == 'cnn_regressor':
             model = CNNRegressor(base_network, self.n_bm_features)
 

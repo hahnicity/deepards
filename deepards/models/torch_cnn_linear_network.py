@@ -4,12 +4,12 @@ import torch.nn as nn
 
 
 class CNNLinearNetwork(nn.Module):
-    def __init__(self, breath_block, sequence_size):
+    def __init__(self, breath_block, sequence_size, metadata_features):
         super(CNNLinearNetwork, self).__init__()
 
         self.seq_size = 224
         self.breath_block = breath_block
-        self.linear_final = nn.Linear(self.breath_block.inplanes * sequence_size, 2)
+        self.linear_final = nn.Linear(self.breath_block.inplanes * sequence_size + metadata_features, 2)
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, x, metadata):
