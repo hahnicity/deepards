@@ -97,7 +97,8 @@ class TrainModel(object):
         with torch.no_grad():
             for idx, (obs_idx, seq, metadata, target) in enumerate(test_loader):
                 inputs = self.cuda_wrapper(Variable(seq.float()))
-                outputs = model(inputs)
+                metadata = self.cuda_wrapper(Variable(metadata.float()))
+                outputs = model(inputs, metadata)
                 batch_preds = self._process_test_batch_predictions(outputs)
                 if self.is_classification:
                     pred_idx.extend(obs_idx.cpu().tolist())
