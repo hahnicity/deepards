@@ -246,7 +246,7 @@ class TrainModel(object):
 
     def _get_model(self, base_network):
         if self.args.network == 'cnn_lstm':
-            model = CNNLSTMNetwork(base_network, self.n_metadata_inputs)
+            model = CNNLSTMNetwork(base_network, self.n_metadata_inputs, self.args.bm_to_linear)
         elif self.args.network == 'cnn_linear':
             model = CNNLinearNetwork(base_network, self.args.n_sub_batches, self.n_metadata_inputs)
         elif self.args.network == 'cnn_regressor':
@@ -301,6 +301,7 @@ def main():
     parser.add_argument('--save-model', help='save the model to a specific file')
     parser.add_argument('--load-pretrained', help='load breath block from a saved model')
     parser.add_argument('-rdc','--resnet-double-conv', action='store_true')
+    parser.add_argument('--bm-to-linear', action='store_true')
     # XXX should probably be more explicit that we are using kfold or holdout in the future
     args = parser.parse_args()
 
