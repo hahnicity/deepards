@@ -7,7 +7,8 @@ from warnings import warn
 import numpy as np
 import pandas as pd
 from sklearn.cluster import AgglomerativeClustering
-from ventmap.breath_meta import get_file_breath_meta, META_HEADER
+from ventmap.breath_meta import get_file_breath_meta, get_production_breath_meta, META_HEADER, write_breath_meta
+from ventmap.raw_utils import process_breath_file, read_processed_file
 
 
 def collect_data(patient_id, data_dir, intermediate_results_dir, warn_file, no_intermediates, desired_cols):
@@ -31,7 +32,7 @@ def collect_data(patient_id, data_dir, intermediate_results_dir, warn_file, no_i
     all_meta = []
     meta_idxs = [META_HEADER.index(col) for col in desired_cols]
     for file in files:
-        meta = get_file_breath_meta(file)[1:]
+        meta = get_file_breath_meta(open(file, 'rU'))[1:]
         desired_meta = [[row[idx] for idx in meta_idxs] + [patient_id, file] for row in meta]
         all_meta.extend(desired_meta)
 
@@ -47,16 +48,50 @@ def perform_clustering(df, nclust, breaths_per_clust):
     # cutoff ventbn, patient, and filename
     results = clustering.fit_predict(df.values[:, 1:-2])
     df['cluster'] = results
-    idx_choies = []
+    idx_choices = []
     for clust in df.cluster.unique():
         # randomly pick n breaths from cluster
-        if len(df[df.cluster == clust]]) < breaths_per_clust:
-            idxs = list(df[df.cluster == clust]].index)
+        if len(df[df.cluster == clust]) < breaths_per_clust:
+            idxs = list(df[df.cluster == clust].index)
         else:
-            idxs = list(np.random.choice(df[df.cluster == clust]].index, size=breaths_per_clust, replace=False))
-        idx_choies.extend(idxs)
+            idxs = list(np.random.choice(df[df.cluster == clust].index, size=breaths_per_clust, replace=False))
+        idx_choices.extend(idxs)
     df = df.loc[idx_choices]
     return df
+
+
+def create_dataset_from_results(df, out_dir):
+    raw_dir = os.path.join(out_dir, 'raw')
+    try:
+        os.mkdir(raw_dir)
+    except OSError:
+        pass
+    raw_pt_dir = os.path.join(out_dir, 'raw', df.patient.unique()[0])
+    try:
+        os.mkdir(raw_pt_dir)
+    except OSError:
+        pass
+    meta_dir = os.path.join(out_dir, 'meta')
+    try:
+        os.mkdir(meta_dir)
+    except OSError:
+        pass
+    meta_pt_dir = os.path.join(out_dir, 'meta', df.patient.unique()[0])
+    try:
+        os.mkdir(meta_pt_dir)
+    except OSError:
+        pass
+
+    for filename in df.filename.unique():
+        vent_bns = df[df.filename == filename].ventBN.tolist()
+        output_filename = os.path.join(raw_pt_dir, os.path.splitext(os.path.basename(filename))[0])
+        process_breath_file(open(filename), False, output_filename, spec_vent_bns=vent_bns)
+        raw_file = output_filename + '.raw.npy'
+        proc_file = output_filename + '.processed.npy'
+        gen = read_processed_file(raw_file, proc_file)
+        meta_output_filename = os.path.join(meta_pt_dir, os.path.splitext(os.path.basename(filename))[0]) + '.csv'
+        metadata = [get_production_breath_meta(breath) for breath in gen]
+        write_breath_meta([META_HEADER] + metadata, meta_output_filename)
 
 
 def func_star(args):
@@ -65,6 +100,23 @@ def func_star(args):
 
 def clustering_func_star(args):
     return perform_clustering(*args)
+
+
+def create_dataset_func_star(args):
+    create_dataset_from_results(*args)
+
+
+def run_parallel_func(func, run_args, threads, is_debug):
+    if not is_debug:
+        pool = multiprocessing.Pool(threads)
+        results = pool.map(func, run_args)
+        pool.close()
+        pool.join()
+    else:
+        results = []
+        for run in run_args:
+            results.append(func(run))
+    return results
 
 
 def main():
@@ -76,8 +128,9 @@ def main():
     parser.add_argument('-wf', '--warn-file', default='no_data_found_warnings.txt')
     parser.add_argument('--only-patient', help='only analyze certain patient')
     parser.add_argument('--no-intermediates', help='do not use intermediates for analysis. Redo all processing', action='store_true')
-    parser.add_argument('--clusters', type=int, default=20)
-    parser.add_argument('-bp', '--breaths-per-clust', type=int, default=1000)
+    parser.add_argument('--clusters', type=int, default=50)
+    parser.add_argument('-bp', '--breaths-per-clust', type=int, default=100)
+    parser.add_argument('-o', '--output-dir', default='new_bm_dataset')
     args = parser.parse_args()
 
     if not os.path.exists(args.intermediate_results_dir):
@@ -87,28 +140,21 @@ def main():
     patient_ids = glob(os.path.join(args.data_dir, '0*RPI*'))
     patient_ids = [os.path.basename(id) for id in patient_ids if os.path.isdir(id)]
     desired_cols = ['ventBN', 'iTime', 'eTime', 'inst_RR', 'tve:tvi ratio', 'I:E ratio']
+
     all_runs = [(patient_id, args.data_dir, args.intermediate_results_dir, args.warn_file, args.no_intermediates, desired_cols) for patient_id in patient_ids]
     if args.only_patient:
         all_runs = filter(lambda x: x[0] == args.only_patient, all_runs)
-    if not args.debug:
-        pool = multiprocessing.Pool(args.threads)
-        results = pool.map(func_star, all_runs)
-        pool.close()
-        pool.join()
-    else:
-        results = []
-        for run in all_runs:
-            results.append(func_star(run))
+    results = run_parallel_func(func_star, all_runs, args.threads, args.debug)
 
     runs = [[df, args.clusters, args.breaths_per_clust] for df in results]
-    if not args.debug:
-        pool = multiprocessing.Pool(args.threads)
-        results = pool.map(clustering_func_star, runs)
-        pool.close()
-        pool.join()
-    else:
-        for run in runs:
-            clustering_func_star(run)
+    results = run_parallel_func(clustering_func_star, runs, args.threads, args.debug)
+
+    try:
+        os.mkdir(args.output_dir)
+    except OSError:
+        pass
+    runs = [[df, args.output_dir] for df in results]
+    results = run_parallel_func(create_dataset_func_star, runs, args.threads, args.debug)
 
 
 if __name__ == "__main__":
