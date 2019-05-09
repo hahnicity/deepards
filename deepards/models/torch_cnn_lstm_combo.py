@@ -17,7 +17,7 @@ class CNNLSTMNetwork(nn.Module):
         # https://discuss.pytorch.org/t/multi-layer-rnn-with-dataparallel/4450/10
         if not bm_to_linear:
             self.lstm = nn.LSTM(breath_block.inplanes+metadata_features, self.lstm_hidden_units+metadata_features, num_layers=self.lstm_layers, batch_first=True)
-            self.linear_final = nn.Linear(self.lstm_hidden_units, 2)
+            self.linear_final = nn.Linear(self.lstm_hidden_units+metadata_features, 2)
         else:
             self.lstm = nn.LSTM(breath_block.inplanes, self.lstm_hidden_units, num_layers=self.lstm_layers, batch_first=True)
             self.linear_final = nn.Linear(self.lstm_hidden_units+metadata_features, 2)
