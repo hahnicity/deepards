@@ -104,11 +104,13 @@ class ARDSRawDataset(Dataset):
         elif dataset_type == 'unpadded_sequences':
             self.get_unpadded_sequences_dataset()
         elif dataset_type == 'padded_breath_by_breath_with_full_bm_target':
-            self._get_breath_by_breath_with_breath_meta_target(self._pad_breath, ['iTime', 'eTime', 'inst_RR', 'maxF', 'I:E ratio', 'tve:tvi ratio'])
-        elif dataset_type == 'padded_breath_by_breath_with_limited_bm target':
+            self._get_breath_by_breath_with_breath_meta_target(self._pad_breath, ['iTime', 'eTime', 'inst_RR', 'I:E ratio', 'tve:tvi ratio'])
+        elif dataset_type == 'padded_breath_by_breath_with_limited_bm_target':
             self._get_breath_by_breath_with_breath_meta_target(self._pad_breath, ['iTime', 'eTime', 'inst_RR'])
         elif dataset_type == 'padded_breath_by_breath_with_flow_time_features':
             self._get_breath_by_breath_with_flow_time_features(self._pad_breath, flow_time_features)
+        else:
+            raise Exception('Unknown dataset type: {}'.format(dataset_type))
 
         if to_pickle:
             pd.to_pickle(self.all_sequences, to_pickle)

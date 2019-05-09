@@ -15,10 +15,10 @@ ards_cohort_patients = cohort[(cohort.experiment_group == 1) & (cohort['Potentia
 
 all_data_raw_path = os.path.join(args.dataset_dir, 'experiment1', 'all_data', 'raw')
 all_data_meta_path = os.path.join(args.dataset_dir, 'experiment1', 'all_data', 'meta')
-training_raw_path = os.path.join(args.dataset_dir, 'experiment1', 'training', 'raw')
-training_meta_path = os.path.join(args.dataset_dir, 'experiment1', 'training', 'meta')
-testing_raw_path = os.path.join(args.dataset_dir, 'experiment1', 'testing', 'raw')
-testing_meta_path = os.path.join(args.dataset_dir, 'experiment1', 'testing', 'meta')
+training_raw_path = os.path.join(args.dataset_dir, 'experiment1', 'prototrain', 'raw')
+training_meta_path = os.path.join(args.dataset_dir, 'experiment1', 'prototrain', 'meta')
+testing_raw_path = os.path.join(args.dataset_dir, 'experiment1', 'prototest', 'raw')
+testing_meta_path = os.path.join(args.dataset_dir, 'experiment1', 'prototest', 'meta')
 
 try:
     os.makedirs(training_raw_path)
