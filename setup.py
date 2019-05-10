@@ -12,7 +12,7 @@ setup(name='deepards',
           'pandas',
           'prettytable',
           'scipy',
-          'scikit-learn',
+          'scikit-learn<0.21.0',
           'ventmap',
       ],
       entry_points={

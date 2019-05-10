@@ -1,6 +1,0 @@
-numpy
-pandas
-prettytable
-scikit-learn<0.21.0
-scipy
-ventmap

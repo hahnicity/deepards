@@ -15,8 +15,8 @@ upgrade though. Next install things that really only get installed well with ana
 After that install everything else with pip, because for some reason numpy and pandas dependencies
 get all messed up in anaconda. Also need to install our private python pkg, ucdpvanalysis.
 
-    pip install -r requirements.txt
     pip install ucdpvanalysis-1.3.tar.gz
+    pip install -e .
 
 Now go to the deepards directory and make a results directory so that your model can store its
 results for future analysis.
