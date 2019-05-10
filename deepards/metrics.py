@@ -221,7 +221,7 @@ class DeepARDSResults(object):
         self.results = pd.DataFrame([], columns=results_cols)
         reporting_suffix = 'deepards_start_{}'.format(start_time)
         self.results_dir = os.path.join(os.path.dirname(__file__), 'results/')
-        self.reporting = Reporting(os.path.join(self.results_dir, reporting_suffix))
+        self.reporting = Reporting(self.results_dir, reporting_suffix)
         self.hyperparams = hyperparams
         self.hyperparams['start_time'] = start_time
         self.experiment_save_filename = "{}_{}.pth".format(experiment_name, start_time) if experiment_name else start_time + ".pth"
@@ -232,7 +232,7 @@ class DeepARDSResults(object):
         """
         self.aggregate_stats = self._aggregate_specific_results(self.results)
         self._print_specific_results_report(self.aggregate_stats)
-        self.reporting.save_all()
+        self.save_all()
 
     def _aggregate_specific_results(self, patient_results):
         aggregate_stats = []
