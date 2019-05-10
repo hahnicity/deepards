@@ -1,3 +1,4 @@
+from copy import copy
 import os
 
 import numpy as np
@@ -204,7 +205,7 @@ class Reporting(SavedObjects):
 
 
 class DeepARDSResults(object):
-    def __init__(self, reporting_suffix):
+    def __init__(self, start_time, experiment_name, **hyperparams):
         self.pathos = {0: 'OTHER', 1: 'ARDS'}
 
         results_cols = ["patient", "patho"]
@@ -218,7 +219,12 @@ class DeepARDSResults(object):
         # self.results is meant to be a high level dataframe of aggregated statistics
         # from our model.
         self.results = pd.DataFrame([], columns=results_cols)
-        self.reporting = Reporting(os.path.join(os.path.dirname(__file__), 'results/'), reporting_suffix)
+        reporting_suffix = 'deepards_start_{}'.format(start_time)
+        self.results_dir = os.path.join(os.path.dirname(__file__), 'results/')
+        self.reporting = Reporting(os.path.join(self.results_dir, reporting_suffix))
+        self.hyperparams = hyperparams
+        self.hyperparams['start_time'] = start_time
+        self.experiment_save_filename = "{}_{}.pth".format(experiment_name, start_time) if experiment_name else start_time + ".pth"
 
     def aggregate_classification_results(self):
         """
@@ -352,3 +358,7 @@ class DeepARDSResults(object):
             print("Patient {}: Prediction: {}, Actual: {}. Voting:\n{}".format(
                 row.patient, row.prediction, row.patho, row[patho_votes]
             ))
+
+    def save_all(self):
+        self.reporting.save_all()
+        torch.save(self.hyperparams, os.path.join(self.results_dir, self.experiment_save_filename))

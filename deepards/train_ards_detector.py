@@ -49,8 +49,14 @@ class TrainModel(object):
             raise NotImplementedError('We currently do not support saving kfold models')
 
         self.start_time = datetime.now().strftime('%s')
-        results_file_suffix = 'deepards_start_{}'.format(self.start_time)
-        self.results = DeepARDSResults(results_file_suffix)
+        self.results = DeepARDSResults(
+            self.start_time,
+            self.args.experiment_name,
+            network=self.args.network,
+            base_network=self.args.base_network,
+            batch_size=self.args.batch_size,
+            learning_rate=self.args.learning_rate,
+        )
         print('Run start time: {}'.format(self.start_time))
 
     def calc_loss(self, outputs, target):
@@ -234,7 +240,7 @@ class TrainModel(object):
         if self.n_runs > 1 and self.is_classification:
             self.results.aggregate_classification_results()
         else:
-            self.results.reporting.save_all()
+            self.results.save_all()
         print('Run start time: {}'.format(self.start_time))
 
     def _perform_testing(self, epoch_num, model, test_dataset, test_loader, run_num):
@@ -302,6 +308,7 @@ def main():
     parser.add_argument('--load-pretrained', help='load breath block from a saved model')
     parser.add_argument('-rdc','--resnet-double-conv', action='store_true')
     parser.add_argument('--bm-to-linear', action='store_true')
+    parser.add_argument('-exp', '--experiment-name')
     # XXX should probably be more explicit that we are using kfold or holdout in the future
     args = parser.parse_args()
 
