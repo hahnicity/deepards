@@ -6,12 +6,11 @@ do
     do
         for lr in .001
         do
-            for rip in 8 16 64
+            for rip in 64
             do
-                for bs in 16 32
+                for bs in 8 16 32
                 do
-                    ts python train_ards_detector.py -p /fastdata/deepards/padded_breath_by_breath-nb100-kfold.pkl -dt padded_breath_by_breath -n cnn_lstm --cuda -rip ${rip} -b ${bs} --load-pretrained resnet18-bm-limited-rip${rip}-rdc.pth -e 15 -rdc --no-print-progress --kfolds 5
-                    ts python train_ards_detector.py -p /fastdata/deepards/padded_breath_by_breath-nb100-kfold.pkl -dt padded_breath_by_breath -n cnn_lstm --cuda -rip ${rip} -b ${bs} --load-pretrained resnet18-bm-limited-rip${rip}.pth -e 15 --no-print-progress --kfolds 5
+                    ts python train_ards_detector.py -p /fastdata/deepards/padded_breath_by_breath-nb100-kfold.pkl -dt padded_breath_by_breath -n cnn_lstm --cuda -rip ${rip} -b ${bs} --load-pretrained resnet18-bm-limited-rip64-bs32.pth -e 15  --no-print-progress --kfolds 5 -exp with_pretrained_models
                 done
             done
         done
