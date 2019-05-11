@@ -50,21 +50,24 @@ all use relatively the same data, but in a variety of different ways. As of 2019
 * **stretched_breath_by_breath** - Instead of padding, breaths are stretched to the maximum extent of a certain sequence size via upsampling.
 * **spaced_padded_breath_by_breath** - Stretches the breath similar to above, but instead of upsampling, we just pad with 0's. Probably one of the weirder modeling techniques and didn't yield great results
 * **unpadded_sequences** - Instead of having 1 single breath fed into a CNN, we utilize sequences of multiple breaths until we cannot fit any more breaths in the sequence.
-* **padded_breath_by_breath_with_full_bm_target** - Utilizes the padded breath by breath method, but sets breath metadata as its target instead of an ARDS/no ARDS classification.
-* **padded_breath_by_breath_with_limited_bm_target** - Utilizes the padded breath by breath method, but sets a limited set of breath metadata as its target instead of an ARDS/no ARDS classification.
+* **padded_breath_by_breath_with_full_bm_target** - Utilizes the padded breath by breath method, but sets breath metadata as its target instead of an ARDS/no ARDS classification. This is used for pretraining a CNN and then later you can apply it to ARDS detection.
+* **padded_breath_by_breath_with_limited_bm_target** - Utilizes the padded breath by breath method, but sets a limited set of breath metadata as its target instead of an ARDS/no ARDS classification. This is used for pretraining a CNN and then later you can apply it to ARDS detection.
 * **padded_breath_by_breath_with_flow_time_features** - Utilizes the padded breath by breath method, and adds breath metadata so the model can use that for classification decisions as well.
 
 I understand that this might be a bit to understand in writing so I have also added images to help visualize how data is being processed.
 
-### Padded Breath By Breath
 ![](img/padded_breath_by_breath.png)
 
-### Stretched Breath By Breath
 ![](img/stretched_breath_by_breath.png)
 
-### Spaced Padded Breath By Breath
 Note that the spaced padding is zoomed so you can see what's happening.
 ![](img/spaced_padded_breath_by_breath.png)
 
-### Unpadded Sequences
 ![](img/unpadded_sequences.png)
+
+### Best Performers
+Currently its unclear if unpadded_sequences or padded_breath_by_breath performs best. I have been using padded_breath_by_breath more
+consistently because it was just the first thing I coded and it was unclear if unpadded_sequences hurt performance
+or not. More experiments will need to be done however to validate which performs best. A further possible advantage
+of padded_breath_by_breath is that you can pretrain CNNs using breath metadata regressors and then apply it to ARDS detection.
+I will discuss this in a later section.
