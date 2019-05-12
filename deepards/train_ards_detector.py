@@ -56,6 +56,7 @@ class TrainModel(object):
             base_network=self.args.base_network,
             batch_size=self.args.batch_size,
             learning_rate=self.args.learning_rate,
+            n_sub_batches=self.args.n_sub_batches,
         )
         print('Run start time: {}'.format(self.start_time))
 
