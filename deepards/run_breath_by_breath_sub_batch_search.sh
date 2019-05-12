@@ -6,13 +6,13 @@ do
     do
         for lr in .001
         do
-            for rip in 8 16 64
+            for rip in 64
             do
                 for bs in 16 32
                 do
-                    for nb in 20 40 50 100 200 400
+                    for nb in 100 200 400 600
                     do
-                        ts python train_ards_detector.py --train-to-pickle padded_breath_by_breath-nb${nb}-kfold.pkl -dt padded_breath_by_breath -n cnn_lstm -nb ${nb} --cuda -rip ${rip} -b ${bs} -e 15 --no-print-progress --kfolds 5 -dp ~/workspace/datasets/ardsdetection_data
+                        ts python train_ards_detector.py --train-to-pickle /fastdata/deepards/padded_breath_by_breath-nb${nb}-kfold.pkl -dt padded_breath_by_breath -n cnn_lstm -nb ${nb} --cuda -rip ${rip} -b ${bs} -e 15 --no-print-progress --kfolds 5 -dp /fastdata/ardsdetection --loader-threads 1 -exp breath_by_breath_sub_batch_search
                     done
                 done
             done
