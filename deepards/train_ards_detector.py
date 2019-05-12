@@ -100,6 +100,7 @@ class TrainModel(object):
     def run_test_epoch(self, model, test_loader, run_num):
         preds = []
         pred_idx = []
+        epoch_targets = []
         with torch.no_grad():
             for idx, (obs_idx, seq, metadata, target) in enumerate(test_loader):
                 inputs = self.cuda_wrapper(Variable(seq.float()))
@@ -109,24 +110,36 @@ class TrainModel(object):
                 if self.is_classification:
                     pred_idx.extend(obs_idx.cpu().tolist())
                     preds.extend(batch_preds)
-                self._record_test_batch_results(batch_preds, target, run_num)
+                epoch_targets = self._record_test_batch_results(batch_preds, target, run_num, epoch_targets)
 
         if self.is_classification:
             preds = pd.Series(preds, index=pred_idx)
             preds = preds.sort_index()
         else:
             self.results.print_meter_results('test_mae', run_num)
+        self._record_test_epoch_results(run_num, preds, epoch_targets)
 
         return preds
 
-    def _record_test_batch_results(self, batch_preds, target, run_num):
+    def _record_test_epoch_results(self, run_num, preds, epoch_targets):
         if self.is_classification:
-            accuracy = accuracy_score(target.argmax(dim=1).cpu().tolist(), batch_preds)
+            accuracy = accuracy_score(epoch_targets, preds)
+            self.results.update_meter('epoch_test_accuracy', run_num, accuracy)
+        else:
+            mae = mean_absolute_error(epoch_targets, preds)
+            self.results.update_meter('epoch_test_mae', run_num, mae)
+
+    def _record_test_batch_results(self, batch_preds, target, run_num, epoch_targets):
+        if self.is_classification:
+            target = target.argmax(dim=1).cpu().tolist()
+            accuracy = accuracy_score(target, batch_preds)
             self.results.update_accuracy(run_num, accuracy)
         else:
-            target = target.cpu().numpy()
+            target = target.cpu().tolist()
             mae = mean_absolute_error(target, batch_preds)
             self.results.update_meter('test_mae', run_num, mae)
+        epoch_targets.extend(target)
+        return epoch_targets
 
     def _process_test_batch_predictions(self, outputs):
         if self.args.network == 'cnn_lstm':
