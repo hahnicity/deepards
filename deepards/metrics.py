@@ -304,14 +304,6 @@ class DeepARDSResults(object):
         :param predictions: Should be a pd.Series instance with all predictions made on a per-stack basis. Should be numerically indexed in 1-1 match with y_test
         :param fold_num: Which K-fold are we in?
         """
-        fold_auc_meter = 'test_auc_fold_{}'.format(fold_num)
-        fold_prec_other_meter = 'test_prec_other_fold_{}'.format(fold_num)
-        fold_prec_ards_meter = 'test_prec_ards_fold_{}'.format(fold_num)
-        fold_sen_other_meter = 'test_sen_other_fold_{}'.format(fold_num)
-        fold_sen_ards_meter = 'test_sen_ards_fold_{}'.format(fold_num)
-        fold_f1_other_meter = 'test_f1_other_fold_{}'.format(fold_num)
-        fold_f1_ards_meter = 'test_f1_ards_fold_{}'.format(fold_num)
-
         for pt in y_test.patient.unique():
             pt_rows = y_test[y_test.patient == pt]
             pt_idx = pt_rows.index
@@ -341,13 +333,13 @@ class DeepARDSResults(object):
         chunked_results = self.results[self.results.patient.isin(y_test.patient.unique())]
         stats = self._aggregate_specific_results(chunked_results)
 
-        self.update_meter(fold_auc_meter, stats.iloc[0].auc)
-        self.update_meter(fold_prec_other_meter, stats[stats.patho == 'OTHER'].iloc[0].precision)
-        self.update_meter(fold_prec_ards_meter, stats[stats.patho == 'ARDS'].iloc[0].precision)
-        self.update_meter(fold_sen_other_meter, stats[stats.patho == 'OTHER'].iloc[0].sensitivity)
-        self.update_meter(fold_sen_ards_meter, stats[stats.patho == 'ARDS'].iloc[0].sensitivity)
-        self.update_meter(fold_f1_other_meter, stats[stats.patho == 'OTHER'].iloc[0].f1)
-        self.update_meter(fold_f1_ards_meter, stats[stats.patho == 'ARDS'].iloc[0].f1)
+        self.update_meter('test_auc', fold_num, stats.iloc[0].auc)
+        self.update_meter('test_prec_other', fold_num, stats[stats.patho == 'OTHER'].iloc[0].precision)
+        self.update_meter('test_prec_ards', fold_num, stats[stats.patho == 'ARDS'].iloc[0].precision)
+        self.update_meter('test_sen_other', fold_num, stats[stats.patho == 'OTHER'].iloc[0].sensitivity)
+        self.update_meter('test_sen_ards', fold_num, stats[stats.patho == 'ARDS'].iloc[0].sensitivity)
+        self.update_meter('test_f1_other', fold_num, stats[stats.patho == 'OTHER'].iloc[0].f1)
+        self.update_meter('test_f1_ards', fold_num, stats[stats.patho == 'ARDS'].iloc[0].f1)
 
         self._print_specific_results_report(stats)
         incorrect_pts = chunked_results[chunked_results.patho != chunked_results.prediction]
