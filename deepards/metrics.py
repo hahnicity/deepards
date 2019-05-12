@@ -309,14 +309,9 @@ class DeepARDSResults(object):
         fold_prec_ards_meter = 'test_prec_ards_fold_{}'.format(fold_num)
         fold_sen_other_meter = 'test_sen_other_fold_{}'.format(fold_num)
         fold_sen_ards_meter = 'test_sen_ards_fold_{}'.format(fold_num)
-        if not self.reporting.does_meter_exist(fold_auc_meter):
-            self.reporting.new_meter(fold_auc_meter)
-            self.reporting.new_meter(fold_prec_other_meter)
-            self.reporting.new_meter(fold_prec_ards_meter)
-            self.reporting.new_meter(fold_sen_other_meter)
-            self.reporting.new_meter(fold_sen_ards_meter)
+        fold_f1_other_meter = 'test_f1_other_fold_{}'.format(fold_num)
+        fold_f1_ards_meter = 'test_f1_ards_fold_{}'.format(fold_num)
 
-        # XXX should add metrics for individual frames as well besides just patient results
         for pt in y_test.patient.unique():
             pt_rows = y_test[y_test.patient == pt]
             pt_idx = pt_rows.index
@@ -346,11 +341,13 @@ class DeepARDSResults(object):
         chunked_results = self.results[self.results.patient.isin(y_test.patient.unique())]
         stats = self._aggregate_specific_results(chunked_results)
 
-        self.reporting.update(fold_auc_meter, stats.iloc[0].auc)
-        self.reporting.update(fold_prec_other_meter, stats[stats.patho == 'OTHER'].iloc[0].precision)
-        self.reporting.update(fold_prec_ards_meter, stats[stats.patho == 'ARDS'].iloc[0].precision)
-        self.reporting.update(fold_sen_other_meter, stats[stats.patho == 'OTHER'].iloc[0].sensitivity)
-        self.reporting.update(fold_sen_ards_meter, stats[stats.patho == 'ARDS'].iloc[0].sensitivity)
+        self.reporting.update_meter(fold_auc_meter, stats.iloc[0].auc)
+        self.reporting.update_meter(fold_prec_other_meter, stats[stats.patho == 'OTHER'].iloc[0].precision)
+        self.reporting.update_meter(fold_prec_ards_meter, stats[stats.patho == 'ARDS'].iloc[0].precision)
+        self.reporting.update_meter(fold_sen_other_meter, stats[stats.patho == 'OTHER'].iloc[0].sensitivity)
+        self.reporting.update_meter(fold_sen_ards_meter, stats[stats.patho == 'ARDS'].iloc[0].sensitivity)
+        self.reporting.update_meter(fold_f1_other_meter, stats[stats.patho == 'OTHER'].iloc[0].f1)
+        self.reporting.update_meter(fold_f1_ards_meter, stats[stats.patho == 'ARDS'].iloc[0].f1)
 
         self._print_specific_results_report(stats)
         incorrect_pts = chunked_results[chunked_results.patho != chunked_results.prediction]
