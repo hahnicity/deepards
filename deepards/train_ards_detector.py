@@ -98,42 +98,58 @@ class TrainModel(object):
                     break
 
     def run_test_epoch(self, model, test_loader, run_num):
-        preds = []
-        pred_idx = []
+        self.preds = []
+        self.pred_idx = []
+        self.epoch_targets = []
         with torch.no_grad():
             for idx, (obs_idx, seq, metadata, target) in enumerate(test_loader):
                 inputs = self.cuda_wrapper(Variable(seq.float()))
                 metadata = self.cuda_wrapper(Variable(metadata.float()))
                 outputs = model(inputs, metadata)
                 batch_preds = self._process_test_batch_predictions(outputs)
-                if self.is_classification:
-                    pred_idx.extend(obs_idx.cpu().tolist())
-                    preds.extend(batch_preds)
-                self._record_test_batch_results(batch_preds, target, run_num)
+                self._record_test_batch_results(batch_preds, target, run_num, obs_idx)
 
         if self.is_classification:
-            preds = pd.Series(preds, index=pred_idx)
-            preds = preds.sort_index()
+            self.preds = pd.Series(self.preds, index=self.pred_idx)
+            self.preds = self.preds.sort_index()
         else:
             self.results.print_meter_results('test_mae', run_num)
+        self._record_test_epoch_results(run_num)
 
-        return preds
+        # Never really makes sense to return a self.var unless its leaving the class..
+        return self.preds
 
-    def _record_test_batch_results(self, batch_preds, target, run_num):
+    def _record_test_epoch_results(self, run_num):
         if self.is_classification:
-            accuracy = accuracy_score(target.argmax(dim=1).cpu().tolist(), batch_preds)
+            accuracy = accuracy_score(self.epoch_targets, self.preds)
+            self.results.update_meter('epoch_test_accuracy', run_num, accuracy)
+        else:
+            mae = mean_absolute_error(self.epoch_targets, self.preds)
+            self.results.update_meter('epoch_test_mae', run_num, mae)
+
+    def _record_test_batch_results(self, batch_preds, target, run_num, obs_idx):
+        # this method needs to update self.epoch_targets, self.preds and self.pred_idx
+        if self.args.network == 'cnn_lstm':
+            target = target.argmax(dim=1).cpu().reshape((batch_preds.shape[0], 1)).repeat((1, batch_preds.shape[1])).view(-1)
+            obs_idx = obs_idx.reshape((batch_preds.shape[0], 1)).repeat((1, batch_preds.shape[1])).view(-1)
+            batch_preds = batch_preds.view(-1)
+
+        if self.is_classification:
+            self.pred_idx.extend(obs_idx.cpu().tolist())
+            self.preds.extend(batch_preds.tolist())
+
+        if self.is_classification:
+            accuracy = accuracy_score(target, batch_preds)
             self.results.update_accuracy(run_num, accuracy)
         else:
-            target = target.cpu().numpy()
+            target = target.cpu().tolist()
             mae = mean_absolute_error(target, batch_preds)
             self.results.update_meter('test_mae', run_num, mae)
+        self.epoch_targets.extend(target.tolist())
 
     def _process_test_batch_predictions(self, outputs):
         if self.args.network == 'cnn_lstm':
-            batch_preds = [
-                1 if int(outputs[batch_num].argmax(dim=1).sum()) >= self.args.lstm_vote_percent else 0
-                for batch_num in range(outputs.shape[0])
-            ]
+            batch_preds = outputs.argmax(dim=-1).cpu()
 
         elif self.args.network == 'cnn_linear':
             batch_preds = outputs.argmax(dim=1).cpu().tolist()

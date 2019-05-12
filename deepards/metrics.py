@@ -215,7 +215,7 @@ class DeepARDSResults(object):
                 "{}_tns".format(patho), "{}_fns".format(patho),
                 "{}_votes".format(patho),
             ])
-        results_cols += ["prediction"]
+        results_cols += ["prediction", 'pred_frac']
         # self.results is meant to be a high level dataframe of aggregated statistics
         # from our model.
         self.results = pd.DataFrame([], columns=results_cols)
@@ -257,7 +257,7 @@ class DeepARDSResults(object):
             if len(self.pathos) > 2:
                 auc = np.nan
             elif len(self.pathos) == 2:
-                auc = round(roc_auc_score(patient_results.patho.tolist(), patient_results.prediction.tolist()), 4)
+                auc = round(roc_auc_score(patient_results.patho.tolist(), patient_results.pred_frac.tolist()), 4)
             try:
                 f1 = 2 * ((precision * sensitivity) / (precision + sensitivity))
             except ZeroDivisionError:
@@ -333,8 +333,9 @@ class DeepARDSResults(object):
                     len(pt_pred[pt_pred == n]),
                 ])
 
+            pred_frac = float(pt_results[6+5*1]) / sum([pt_results[6+5*j] for j in self.pathos.keys()])
             patho_pred = np.argmax([pt_results[6 + 5*k] for k in range(len(self.pathos))])
-            pt_results.extend([patho_pred])
+            pt_results.extend([patho_pred, pred_frac])
             # If patient results exist then overwrite them. This will occur in the case
             # of running test after each train epoch. Otherwise just add new row
             if len(self.results[self.results.patient == pt]) > 0:

@@ -71,10 +71,30 @@ def visualize_results_for_start_time(start_time):
 
 def visualize_results_for_experiment(experiment_name):
     experiment_files = glob('results/{}*.pth'.format(experiment_name))
-    for filename in experiment_files:
-        experiment_params = torch.load(filename)
-        start_time = experiment_params['start_time']
-    pass
+    # haven't figured out how to do accuracy yet
+    metrics = ['auc']
+
+    for i, filename in enumerate(experiment_files):
+        print('Run {}. Params: {}'.format(i, torch.load(filename)))
+
+    for metric in metrics:
+        for i, filename in enumerate(experiment_files):
+            experiment_params = torch.load(filename)
+            start_time = experiment_params['start_time']
+
+            metric_files = glob('results/*{}_fold*_{}.pt'.format(metric, start_time))
+            vals = None
+            for f in metric_files:
+                if vals is None:
+                    vals = torch.load(f).values.numpy()
+                else:
+                    vals += torch.load(f).values.numpy()
+            av = vals / len(metric_files)
+            plt.plot(av, label='average {} run {}'.format(metric, i))
+        plt.legend()
+        plt.grid()
+        plt.ylabel(metric)
+        plt.show()
 
 
 def main():
