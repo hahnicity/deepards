@@ -1,4 +1,5 @@
 from glob import glob
+import math
 import os
 import re
 
@@ -28,7 +29,8 @@ class ARDSRawDataset(Dataset):
                  to_pickle=None,
                  train=True,
                  kfold_num=None,
-                 total_kfolds=None):
+                 total_kfolds=None,
+                 unpadded_downsample_factor=4.0):
         """
         Dataset to generate sequences of data for ARDS Detection
         """
@@ -39,6 +41,7 @@ class ARDSRawDataset(Dataset):
         self.vent_bn_frac_missing = .5
         self.frames_dropped = dict()
         self.n_sub_batches = n_sub_batches
+        self.unpadded_downsample_factor = unpadded_downsample_factor
 
         if len(all_sequences) > 0 and kfold_num is not None:
             self.get_kfold_indexes()
@@ -102,7 +105,9 @@ class ARDSRawDataset(Dataset):
         elif dataset_type == 'spaced_padded_breath_by_breath':
             self._get_breath_by_breath_dataset(self._perform_spaced_padding)
         elif dataset_type == 'unpadded_sequences':
-            self.get_unpadded_sequences_dataset()
+            self.get_unpadded_sequences_dataset(self._regular_unpadded_processing)
+        elif dataset_type == 'unpadded_downsampled_sequences':
+            self.get_unpadded_sequences_dataset(self._downsampled_unpadded_processing)
         elif dataset_type == 'padded_breath_by_breath_with_full_bm_target':
             self._get_breath_by_breath_with_breath_meta_target(self._pad_breath, ['iTime', 'eTime', 'inst_RR', 'I:E ratio', 'tve:tvi ratio'])
         elif dataset_type == 'padded_breath_by_breath_with_limited_bm_target':
@@ -119,7 +124,6 @@ class ARDSRawDataset(Dataset):
             self.get_kfold_indexes()
 
     def _get_breath_by_breath_with_flow_time_features(self, process_breath_func, bm_features):
-        # XXX there is a bunch of stuff here I can abstract
         last_patient = None
         try:
             ratio_indices = [bm_features.index(f) for f in ['I:E ratio', 'tve:tvi ratio']]
@@ -153,9 +157,6 @@ class ARDSRawDataset(Dataset):
                 # will ever learn anything useful from them. 21 is chosen because the mean
                 # number of unpadded obs we have in our train set is 138.78 and the std
                 # is 38.23. So 21 is < mu - 3*std and is divisible with 7.
-                #
-                # XXX is this not good? Should I be keeping these outliers to act as
-                # regularizers? Ultimately you have to rely on your testing+validation sets
                 if len(breath['flow']) < 21:
                     continue
                 if has_preprocessed_meta:
@@ -321,8 +322,7 @@ class ARDSRawDataset(Dataset):
         else:
             return flow[:self.seq_len]
 
-    def get_unpadded_sequences_dataset(self):
-        # XXX should probably consolidate these two funcs
+    def get_unpadded_sequences_dataset(self, processing_func):
         last_patient = None
         for fidx, filename in enumerate(self.raw_files):
             gen = read_processed_file(filename, self.processed_files[fidx])
@@ -345,16 +345,7 @@ class ARDSRawDataset(Dataset):
                 if len(breath['flow']) < 21:
                     continue
                 seq_vent_bns.append(breath['vent_bn'])
-                if (len(breath['flow']) + len(breath_arr)) < self.seq_len:
-                    breath_arr.extend(breath['flow'])
-                else:
-                    remaining = self.seq_len - len(breath_arr)
-                    breath_arr.extend(breath['flow'][:remaining])
-                    batch_arr.append((np.array(breath_arr) - self.mu) / self.std)
-                    if len(breath['flow'][remaining:]) > self.seq_len:
-                        breath_arr = breath['flow'][remaining:remaining+self.seq_len]
-                    else:
-                        breath_arr = breath['flow'][remaining:]
+                batch_arr, breath_arr = processing_func(breath['flow'], breath_arr, batch_arr)
 
                 if len(batch_arr) == self.n_sub_batches:
                     if self._should_we_drop_frame(seq_vent_bns, patient_id):
@@ -368,6 +359,24 @@ class ARDSRawDataset(Dataset):
                     self.all_sequences.append([patient_id, np.array(batch_arr).reshape((self.n_sub_batches, 1, self.seq_len)), target])
                     batch_arr = []
                     seq_vent_bns = []
+
+    def _regular_unpadded_processing(self, flow, breath_arr, batch_arr):
+        if (len(flow) + len(breath_arr)) < self.seq_len:
+            breath_arr.extend(flow)
+        else:
+            remaining = self.seq_len - len(breath_arr)
+            breath_arr.extend(flow[:remaining])
+            batch_arr.append((np.array(breath_arr) - self.mu) / self.std)
+            if len(flow[remaining:]) > self.seq_len:
+                breath_arr = flow[remaining:remaining+self.seq_len]
+            else:
+                breath_arr = flow[remaining:]
+        return batch_arr, breath_arr
+
+    def _downsampled_unpadded_processing(self, flow, breath_arr, batch_arr):
+        new_samples = int(math.ceil(len(flow) / float(self.unpadded_downsample_factor)))
+        flow = list(resample(flow, new_samples))
+        return self._regular_unpadded_processing(flow, breath_arr, batch_arr)
 
     def _get_patient_id_from_file(self, filename):
         match = re.search(r'(0\d{3}RPI\d{10})', filename)

@@ -15,6 +15,7 @@ from deepards.models.resnet import resnet18, resnet50, resnet101, resnet152
 from deepards.models.torch_cnn_lstm_combo import CNNLSTMNetwork
 from deepards.models.torch_cnn_bm_regressor import CNNRegressor
 from deepards.models.torch_cnn_linear_network import CNNLinearNetwork
+from deepards.models.torch_metadata_only_network import MetadataOnlyNetwork
 from deepards.dataset import ARDSRawDataset
 
 
@@ -134,6 +135,8 @@ class TrainModel(object):
             target = target.argmax(dim=1).cpu().reshape((batch_preds.shape[0], 1)).repeat((1, batch_preds.shape[1])).view(-1)
             obs_idx = obs_idx.reshape((batch_preds.shape[0], 1)).repeat((1, batch_preds.shape[1])).view(-1)
             batch_preds = batch_preds.view(-1)
+        elif self.args.network in ['cnn_linear', 'metadata_only']:
+            target = target.argmax(dim=1).cpu()
 
         if self.is_classification:
             self.pred_idx.extend(obs_idx.cpu().tolist())
@@ -149,11 +152,8 @@ class TrainModel(object):
         self.epoch_targets.extend(target.tolist())
 
     def _process_test_batch_predictions(self, outputs):
-        if self.args.network == 'cnn_lstm':
-            batch_preds = outputs.argmax(dim=-1).cpu()
-
-        elif self.args.network == 'cnn_linear':
-            batch_preds = outputs.argmax(dim=1).cpu().tolist()
+        if self.args.network in ['cnn_lstm', 'cnn_linear', 'metadata_only']:
+            batch_preds = outputs.argmax(dim=1).cpu()
 
         elif self.args.network == 'cnn_regressor':
             batch_preds = outputs.cpu().numpy()
@@ -187,6 +187,7 @@ class TrainModel(object):
             to_pickle=self.args.train_to_pickle,
             kfold_num=kfold_num,
             total_kfolds=self.args.kfolds,
+            unpadded_downsample_factor=self.args.downsample_factor,
         )
         # for holdout
         if self.args.test_from_pickle and self.args.kfolds is None:
@@ -211,6 +212,7 @@ class TrainModel(object):
             train=False,
             kfold_num=kfold_num,
             total_kfolds=self.args.kfolds,
+            unpadded_downsample_factor=self.args.downsample_factor,
         )
         return train_dataset, test_dataset
 
@@ -274,6 +276,8 @@ class TrainModel(object):
             model = CNNLinearNetwork(base_network, self.args.n_sub_batches, self.n_metadata_inputs)
         elif self.args.network == 'cnn_regressor':
             model = CNNRegressor(base_network, self.n_bm_features)
+        elif self.args.network == 'metadata_only':
+            model = MetadataOnlyNetwork()
 
         if self.args.load_pretrained:
             saved_model = torch.load(self.args.load_pretrained)
@@ -295,7 +299,7 @@ def main():
     parser.add_argument('-dp', '--data-path', default='/fastdata/ardsdetection', help='Path to ARDS detection dataset')
     parser.add_argument('-en', '--experiment-num', type=int, default=1)
     parser.add_argument('-c', '--cohort-file', default='cohort-description.csv')
-    parser.add_argument('-n', '--network', choices=['cnn_lstm', 'cnn_linear', 'cnn_regressor'], default='cnn_lstm')
+    parser.add_argument('-n', '--network', choices=['cnn_lstm', 'cnn_linear', 'cnn_regressor', 'metadata_only'], default='cnn_lstm')
     parser.add_argument('-e', '--epochs', type=int, default=5)
     parser.add_argument('-p', '--train-from-pickle')
     parser.add_argument('--train-to-pickle')
@@ -318,14 +322,15 @@ def main():
     parser.add_argument('--no-test-after-epochs', action='store_true')
     parser.add_argument('--debug', action='store_true', help='debug code and dont train')
     parser.add_argument('--optimizer', choices=['adam', 'sgd'], default='sgd')
-    parser.add_argument('-dt', '--dataset-type', choices=['padded_breath_by_breath', 'unpadded_sequences', 'spaced_padded_breath_by_breath', 'stretched_breath_by_breath', 'padded_breath_by_breath_with_full_bm_target', 'padded_breath_by_breath_with_limited_bm_target', 'padded_breath_by_breath_with_flow_time_features'], default='padded_breath_by_breath')
+    parser.add_argument('-dt', '--dataset-type', choices=['padded_breath_by_breath', 'unpadded_sequences', 'unpadded_downsampled_sequences', 'spaced_padded_breath_by_breath', 'stretched_breath_by_breath', 'padded_breath_by_breath_with_full_bm_target', 'padded_breath_by_breath_with_limited_bm_target', 'padded_breath_by_breath_with_flow_time_features'], default='padded_breath_by_breath')
     parser.add_argument('-lr', '--learning-rate', default=0.001, type=float)
-    parser.add_argument('--loader-threads', type=int, default=4)
+    parser.add_argument('--loader-threads', type=int, default=0, help='specify how many threads we should use to load data. Sometimes the threads fail to shutdown correctly though and this can cause memory errors. If this happens a restart works well')
     parser.add_argument('--save-model', help='save the model to a specific file')
     parser.add_argument('--load-pretrained', help='load breath block from a saved model')
     parser.add_argument('-rdc','--resnet-double-conv', action='store_true')
     parser.add_argument('--bm-to-linear', action='store_true')
     parser.add_argument('-exp', '--experiment-name')
+    parser.add_argument('--downsample-factor', type=float, default=4.0)
     # XXX should probably be more explicit that we are using kfold or holdout in the future
     args = parser.parse_args()
 
