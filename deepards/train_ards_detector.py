@@ -249,7 +249,7 @@ class TrainModel(object):
         if self.args.save_model:
             torch.save(model, self.args.save_model)
 
-        if self.n_runs > 1 and self.is_classification:
+        if self.is_classification:
             self.results.aggregate_classification_results()
         else:
             self.results.save_all()
@@ -311,7 +311,6 @@ def main():
     parser.add_argument('--kfolds', type=int)
     parser.add_argument('-rip', '--resnet-initial-planes', type=int, default=64)
     parser.add_argument('-rfpt', '--resnet-first-pool-type', default='max', choices=['max', 'avg'])
-    parser.add_argument('--lstm-vote-percent', default=70, type=int)
     parser.add_argument('--no-test-after-epochs', action='store_true')
     parser.add_argument('--debug', action='store_true', help='debug code and dont train')
     parser.add_argument('--optimizer', choices=['adam', 'sgd'], default='sgd')

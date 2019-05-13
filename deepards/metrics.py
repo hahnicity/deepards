@@ -225,14 +225,17 @@ class DeepARDSResults(object):
         self.hyperparams = hyperparams
         self.hyperparams['start_time'] = start_time
         self.experiment_save_filename = "{}_{}.pth".format(experiment_name, start_time) if experiment_name else start_time + ".pth"
+        self.start_time = start_time
 
     def aggregate_classification_results(self):
         """
         Aggregate final results for all patients into a friendly data frame
         """
-        self.aggregate_stats = self._aggregate_specific_results(self.results)
-        self._print_specific_results_report(self.aggregate_stats)
+        aggregate_stats = self._aggregate_specific_results(self.results)
+        self._print_specific_results_report(aggregate_stats)
         self.save_all()
+        self.results.to_pickle('results/{}_patient_results.pkl'.format(self.start_time))
+        aggregate_stats.to_pickle('results/{}_aggregate_results.pkl'.format(self.start_time))
 
     def _aggregate_specific_results(self, patient_results):
         aggregate_stats = []
@@ -259,7 +262,7 @@ class DeepARDSResults(object):
             elif len(self.pathos) == 2:
                 auc = round(roc_auc_score(patient_results.patho.tolist(), patient_results.pred_frac.tolist()), 4)
             try:
-                f1 = 2 * ((precision * sensitivity) / (precision + sensitivity))
+                f1 = round(2 * ((precision * sensitivity) / (precision + sensitivity)), 4)
             except ZeroDivisionError:
                 f1 = 0
             aggregate_stats.append([patho, tps, tns, fps, fns, accuracy, sensitivity, specificity, precision, auc, f1])
@@ -274,6 +277,7 @@ class DeepARDSResults(object):
         table.field_names = ['Patho', 'Accuracy', 'Recall', 'Precision', 'AUC', 'F1']
         for idx, row in stats_frame.iterrows():
             table.add_row([row.patho, row.accuracy, row.sensitivity, row.precision, row.auc, row.f1])
+        print('Patient-level stats')
         print(table)
 
     def update_loss(self, fold_num, loss):
@@ -343,11 +347,13 @@ class DeepARDSResults(object):
 
         self._print_specific_results_report(stats)
         incorrect_pts = chunked_results[chunked_results.patho != chunked_results.prediction]
-        patho_votes = ["{}_votes".format(k) for k in self.pathos.values()]
+        table = PrettyTable()
+        table.field_names = ['patient', 'actual', 'prediction'] + ['{} Votes'.format(patho) for patho in self.pathos.values()]
+
         for idx, row in incorrect_pts.iterrows():
-            print("Patient {}: Prediction: {}, Actual: {}. Voting:\n{}".format(
-                row.patient, row.prediction, row.patho, row[patho_votes]
-            ))
+            table.add_row([row.patient, row.patho, row.prediction] + [row['{}_votes'.format(patho)] for patho in self.pathos.values()])
+        print('Misclassified Patients')
+        print(table)
 
     def save_all(self):
         self.reporting.save_all()
