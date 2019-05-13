@@ -109,6 +109,33 @@ class UpConv(nn.Module):
         return x
 
 
+class Encoder(nn.Module):
+    is_paired_with_decoder = True
+
+    def __init__(self, depth, in_channels, start_filts):
+        super(Encoder, self).__init__()
+        self.down_convs = []
+        for i in range(depth):
+            ins = in_channels if i == 0 else outs
+            outs = start_filts*(2**i)
+            pooling = True if i < depth-1 else False
+
+            down_conv = DownConv(ins, outs, pooling=pooling)
+            self.down_convs.append(down_conv)
+        self.final_outchans = outs
+
+    def forward(self, x):
+        encoder_outs = []
+        for i, module in enumerate(self.down_convs):
+            x, before_pool = module(x)
+            encoder_outs.append(before_pool)
+
+        if self.is_paired_with_decoder:
+            return x, encoder_outs
+
+        return x
+
+
 class UNet(nn.Module):
     """ `UNet` class is based on https://arxiv.org/abs/1505.04597
     The U-Net is a convolutional encoder-decoder neural network.
@@ -174,17 +201,10 @@ class UNet(nn.Module):
         self.start_filts = start_filts
         self.depth = depth
 
-        self.down_convs = []
         self.up_convs = []
 
-        # create the encoder pathway and add to a list
-        for i in range(depth):
-            ins = self.in_channels if i == 0 else outs
-            outs = self.start_filts*(2**i)
-            pooling = True if i < depth-1 else False
-
-            down_conv = DownConv(ins, outs, pooling=pooling)
-            self.down_convs.append(down_conv)
+        self.encoder = Encoder(depth, in_channels, start_filts)
+        outs = self.encoder.final_outchans
 
         # create the decoder pathway and add to a list
         # - careful! decoding only requires depth-1 blocks
@@ -198,7 +218,7 @@ class UNet(nn.Module):
         self.conv_final = conv1x1(outs, self.num_classes)
 
         # add the list of modules to current module
-        self.down_convs = nn.ModuleList(self.down_convs)
+        self.down_convs = nn.ModuleList([self.encoder])
         self.up_convs = nn.ModuleList(self.up_convs)
 
         self.reset_params()
@@ -216,13 +236,9 @@ class UNet(nn.Module):
 
 
     def forward(self, x):
-        encoder_outs = []
+        x, encoder_outs = self.encoder(x)
 
-        # encoder pathway, save outputs for merging
-        for i, module in enumerate(self.down_convs):
-            x, before_pool = module(x)
-            encoder_outs.append(before_pool)
-
+        # decoder path
         for i, module in enumerate(self.up_convs):
             before_pool = encoder_outs[-(i+2)]
             x = module(before_pool, x)
@@ -237,8 +253,16 @@ if __name__ == "__main__":
     """
     testing
     """
-    model = UNet(2, depth=5, merge_mode='concat')
+    model = UNet(1, depth=5, merge_mode='concat')
     x = Variable(torch.FloatTensor(np.random.random((1, 1, 320))))
+    out = model(x)
+    print(out.shape)
+    loss = torch.sum(out)
+    loss.backward()
+    print(loss)
+    x = Variable(torch.FloatTensor(np.random.random((1, 1, 224))))
     out = model(x)
     loss = torch.sum(out)
     loss.backward()
+    print(out.shape)
+    print(loss)

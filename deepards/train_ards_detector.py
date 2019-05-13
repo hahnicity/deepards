@@ -10,13 +10,15 @@ from torch.autograd import Variable
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
+from deepards.dataset import ARDSRawDataset
 from deepards.metrics import DeepARDSResults, Reporting
+from deepards.models.autoencoder_network import AutoencoderNetwork
 from deepards.models.resnet import resnet18, resnet50, resnet101, resnet152
 from deepards.models.torch_cnn_lstm_combo import CNNLSTMNetwork
 from deepards.models.torch_cnn_bm_regressor import CNNRegressor
 from deepards.models.torch_cnn_linear_network import CNNLinearNetwork
 from deepards.models.torch_metadata_only_network import MetadataOnlyNetwork
-from deepards.dataset import ARDSRawDataset
+from deepards.models.unet import UNet
 
 
 class TrainModel(object):
@@ -234,13 +236,7 @@ class TrainModel(object):
 
     def train_and_test(self):
         for run_num, (train_dataset, train_loader, test_dataset, test_loader) in enumerate(self.get_splits()):
-            base_network = {'resnet18': resnet18, 'resnet50': resnet50, 'resnet101': resnet101, 'resnet152': resnet152}[self.args.base_network]
-            base_network = base_network(
-                initial_planes=self.args.resnet_initial_planes,
-                first_pool_type=self.args.resnet_first_pool_type,
-                double_conv_first=self.args.resnet_double_conv,
-            )
-            model = self._get_model(base_network)
+            model = self._get_model()
             optimizer = self._get_optimizer(model)
             for epoch in range(self.args.epochs):
                 self.run_train_epoch(model, train_loader, optimizer, epoch+1, run_num)
@@ -263,6 +259,23 @@ class TrainModel(object):
                 self.results.perform_patient_predictions(y_test, preds, run_num)
 
     def _get_model(self, base_network):
+        base_network = {
+            'resnet18': resnet18,
+            'resnet50': resnet50,
+            'resnet101': resnet101,
+            'resnet152': resnet152,
+            'unet': UNet,
+        }[self.args.base_network]
+
+        if 'resnet' in self.args.base_network:
+            base_network = base_network(
+                initial_planes=self.args.initial_planes,
+                first_pool_type=self.args.resnet_first_pool_type,
+                double_conv_first=self.args.resnet_double_conv,
+            )
+        elif 'unet' in self.args.base_network:
+            base_network = base_network(1, start_filts=self.args.initial_planes)
+
         if self.args.network == 'cnn_lstm':
             model = CNNLSTMNetwork(base_network, self.n_metadata_inputs, self.args.bm_to_linear)
         elif self.args.network == 'cnn_linear':
@@ -271,6 +284,8 @@ class TrainModel(object):
             model = CNNRegressor(base_network, self.n_bm_features)
         elif self.args.network == 'metadata_only':
             model = MetadataOnlyNetwork()
+        elif self.args.network == 'autoencoder':
+            model = AutoencoderNetwork(base_network)
 
         if self.args.load_pretrained:
             saved_model = torch.load(self.args.load_pretrained)
@@ -309,7 +324,7 @@ def main():
         "this means the number of contiguous flow measurements in each frame."))
     parser.add_argument('--no-print-progress', action='store_true')
     parser.add_argument('--kfolds', type=int)
-    parser.add_argument('-rip', '--resnet-initial-planes', type=int, default=64)
+    parser.add_argument('-rip', '--initial-planes', type=int, default=64)
     parser.add_argument('-rfpt', '--resnet-first-pool-type', default='max', choices=['max', 'avg'])
     parser.add_argument('--no-test-after-epochs', action='store_true')
     parser.add_argument('--debug', action='store_true', help='debug code and dont train')
