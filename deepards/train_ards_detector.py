@@ -22,15 +22,24 @@ from deepards.models.unet import UNet
 
 
 class TrainModel(object):
+    base_networks = {
+        'resnet18': resnet18,
+        'resnet50': resnet50,
+        'resnet101': resnet101,
+        'resnet152': resnet152,
+        'unet': UNet,
+    }
+
     def __init__(self, args):
         self.args = args
         self.cuda_wrapper = lambda x: x.cuda() if args.cuda else x
         self.model_cuda_wrapper = lambda x: nn.DataParallel(x).cuda() if args.cuda else x
+        self.is_classification = self.args.network not in ['autoencoder', 'cnn_regressor']
 
-        if self.args.network == 'cnn_regressor':
-            self.criterion = torch.nn.MSELoss()
-        else:
+        if self.is_classification:
             self.criterion = torch.nn.BCELoss()
+        else:
+            self.criterion = torch.nn.MSELoss()
 
         if self.args.dataset_type == 'padded_breath_by_breath_with_limited_bm_target':
             self.n_bm_features = 3
@@ -42,7 +51,6 @@ class TrainModel(object):
         else:
             self.n_metadata_inputs = 0
 
-        self.is_classification = self.args.network != 'cnn_regressor'
         self.n_runs = self.args.kfolds if self.args.kfolds is not None else 1
         # Train and test both load from the same dataset in the case of kfold
         if self.n_runs > 1:
@@ -63,13 +71,15 @@ class TrainModel(object):
         )
         print('Run start time: {}'.format(self.start_time))
 
-    def calc_loss(self, outputs, target):
+    def calc_loss(self, outputs, target, inputs):
         if self.args.loss_calc == 'all_breaths' and self.args.network == 'cnn_lstm':
             if self.args.batch_size > 1:
                 target = target.unsqueeze(1)
             return self.criterion(outputs, target.repeat((1, self.args.n_sub_batches, 1)))
         elif self.args.loss_calc == 'last_breath' and self.args.network == 'cnn_lstm':
             return self.criterion(outputs[:, -1, :], target)
+        elif self.args.network == 'autoencoder':
+            return self.criterion(outputs, inputs.view((inputs.shape[0]*inputs.shape[1], inputs.shape[2], inputs.shape[3])))
         else:
             return self.criterion(outputs, target)
 
@@ -85,7 +95,7 @@ class TrainModel(object):
                 inputs = self.cuda_wrapper(Variable(seq.float()))
                 metadata = self.cuda_wrapper(Variable(metadata.float()))
                 outputs = model(inputs, metadata)
-                loss = self.calc_loss(outputs, target)
+                loss = self.calc_loss(outputs, target, inputs)
                 loss.backward()
                 optimizer.step()
                 optimizer.zero_grad()
@@ -110,7 +120,7 @@ class TrainModel(object):
                 inputs = self.cuda_wrapper(Variable(seq.float()))
                 metadata = self.cuda_wrapper(Variable(metadata.float()))
                 outputs = model(inputs, metadata)
-                self._process_test_batch_results(outputs, target, run_num, obs_idx)
+                self._process_test_batch_results(outputs, target, inputs, run_num, obs_idx)
 
         if self.is_classification:
             self.preds = pd.Series(self.preds, index=self.pred_idx)
@@ -130,27 +140,37 @@ class TrainModel(object):
             mae = mean_absolute_error(self.epoch_targets, self.preds)
             self.results.update_meter('epoch_test_mae', run_num, mae)
 
-    def _process_test_batch_results(self, outputs, target, run_num, obs_idx):
-        if self.args.network in ['cnn_lstm', 'cnn_linear', 'metadata_only']:
+    def _process_test_batch_results(self, outputs, target, inputs, run_num, obs_idx):
+        # process batch predictions
+        if self.args.network in ['cnn_linear', 'metadata_only']:
             batch_preds = outputs.argmax(dim=-1).cpu()
+        elif self.args.network == 'cnn_lstm':
+            batch_preds = outputs.argmax(dim=-1).cpu().view(-1)
         elif self.args.network == 'cnn_regressor':
             batch_preds = outputs.cpu().numpy()
+        elif self.args.network == 'autoencoder':
+            batch_preds = outputs.cpu().numpy().squeeze(1)
 
-        # this method needs to update self.epoch_targets, self.preds and self.pred_idx
+        # process target
         if self.args.network == 'cnn_lstm':
             target = target.argmax(dim=1).cpu().reshape((batch_preds.shape[0], 1)).repeat((1, batch_preds.shape[1])).view(-1)
             obs_idx = obs_idx.reshape((batch_preds.shape[0], 1)).repeat((1, batch_preds.shape[1])).view(-1)
-            batch_preds = batch_preds.view(-1)
         elif self.args.network in ['cnn_linear', 'metadata_only']:
             target = target.argmax(dim=1).cpu()
+        elif self.args.network == 'autoencoder':
+            # reshape our inputs to match our autoencoder outputs and then squeeze out
+            # the channels dimension
+            target = inputs.view((inputs.shape[0]*inputs.shape[1], inputs.shape[2], inputs.shape[3])).squeeze(1)
+        elif self.args.network == 'cnn_regressor':
+            target = target.cpu().tolist()
 
+        # record any results
         if self.is_classification:
             self.pred_idx.extend(obs_idx.cpu().tolist())
             self.preds.extend(batch_preds.tolist())
             accuracy = accuracy_score(target, batch_preds)
             self.results.update_accuracy(run_num, accuracy)
         else:
-            target = target.cpu().tolist()
             mae = mean_absolute_error(target, batch_preds)
             self.results.update_meter('test_mae', run_num, mae)
         self.epoch_targets.extend(target.tolist())
@@ -258,14 +278,8 @@ class TrainModel(object):
                 y_test = test_dataset.get_ground_truth_df()
                 self.results.perform_patient_predictions(y_test, preds, run_num)
 
-    def _get_model(self, base_network):
-        base_network = {
-            'resnet18': resnet18,
-            'resnet50': resnet50,
-            'resnet101': resnet101,
-            'resnet152': resnet152,
-            'unet': UNet,
-        }[self.args.base_network]
+    def _get_model(self):
+        base_network = self.base_networks[self.args.base_network]
 
         if 'resnet' in self.args.base_network:
             base_network = base_network(
@@ -307,7 +321,7 @@ def main():
     parser.add_argument('-dp', '--data-path', default='/fastdata/ardsdetection', help='Path to ARDS detection dataset')
     parser.add_argument('-en', '--experiment-num', type=int, default=1)
     parser.add_argument('-c', '--cohort-file', default='cohort-description.csv')
-    parser.add_argument('-n', '--network', choices=['cnn_lstm', 'cnn_linear', 'cnn_regressor', 'metadata_only'], default='cnn_lstm')
+    parser.add_argument('-n', '--network', choices=['cnn_lstm', 'cnn_linear', 'cnn_regressor', 'metadata_only', 'autoencoder'], default='cnn_lstm')
     parser.add_argument('-e', '--epochs', type=int, default=5)
     parser.add_argument('-p', '--train-from-pickle')
     parser.add_argument('--train-to-pickle')
@@ -315,7 +329,7 @@ def main():
     parser.add_argument('--test-to-pickle')
     parser.add_argument('--cuda', action='store_true')
     parser.add_argument('-b', '--batch-size', type=int, default=16)
-    parser.add_argument('--base-network', choices=['resnet18', 'resnet50', 'resnet101', 'resnet152'], default='resnet18')
+    parser.add_argument('--base-network', choices=TrainModel.base_networks)
     parser.add_argument('-lc', '--loss-calc', choices=['all_breaths', 'last_breath'], default='all_breaths')
     parser.add_argument('-nb', '--n-sub-batches', type=int, default=100, help=(
         "number of breath-subbatches for each breath frame. This has different "
