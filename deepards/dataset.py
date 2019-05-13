@@ -66,8 +66,13 @@ class ARDSRawDataset(Dataset):
         # testing sets. Everything is just scaled to the same factor. I think that we
         # should change this but for now I'm going to let it ride for a bit.
 
-        # use precomputed scaling factors. These may change so we may need to compute them
-        # again
+        # use precomputed scaling factors. These may change so we may need to compute them again
+        #
+        # I recalculated this and factors changed after addition of 0723. I wonder if
+        # standard scaling is the right way to do this, especially because there are
+        # so many outliers.
+        # new mu: -0.23932047816188615
+        # new std: 25.40184587980919
         self.mu = -0.16998896167389502
         self.std = 25.332015720945343
         flow_time_features = [
@@ -84,14 +89,14 @@ class ARDSRawDataset(Dataset):
         # XXX this is kinda hard coded to 9 features even though in the future the #
         # features will probably change.
         self.flow_time_bm_mu = [
-            -2.26242758e+01,  4.57935143e+01,  1.06921834e+02,  5.45218237e+01,
-            1.75132215e+00,  3.95646880e+00,  1.02916020e+00,  6.28111796e-02,
-            2.07012537e+00
+            -1.12003803e+01,  2.27065158e+01,  5.41515510e+01,  2.68864330e+01,
+            8.81662707e-01,  1.98707801e+00,  5.14447986e-01,  3.08663952e-02,
+            1.03526574e+00
         ]
         self.flow_time_bm_std = [
-            1.76543292e+03, 3.57338569e+03, 8.34414226e+03, 4.25456197e+03,
-            1.36659346e+02, 3.08730757e+02, 8.03104054e+01, 4.90176856e+00,
-            1.61537969e+02
+            4.96512973e+00, 6.28153415e+00, 9.68798546e+01, 2.14905835e+01,
+            1.57385909e-01, 8.65758973e-01, 4.93673691e-01, 5.38365875e-02,
+            5.44132642e-01
         ]
         # 224 seems reasonable because it would fit well with existing img systems.
         self.seq_len = 224
