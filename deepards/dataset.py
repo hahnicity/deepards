@@ -228,9 +228,6 @@ class ARDSRawDataset(Dataset):
                 # will ever learn anything useful from them. 21 is chosen because the mean
                 # number of unpadded obs we have in our train set is 138.78 and the std
                 # is 38.23. So 21 is < mu - 3*std and is divisible with 7.
-                #
-                # XXX is this not good? Should I be keeping these outliers to act as
-                # regularizers? Ultimately you have to rely on your testing+validation sets
                 if len(breath['flow']) < 21:
                     continue
                 # XXX I should abstract this whole section where we extract a row of metadata

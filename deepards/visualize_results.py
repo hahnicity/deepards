@@ -72,7 +72,7 @@ def visualize_results_for_start_time(start_time):
 def visualize_results_for_experiment(experiment_name):
     experiment_files = glob('results/{}*.pth'.format(experiment_name))
     # haven't figured out how to do accuracy yet
-    metrics = ['auc']
+    metrics = ['auc', 'f1_ards', 'epoch_test_accuracy']
 
     for i, filename in enumerate(experiment_files):
         print('Run {}. Params: {}'.format(i, torch.load(filename)))
@@ -83,6 +83,8 @@ def visualize_results_for_experiment(experiment_name):
             start_time = experiment_params['start_time']
 
             metric_files = glob('results/*{}_fold*_{}.pt'.format(metric, start_time))
+            if len(metric_files) == 0:
+                continue
             vals = None
             for f in metric_files:
                 if vals is None:

@@ -108,8 +108,7 @@ class TrainModel(object):
                 inputs = self.cuda_wrapper(Variable(seq.float()))
                 metadata = self.cuda_wrapper(Variable(metadata.float()))
                 outputs = model(inputs, metadata)
-                batch_preds = self._process_test_batch_predictions(outputs)
-                self._record_test_batch_results(batch_preds, target, run_num, obs_idx)
+                self._process_test_batch_results(outputs, target, run_num, obs_idx)
 
         if self.is_classification:
             self.preds = pd.Series(self.preds, index=self.pred_idx)
@@ -129,7 +128,12 @@ class TrainModel(object):
             mae = mean_absolute_error(self.epoch_targets, self.preds)
             self.results.update_meter('epoch_test_mae', run_num, mae)
 
-    def _record_test_batch_results(self, batch_preds, target, run_num, obs_idx):
+    def _process_test_batch_results(self, outputs, target, run_num, obs_idx):
+        if self.args.network in ['cnn_lstm', 'cnn_linear', 'metadata_only']:
+            batch_preds = outputs.argmax(dim=-1).cpu()
+        elif self.args.network == 'cnn_regressor':
+            batch_preds = outputs.cpu().numpy()
+
         # this method needs to update self.epoch_targets, self.preds and self.pred_idx
         if self.args.network == 'cnn_lstm':
             target = target.argmax(dim=1).cpu().reshape((batch_preds.shape[0], 1)).repeat((1, batch_preds.shape[1])).view(-1)
@@ -141,8 +145,6 @@ class TrainModel(object):
         if self.is_classification:
             self.pred_idx.extend(obs_idx.cpu().tolist())
             self.preds.extend(batch_preds.tolist())
-
-        if self.is_classification:
             accuracy = accuracy_score(target, batch_preds)
             self.results.update_accuracy(run_num, accuracy)
         else:
@@ -150,15 +152,6 @@ class TrainModel(object):
             mae = mean_absolute_error(target, batch_preds)
             self.results.update_meter('test_mae', run_num, mae)
         self.epoch_targets.extend(target.tolist())
-
-    def _process_test_batch_predictions(self, outputs):
-        if self.args.network in ['cnn_lstm', 'cnn_linear', 'metadata_only']:
-            batch_preds = outputs.argmax(dim=1).cpu()
-
-        elif self.args.network == 'cnn_regressor':
-            batch_preds = outputs.cpu().numpy()
-
-        return batch_preds
 
     def get_base_datasets(self):
         # We are doing things this way by loading sequence information here so that
