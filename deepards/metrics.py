@@ -215,7 +215,7 @@ class DeepARDSResults(object):
                 "{}_tns".format(patho), "{}_fns".format(patho),
                 "{}_votes".format(patho),
             ])
-        results_cols += ["prediction", 'pred_frac']
+        results_cols += ["prediction", 'pred_frac', 'epoch_num']
         # self.results is meant to be a high level dataframe of aggregated statistics
         # from our model.
         self.results = pd.DataFrame([], columns=results_cols)
@@ -231,7 +231,8 @@ class DeepARDSResults(object):
         """
         Aggregate final results for all patients into a friendly data frame
         """
-        aggregate_stats = self._aggregate_specific_results(self.results)
+        last_epoch = sorted(self.results.epoch_num.unique())[-1]
+        aggregate_stats = self._aggregate_specific_results(self.results[self.results.epoch_num == last_epoch])
         self._print_specific_results_report(aggregate_stats)
         self.save_all()
         self.results.to_pickle('results/{}_patient_results.pkl'.format(self.start_time))
@@ -299,7 +300,7 @@ class DeepARDSResults(object):
         meter_name = '{}_fold_{}'.format(metric_name, fold_num)
         print(self.reporting.meters[meter_name])
 
-    def perform_patient_predictions(self, y_test, predictions, fold_num):
+    def perform_patient_predictions(self, y_test, predictions, fold_num, epoch_num):
         """
         After a group of patients is run through the model, record all necessary stats
         such as true positives, false positives, etc.
@@ -307,6 +308,7 @@ class DeepARDSResults(object):
         :param y_test: Should be a pd.DataFrame instance with 2 columns patient, y
         :param predictions: Should be a pd.Series instance with all predictions made on a per-stack basis. Should be numerically indexed in 1-1 match with y_test
         :param fold_num: Which K-fold are we in?
+        :param epoch_num: Which epoch number are we in
         """
         for pt in y_test.patient.unique():
             pt_rows = y_test[y_test.patient == pt]
@@ -326,15 +328,10 @@ class DeepARDSResults(object):
 
             pred_frac = float(pt_results[6+5*1]) / sum([pt_results[6+5*j] for j in self.pathos.keys()])
             patho_pred = np.argmax([pt_results[6 + 5*k] for k in range(len(self.pathos))])
-            pt_results.extend([patho_pred, pred_frac])
-            # If patient results exist then overwrite them. This will occur in the case
-            # of running test after each train epoch. Otherwise just add new row
-            if len(self.results[self.results.patient == pt]) > 0:
-                self.results.loc[self.results.patient == pt] = [pt_results]
-            else:
-                self.results.loc[len(self.results)] = pt_results
+            pt_results.extend([patho_pred, pred_frac, epoch_num])
+            self.results.loc[len(self.results)] = pt_results
 
-        chunked_results = self.results[self.results.patient.isin(y_test.patient.unique())]
+        chunked_results = self.results[(self.results.patient.isin(y_test.patient.unique())) & (self.results.epoch_num == epoch_num)]
         stats = self._aggregate_specific_results(chunked_results)
 
         self.update_meter('test_auc', fold_num, stats.iloc[0].auc)

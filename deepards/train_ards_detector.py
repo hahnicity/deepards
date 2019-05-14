@@ -83,7 +83,7 @@ class TrainModel(object):
         else:
             return self.criterion(outputs, target)
 
-    def run_train_epoch(self, model, train_loader, optimizer, epoch_num, run_num):
+    def run_train_epoch(self, model, train_loader, optimizer, epoch_num, fold_num):
         n_loss = 0
         total_loss = 0
         with torch.enable_grad():
@@ -101,7 +101,7 @@ class TrainModel(object):
                 optimizer.zero_grad()
                 # print individual loss and total loss
                 total_loss += loss.data
-                self.results.update_loss(run_num, loss.data)
+                self.results.update_loss(fold_num, loss.data)
                 n_loss += 1
                 # If the average loss jumps by > 100% then drop into debugger
                 #if n_loss > 1 and (total_loss / n_loss) / ((total_loss-loss.data) / (n_loss-1)) > 1.5:
@@ -111,7 +111,7 @@ class TrainModel(object):
                 if self.args.debug:
                     break
 
-    def run_test_epoch(self, model, test_loader, run_num):
+    def run_test_epoch(self, model, test_loader, fold_num):
         self.preds = []
         self.pred_idx = []
         self.epoch_targets = []
@@ -120,27 +120,27 @@ class TrainModel(object):
                 inputs = self.cuda_wrapper(Variable(seq.float()))
                 metadata = self.cuda_wrapper(Variable(metadata.float()))
                 outputs = model(inputs, metadata)
-                self._process_test_batch_results(outputs, target, inputs, run_num, obs_idx)
+                self._process_test_batch_results(outputs, target, inputs, fold_num, obs_idx)
 
         if self.is_classification:
             self.preds = pd.Series(self.preds, index=self.pred_idx)
             self.preds = self.preds.sort_index()
         else:
-            self.results.print_meter_results('test_mae', run_num)
-        self._record_test_epoch_results(run_num)
+            self.results.print_meter_results('test_mae', fold_num)
+        self._record_test_epoch_results(fold_num)
 
         # Never really makes sense to return a self.var unless its leaving the class..
         return self.preds
 
-    def _record_test_epoch_results(self, run_num):
+    def _record_test_epoch_results(self, fold_num):
         if self.is_classification:
             accuracy = accuracy_score(self.epoch_targets, self.preds)
-            self.results.update_meter('epoch_test_accuracy', run_num, accuracy)
+            self.results.update_meter('epoch_test_accuracy', fold_num, accuracy)
         else:
             mae = mean_absolute_error(self.epoch_targets, self.preds)
-            self.results.update_meter('epoch_test_mae', run_num, mae)
+            self.results.update_meter('epoch_test_mae', fold_num, mae)
 
-    def _process_test_batch_results(self, outputs, target, inputs, run_num, obs_idx):
+    def _process_test_batch_results(self, outputs, target, inputs, fold_num, obs_idx):
         # process batch predictions
         if self.args.network in ['cnn_linear', 'metadata_only']:
             batch_preds = outputs.argmax(dim=-1).cpu()
@@ -169,14 +169,14 @@ class TrainModel(object):
             self.pred_idx.extend(obs_idx.cpu().tolist())
             self.preds.extend(batch_preds.tolist())
             accuracy = accuracy_score(target, batch_preds)
-            self.results.update_accuracy(run_num, accuracy)
+            self.results.update_accuracy(fold_num, accuracy)
         else:
             mae = mean_absolute_error(target, batch_preds)
-            self.results.update_meter('test_mae', run_num, mae)
+            self.results.update_meter('test_mae', fold_num, mae)
             r2 = r2_score(target, batch_preds)
-            self.results.update_meter('r2', run_num, r2)
+            self.results.update_meter('r2', fold_num, r2)
             mse = mean_squared_error(target, batch_preds)
-            self.results.update_meter('test_mse', run_num, mse)
+            self.results.update_meter('test_mse', fold_num, mse)
 
         self.epoch_targets.extend(target.tolist())
 
@@ -260,12 +260,12 @@ class TrainModel(object):
             yield train_dataset, train_loader, test_dataset, test_loader
 
     def train_and_test(self):
-        for run_num, (train_dataset, train_loader, test_dataset, test_loader) in enumerate(self.get_splits()):
+        for fold_num, (train_dataset, train_loader, test_dataset, test_loader) in enumerate(self.get_splits()):
             model = self._get_model()
             optimizer = self._get_optimizer(model)
             for epoch in range(self.args.epochs):
-                self.run_train_epoch(model, train_loader, optimizer, epoch+1, run_num)
-                self._perform_testing(epoch, model, test_dataset, test_loader, run_num)
+                self.run_train_epoch(model, train_loader, optimizer, epoch+1, fold_num)
+                self._perform_testing(epoch, model, test_dataset, test_loader, fold_num)
 
         if self.args.save_model:
             torch.save(model, self.args.save_model)
@@ -276,12 +276,12 @@ class TrainModel(object):
             self.results.save_all()
         print('Run start time: {}'.format(self.start_time))
 
-    def _perform_testing(self, epoch_num, model, test_dataset, test_loader, run_num):
+    def _perform_testing(self, epoch_num, model, test_dataset, test_loader, fold_num):
         if not self.args.no_test_after_epochs or epoch_num == self.args.epochs - 1:
-            preds = self.run_test_epoch(model, test_loader, run_num)
+            preds = self.run_test_epoch(model, test_loader, fold_num)
             if self.is_classification:
                 y_test = test_dataset.get_ground_truth_df()
-                self.results.perform_patient_predictions(y_test, preds, run_num)
+                self.results.perform_patient_predictions(y_test, preds, fold_num, epoch_num)
 
     def _get_model(self):
         base_network = self.base_networks[self.args.base_network]
@@ -334,7 +334,7 @@ def main():
     parser.add_argument('--test-to-pickle')
     parser.add_argument('--cuda', action='store_true')
     parser.add_argument('-b', '--batch-size', type=int, default=16)
-    parser.add_argument('--base-network', choices=TrainModel.base_networks)
+    parser.add_argument('--base-network', choices=TrainModel.base_networks, default='resnet18')
     parser.add_argument('-lc', '--loss-calc', choices=['all_breaths', 'last_breath'], default='all_breaths')
     parser.add_argument('-nb', '--n-sub-batches', type=int, default=100, help=(
         "number of breath-subbatches for each breath frame. This has different "
