@@ -4,7 +4,7 @@ from datetime import datetime
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import accuracy_score, classification_report, mean_absolute_error, r2_score
+from sklearn.metrics import accuracy_score, classification_report, mean_absolute_error, mean_squared_error, r2_score
 import torch
 from torch.autograd import Variable
 import torch.nn as nn
@@ -173,6 +173,11 @@ class TrainModel(object):
         else:
             mae = mean_absolute_error(target, batch_preds)
             self.results.update_meter('test_mae', run_num, mae)
+            r2 = r2_score(target, batch_preds)
+            self.results.update_meter('r2', run_num, r2)
+            mse = mean_squared_error(target, batch_preds)
+            self.results.update_meter('test_mse', run_num, mse)
+
         self.epoch_targets.extend(target.tolist())
 
     def get_base_datasets(self):
