@@ -44,7 +44,7 @@ class TrainModel(object):
         if self.args.dataset_type == 'padded_breath_by_breath_with_limited_bm_target':
             self.n_bm_features = 3
         elif self.args.dataset_type == 'padded_breath_by_breath_with_full_bm_target':
-            self.n_bm_features = 6
+            self.n_bm_features = 9
 
         if self.args.dataset_type == 'padded_breath_by_breath_with_flow_time_features':
             self.n_metadata_inputs = 9
@@ -162,7 +162,7 @@ class TrainModel(object):
             # the channels dimension
             target = inputs.view((inputs.shape[0]*inputs.shape[1], inputs.shape[2], inputs.shape[3])).squeeze(1)
         elif self.args.network == 'cnn_regressor':
-            target = target.cpu().tolist()
+            target = target.cpu()
 
         # record any results
         if self.is_classification:
@@ -177,6 +177,7 @@ class TrainModel(object):
             self.results.update_meter('r2', fold_num, r2)
             mse = mean_squared_error(target, batch_preds)
             self.results.update_meter('test_mse', fold_num, mse)
+            self.results.update_meter('test_loss', fold_num, self.criterion(torch.DoubleTensor(batch_preds), target).float())
 
         self.epoch_targets.extend(target.tolist())
 
@@ -208,6 +209,7 @@ class TrainModel(object):
             kfold_num=kfold_num,
             total_kfolds=self.args.kfolds,
             unpadded_downsample_factor=self.args.downsample_factor,
+            drop_frame_if_frac_missing=self.args.no_drop_frames,
         )
         # for holdout
         if self.args.test_from_pickle and self.args.kfolds is None:
@@ -233,6 +235,7 @@ class TrainModel(object):
             kfold_num=kfold_num,
             total_kfolds=self.args.kfolds,
             unpadded_downsample_factor=self.args.downsample_factor,
+            drop_frame_if_frac_missing=self.args.no_drop_frames,
         )
         return train_dataset, test_dataset
 
@@ -357,6 +360,7 @@ def main():
     parser.add_argument('--bm-to-linear', action='store_true')
     parser.add_argument('-exp', '--experiment-name')
     parser.add_argument('--downsample-factor', type=float, default=4.0)
+    parser.add_argument('--no-drop-frames', action='store_false')
     # XXX should probably be more explicit that we are using kfold or holdout in the future
     args = parser.parse_args()
 
