@@ -141,6 +141,8 @@ class TrainModel(object):
             self.results.update_meter('epoch_test_mae', fold_num, mae)
 
     def _process_test_batch_results(self, outputs, target, inputs, fold_num, obs_idx):
+        # XXX the coding in this section is getting way too convoluted
+
         # process batch predictions
         if self.args.network in ['cnn_linear', 'metadata_only']:
             batch_preds = outputs.argmax(dim=-1).cpu()
@@ -153,8 +155,8 @@ class TrainModel(object):
 
         # process target
         if self.args.network == 'cnn_lstm':
-            target = target.argmax(dim=1).cpu().reshape((batch_preds.shape[0], 1)).repeat((1, batch_preds.shape[1])).view(-1)
-            obs_idx = obs_idx.reshape((batch_preds.shape[0], 1)).repeat((1, batch_preds.shape[1])).view(-1)
+            target = target.argmax(dim=1).cpu().reshape((outputs.shape[0], 1)).repeat((1, outputs.shape[1])).view(-1)
+            obs_idx = obs_idx.reshape((outputs.shape[0], 1)).repeat((1, outputs.shape[1])).view(-1)
         elif self.args.network in ['cnn_linear', 'metadata_only']:
             target = target.argmax(dim=1).cpu()
         elif self.args.network == 'autoencoder':
@@ -170,6 +172,7 @@ class TrainModel(object):
             self.preds.extend(batch_preds.tolist())
             accuracy = accuracy_score(target, batch_preds)
             self.results.update_accuracy(fold_num, accuracy)
+            self.results.update_meter('test_loss', fold_num, self.criterion(batch_preds.float(), target.float()))
         else:
             mae = mean_absolute_error(target, batch_preds)
             self.results.update_meter('test_mae', fold_num, mae)
