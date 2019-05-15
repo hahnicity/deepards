@@ -68,6 +68,29 @@ def visualize_results_for_start_time(start_time):
     #plt.title(
     plt.show()
 
+    glob_search = 'results/test_f1_ards*_{}*'.format(start_time)
+    results_files = glob(glob_search)
+    if len(results_files) == 0:
+        raise Exception('No f1 results files found')
+
+    all_vals = None
+    for i, f in enumerate(sorted(results_files)):
+        vals = torch.load(f).values.numpy()
+        if all_vals is None:
+            all_vals = vals
+        else:
+            all_vals += vals
+        plt.plot(vals, label='Test ARDS F1 Fold {}'.format(i+1))
+    all_vals = all_vals / len(glob(glob_search))
+    plt.plot(all_vals, label='Mean F1')
+    plt.legend()
+    plt.grid()
+    plt.ylabel('F1')
+    plt.ylim(.5, 1)
+    plt.yticks(np.arange(.5, 1.01, .05))
+    #plt.title(
+    plt.show()
+
 
 def visualize_results_for_experiment(experiment_name):
     experiment_files = glob('results/{}*.pth'.format(experiment_name))

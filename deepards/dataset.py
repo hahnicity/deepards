@@ -8,8 +8,6 @@ import pandas as pd
 from scipy.signal import resample
 from sklearn.model_selection import StratifiedKFold
 from torch.utils.data import Dataset, DataLoader
-from ventmap.breath_meta import get_production_breath_meta
-from ventmap.constants import META_HEADER
 from ventmap.raw_utils import extract_raw, read_processed_file
 
 # We will mainline all the experimental work after publication. Probably rename it as well.
@@ -30,7 +28,8 @@ class ARDSRawDataset(Dataset):
                  train=True,
                  kfold_num=None,
                  total_kfolds=None,
-                 unpadded_downsample_factor=4.0):
+                 unpadded_downsample_factor=4.0,
+                 drop_frame_if_frac_missing=True):
         """
         Dataset to generate sequences of data for ARDS Detection
         """
@@ -42,6 +41,7 @@ class ARDSRawDataset(Dataset):
         self.frames_dropped = dict()
         self.n_sub_batches = n_sub_batches
         self.unpadded_downsample_factor = unpadded_downsample_factor
+        self.drop_frame_if_frac_missing = drop_frame_if_frac_missing
 
         if len(all_sequences) > 0 and kfold_num is not None:
             self.get_kfold_indexes()
@@ -114,7 +114,7 @@ class ARDSRawDataset(Dataset):
         elif dataset_type == 'unpadded_downsampled_sequences':
             self.get_unpadded_sequences_dataset(self._downsampled_unpadded_processing)
         elif dataset_type == 'padded_breath_by_breath_with_full_bm_target':
-            self._get_breath_by_breath_with_breath_meta_target(self._pad_breath, ['iTime', 'eTime', 'inst_RR', 'I:E ratio', 'tve:tvi ratio'])
+            self._get_breath_by_breath_with_breath_meta_target(self._pad_breath, flow_time_features)
         elif dataset_type == 'padded_breath_by_breath_with_limited_bm_target':
             self._get_breath_by_breath_with_breath_meta_target(self._pad_breath, ['iTime', 'eTime', 'inst_RR'])
         elif dataset_type == 'padded_breath_by_breath_with_flow_time_features':
@@ -209,7 +209,7 @@ class ARDSRawDataset(Dataset):
             ratio_indices = [bm_features.index(f) for f in ['I:E ratio', 'tve:tvi ratio']]
         except ValueError:
             ratio_indices = []
-        indices = [META_HEADER.index(feature) for feature in bm_features]
+        indices = [EXPERIMENTAL_META_HEADER.index(feature) for feature in bm_features]
         for fidx, filename in enumerate(self.raw_files):
             gen = read_processed_file(filename, self.processed_files[fidx])
             patient_id = self._get_patient_id_from_file(filename)
@@ -235,12 +235,12 @@ class ARDSRawDataset(Dataset):
                     try:
                         meta = processed_meta[bidx]
                     except IndexError:
-                        meta = np.array(get_production_breath_meta(breath))
+                        meta = np.array(get_experimental_breath_meta(breath))
                     # sanity check
                     if int(meta[0]) != breath['rel_bn']:
-                        meta = np.array(get_production_breath_meta(breath))
+                        meta = np.array(get_experimental_breath_meta(breath))
                 else:
-                    meta = np.array(get_production_breath_meta(breath))
+                    meta = np.array(get_experimental_breath_meta(breath))
 
                 meta = meta[indices].astype(np.float)
                 if np.any(np.isinf(meta) | np.isnan(meta)):
@@ -253,6 +253,8 @@ class ARDSRawDataset(Dataset):
 
                 flow = (np.array(breath['flow']) - self.mu) / self.std
                 b_seq = process_breath_func(flow)
+                # no scaling of the breath meta is required here because we are just doing
+                # regression
                 self.all_sequences.append([patient_id, b_seq.reshape((1, self.seq_len)), meta])
 
     def _get_breath_by_breath_dataset(self, process_breath_func):
@@ -388,6 +390,9 @@ class ARDSRawDataset(Dataset):
             raise ValueError('could not find patient id in file: {}'.format(filename))
 
     def _should_we_drop_frame(self, seq_vent_bns, patient_id):
+        if not self.drop_frame_if_frac_missing:
+            return False
+
         seq_vent_bns = np.array(seq_vent_bns)
         diffs = seq_vent_bns[:-1] + 1 - seq_vent_bns[1:]
         # do not include the stack if it is discontiguous to too large a degree

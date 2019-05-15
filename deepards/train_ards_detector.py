@@ -33,7 +33,7 @@ class TrainModel(object):
         if self.args.dataset_type == 'padded_breath_by_breath_with_limited_bm_target':
             self.n_bm_features = 3
         elif self.args.dataset_type == 'padded_breath_by_breath_with_full_bm_target':
-            self.n_bm_features = 6
+            self.n_bm_features = 9
 
         if self.args.dataset_type == 'padded_breath_by_breath_with_flow_time_features':
             self.n_metadata_inputs = 9
@@ -148,9 +148,10 @@ class TrainModel(object):
             accuracy = accuracy_score(target, batch_preds)
             self.results.update_accuracy(run_num, accuracy)
         else:
-            target = target.cpu().tolist()
+            target = target.cpu()
             mae = mean_absolute_error(target, batch_preds)
             self.results.update_meter('test_mae', run_num, mae)
+            self.results.update_meter('test_loss', run_num, self.criterion(torch.DoubleTensor(batch_preds), target).float())
         self.epoch_targets.extend(target.tolist())
 
     def get_base_datasets(self):
@@ -181,6 +182,7 @@ class TrainModel(object):
             kfold_num=kfold_num,
             total_kfolds=self.args.kfolds,
             unpadded_downsample_factor=self.args.downsample_factor,
+            drop_frame_if_frac_missing=self.args.no_drop_frames,
         )
         # for holdout
         if self.args.test_from_pickle and self.args.kfolds is None:
@@ -206,6 +208,7 @@ class TrainModel(object):
             kfold_num=kfold_num,
             total_kfolds=self.args.kfolds,
             unpadded_downsample_factor=self.args.downsample_factor,
+            drop_frame_if_frac_missing=self.args.no_drop_frames,
         )
         return train_dataset, test_dataset
 
@@ -323,6 +326,7 @@ def main():
     parser.add_argument('--bm-to-linear', action='store_true')
     parser.add_argument('-exp', '--experiment-name')
     parser.add_argument('--downsample-factor', type=float, default=4.0)
+    parser.add_argument('--no-drop-frames', action='store_false')
     # XXX should probably be more explicit that we are using kfold or holdout in the future
     args = parser.parse_args()
 
