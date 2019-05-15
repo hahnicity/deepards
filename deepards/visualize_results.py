@@ -94,16 +94,21 @@ def visualize_results_for_start_time(start_time):
 
 def visualize_results_for_experiment(experiment_name):
     experiment_files = glob('results/{}*.pth'.format(experiment_name))
+    experiment_data = [torch.load(f) for f in experiment_files]
+    for i, exp_data in enumerate(experiment_data):
+        if 'n_sub_batches' not in exp_data:
+            exp_data['n_sub_batches'] = np.nan
+    experiment_data = sorted(experiment_data, key=lambda x: (x['n_sub_batches'], x['batch_size'], x['learning_rate']))
+
     # haven't figured out how to do accuracy yet
     metrics = ['auc', 'f1_ards', 'epoch_test_accuracy']
 
-    for i, filename in enumerate(experiment_files):
-        print('Run {}. Params: {}'.format(i, torch.load(filename)))
+    for i, exp_data in enumerate(experiment_data):
+        print('Run {}. Params: {}'.format(i, exp_data))
 
     for metric in metrics:
-        for i, filename in enumerate(experiment_files):
-            experiment_params = torch.load(filename)
-            start_time = experiment_params['start_time']
+        for i, exp_data in enumerate(experiment_data):
+            start_time = exp_data['start_time']
 
             metric_files = glob('results/*{}_fold*_{}.pt'.format(metric, start_time))
             if len(metric_files) == 0:
