@@ -130,6 +130,8 @@ def main():
     print('Analyze all breaths for patients')
     patient_ids = glob(os.path.join(args.data_dir, '0*RPI*'))
     patient_ids = [os.path.basename(id) for id in patient_ids if os.path.isdir(id)]
+    # We use these 5 features because they are part of our established fetaure set, whereas
+    # the other 4/9 are part of the experimental feature set.
     desired_cols = ['ventBN', 'iTime', 'eTime', 'inst_RR', 'tve:tvi ratio', 'I:E ratio']
 
     try:

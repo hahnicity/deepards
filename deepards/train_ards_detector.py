@@ -68,6 +68,7 @@ class TrainModel(object):
             batch_size=self.args.batch_size,
             learning_rate=self.args.learning_rate,
             n_sub_batches=self.args.n_sub_batches,
+            weight_decay=self.args.weight_decay,
         )
         print('Run start time: {}'.format(self.start_time))
 
@@ -323,7 +324,7 @@ class TrainModel(object):
         if self.args.optimizer == 'adam':
             optimizer = torch.optim.Adam(model.parameters(), lr=self.args.learning_rate)
         elif self.args.optimizer == 'sgd':
-            optimizer = torch.optim.SGD(model.parameters(), lr=self.args.learning_rate, momentum=0.9, weight_decay=0.0001, nesterov=True)
+            optimizer = torch.optim.SGD(model.parameters(), lr=self.args.learning_rate, momentum=0.9, weight_decay=self.args.weight_decay, nesterov=True)
         return optimizer
 
 
@@ -364,6 +365,7 @@ def main():
     parser.add_argument('-exp', '--experiment-name')
     parser.add_argument('--downsample-factor', type=float, default=4.0)
     parser.add_argument('--no-drop-frames', action='store_false')
+    parser.add_argument('-wd', '--weight-decay', type=float, default=.0001)
     # XXX should probably be more explicit that we are using kfold or holdout in the future
     args = parser.parse_args()
 
