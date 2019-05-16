@@ -175,6 +175,7 @@ class TrainModel(object):
             self.results.update_accuracy(fold_num, accuracy)
             self.results.update_meter('test_loss', fold_num, self.criterion(batch_preds.float(), target.float()))
         else:
+            self.preds.extend(batch_preds.tolist())
             mae = mean_absolute_error(target, batch_preds)
             self.results.update_meter('test_mae', fold_num, mae)
             r2 = r2_score(target, batch_preds)
