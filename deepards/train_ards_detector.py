@@ -11,6 +11,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from deepards.dataset import ARDSRawDataset
+from deepards.loss import VacillatingLoss
 from deepards.metrics import DeepARDSResults, Reporting
 from deepards.models.autoencoder_network import AutoencoderNetwork
 from deepards.models.resnet import resnet18, resnet50, resnet101, resnet152
