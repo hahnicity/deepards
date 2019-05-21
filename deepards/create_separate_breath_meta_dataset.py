@@ -10,6 +10,8 @@ from sklearn.cluster import KMeans
 from ventmap.breath_meta import get_file_breath_meta, get_production_breath_meta, META_HEADER, write_breath_meta
 from ventmap.raw_utils import process_breath_file, read_processed_file
 
+from deepards.create_breath_meta_dataset_split import perform_breath_meta_splits
+
 
 def collect_data(patient_id, data_dir, intermediate_results_dir, warn_file, no_intermediates, desired_cols, nclust, breaths_per_clust, out_dir):
     intermediate_file = os.path.join(intermediate_results_dir, patient_id) + '.pkl'
@@ -62,22 +64,22 @@ def collect_data(patient_id, data_dir, intermediate_results_dir, warn_file, no_i
         idx_choices.extend(idxs)
     df = df.loc[idx_choices]
 
-    raw_dir = os.path.join(out_dir, 'raw')
+    raw_dir = os.path.join(out_dir, 'experiment1', 'all_data', 'raw')
     try:
-        os.mkdir(raw_dir)
+        os.makedirs(raw_dir)
     except OSError:
         pass
-    raw_pt_dir = os.path.join(out_dir, 'raw', df.patient.unique()[0])
+    raw_pt_dir = os.path.join(raw_dir, df.patient.unique()[0])
     try:
         os.mkdir(raw_pt_dir)
     except OSError:
         pass
-    meta_dir = os.path.join(out_dir, 'meta')
+    meta_dir = os.path.join(out_dir, 'experiment1', 'all_data', 'meta')
     try:
         os.mkdir(meta_dir)
     except OSError:
         pass
-    meta_pt_dir = os.path.join(out_dir, 'meta', df.patient.unique()[0])
+    meta_pt_dir = os.path.join(meta_dir, df.patient.unique()[0])
     try:
         os.mkdir(meta_pt_dir)
     except OSError:
@@ -143,6 +145,7 @@ def main():
     if args.only_patient:
         all_runs = filter(lambda x: x[0] == args.only_patient, all_runs)
     run_parallel_func(func_star, all_runs, args.threads, args.debug)
+    perform_breath_meta_splits(args.output_dir)
 
 
 if __name__ == "__main__":
