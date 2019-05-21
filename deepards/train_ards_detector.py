@@ -187,7 +187,9 @@ class TrainModel(object):
             self.results.update_meter('r2', fold_num, r2)
             mse = mean_squared_error(target, batch_preds)
             self.results.update_meter('test_mse', fold_num, mse)
-            self.results.update_meter('test_loss', fold_num, self.criterion(torch.DoubleTensor(batch_preds), target).float())
+            # XXX I'm having difficulty on types here between the autoencoder and the
+            # breath meta regressor. So just punt on this for now
+            #self.results.update_meter('test_loss', fold_num, self.criterion(torch.DoubleTensor(batch_preds), target).float())
 
         self.epoch_targets.extend(target.tolist())
 
