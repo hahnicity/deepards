@@ -177,7 +177,8 @@ class TrainModel(object):
             self.preds.extend(batch_preds.tolist())
             accuracy = accuracy_score(target, batch_preds)
             self.results.update_accuracy(fold_num, accuracy)
-            self.results.update_meter('test_loss', fold_num, self.criterion(batch_preds.float(), target.float()))
+            # XXX fix so we can get an accurate test loss. What we have now is not test loss
+            #self.results.update_meter('test_loss', fold_num, self.criterion(outputs.float(), target.float()))
         else:
             self.preds.extend(batch_preds.tolist())
             mae = mean_absolute_error(target, batch_preds)
