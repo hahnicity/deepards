@@ -37,7 +37,9 @@ class TrainModel(object):
         self.model_cuda_wrapper = lambda x: nn.DataParallel(x).cuda() if args.cuda else x
         self.is_classification = self.args.network not in ['autoencoder', 'cnn_regressor']
 
-        if self.is_classification:
+        if self.is_classification and self.args.loss_func == 'vacillating':
+            self.criterion = VacillatingLoss(torch.FloatTensor([self.args.valpha]))
+        elif self.is_classification and self.args.loss_func == 'bce':
             self.criterion = torch.nn.BCELoss()
         else:
             self.criterion = torch.nn.MSELoss()
@@ -368,6 +370,8 @@ def main():
     parser.add_argument('--downsample-factor', type=float, default=4.0)
     parser.add_argument('--no-drop-frames', action='store_false')
     parser.add_argument('-wd', '--weight-decay', type=float, default=.0001)
+    parser.add_argument('-loss', '--loss-func', choices=['bce', 'vacillating'], default='bce', help='This option only works for classification. Choose the loss function you want to use for classification purposes: BCE or vacillating loss.')
+    parser.add_argument('--valpha', type=float, default=float('Inf'), help='alpha value to use for vacillating loss. Lower alpha values mean vacillating loss will contribute less to overall loss of the system. Default value is inf')
     # XXX should probably be more explicit that we are using kfold or holdout in the future
     args = parser.parse_args()
 
