@@ -122,6 +122,11 @@ class Encoder(nn.Module):
 
             down_conv = DownConv(ins, outs, pooling=pooling)
             self.down_convs.append(down_conv)
+            # need to use __setattr__ because self.down_convs wont convert model to
+            # cuda if we are using GPUs. So directly attach down convs to the module
+            # This is probably because of the way we're declaring the layers and
+            # not making them directly attached to self.
+            self.__setattr__("downconv{}".format(i), downconv)
         self.final_outchans = outs
 
     def forward(self, x):
