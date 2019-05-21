@@ -306,7 +306,7 @@ class TrainModel(object):
                 double_conv_first=self.args.resnet_double_conv,
             )
         elif 'unet' in self.args.base_network:
-            base_network = base_network(1, start_filts=self.args.initial_planes)
+            base_network = base_network(1)
 
         if self.args.network == 'cnn_lstm':
             model = CNNLSTMNetwork(base_network, self.n_metadata_inputs, self.args.bm_to_linear)
