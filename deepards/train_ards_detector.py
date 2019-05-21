@@ -359,7 +359,7 @@ def main():
     parser.add_argument('--no-test-after-epochs', action='store_true')
     parser.add_argument('--debug', action='store_true', help='debug code and dont train')
     parser.add_argument('--optimizer', choices=['adam', 'sgd'], default='sgd')
-    parser.add_argument('-dt', '--dataset-type', choices=['padded_breath_by_breath', 'unpadded_sequences', 'unpadded_downsampled_sequences', 'spaced_padded_breath_by_breath', 'stretched_breath_by_breath', 'padded_breath_by_breath_with_full_bm_target', 'padded_breath_by_breath_with_limited_bm_target', 'padded_breath_by_breath_with_flow_time_features'], default='padded_breath_by_breath')
+    parser.add_argument('-dt', '--dataset-type', choices=['padded_breath_by_breath', 'unpadded_sequences', 'unpadded_downsampled_sequences', 'spaced_padded_breath_by_breath', 'stretched_breath_by_breath', 'padded_breath_by_breath_with_full_bm_target', 'padded_breath_by_breath_with_limited_bm_target', 'padded_breath_by_breath_with_flow_time_features', 'unpadded_downsampled_autoencoder_sequences'], default='padded_breath_by_breath')
     parser.add_argument('-lr', '--learning-rate', default=0.001, type=float)
     parser.add_argument('--loader-threads', type=int, default=0, help='specify how many threads we should use to load data. Sometimes the threads fail to shutdown correctly though and this can cause memory errors. If this happens a restart works well')
     parser.add_argument('--save-model', help='save the model to a specific file')

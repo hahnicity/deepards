@@ -104,15 +104,17 @@ class ARDSRawDataset(Dataset):
         # 224 seems reasonable because it would fit well with existing img systems.
         self.seq_len = 224
         if dataset_type == 'padded_breath_by_breath':
-            self._get_breath_by_breath_dataset(self._pad_breath)
+            self._get_breath_by_breath_dataset(self._pad_breath, self._pathophysiology_target)
         elif dataset_type == 'stretched_breath_by_breath':
-            self._get_breath_by_breath_dataset(self._stretch_breath)
+            self._get_breath_by_breath_dataset(self._stretch_breath, self._pathophysiology_target)
         elif dataset_type == 'spaced_padded_breath_by_breath':
-            self._get_breath_by_breath_dataset(self._perform_spaced_padding)
+            self._get_breath_by_breath_dataset(self._perform_spaced_padding, self._pathophysiology_target)
         elif dataset_type == 'unpadded_sequences':
-            self.get_unpadded_sequences_dataset(self._regular_unpadded_processing)
+            self.get_unpadded_sequences_dataset(self._regular_unpadded_processing, self._pathophysiology_target)
         elif dataset_type == 'unpadded_downsampled_sequences':
-            self.get_unpadded_sequences_dataset(self._downsampled_unpadded_processing)
+            self.get_unpadded_sequences_dataset(self._downsampled_unpadded_processing, self._pathophysiology_target)
+        elif dataset_type == 'unpadded_downsampled_autoencoder_sequences':
+            self.get_unpadded_sequences_dataset(self._downsampled_unpadded_processing, self._autoencoder_target)
         elif dataset_type == 'padded_breath_by_breath_with_full_bm_target':
             self._get_breath_by_breath_with_breath_meta_target(self._pad_breath, flow_time_features)
         elif dataset_type == 'padded_breath_by_breath_with_limited_bm_target':
@@ -257,7 +259,7 @@ class ARDSRawDataset(Dataset):
                 # regression
                 self.all_sequences.append([patient_id, b_seq.reshape((1, self.seq_len)), meta])
 
-    def _get_breath_by_breath_dataset(self, process_breath_func):
+    def _get_breath_by_breath_dataset(self, process_breath_func, target_func):
         """
         Process data for patient where each component of a sub-batch is a breath padded
         to a desired sequence length. Breaths are batched in accordance to how many
@@ -271,9 +273,7 @@ class ARDSRawDataset(Dataset):
                 batch_arr = []
                 seq_vent_bns = []
             last_patient = patient_id
-            patient_row = self.cohort[self.cohort['Patient Unique Identifier'] == patient_id]
-            patient_row = patient_row.iloc[0]
-            patho = 1 if patient_row['Pathophysiology'] == 'ARDS' else 0
+            target = target_func(patient_id)
 
             # XXX need to eventually add cutoffs based on vent time or Berlin time
             for bidx, breath in enumerate(gen):
@@ -293,11 +293,20 @@ class ARDSRawDataset(Dataset):
                         batch_arr = []
                         seq_vent_bns = []
                         continue
-                    target = np.zeros(2)
-                    target[patho] = 1
                     self.all_sequences.append([patient_id, np.array(batch_arr).reshape((self.n_sub_batches, 1, self.seq_len)), target])
                     batch_arr = []
                     seq_vent_bns = []
+
+    def _autoencoder_target(self, _):
+        return np.array([np.nan, np.nan])
+
+    def _pathophysiology_target(self, patient_id):
+        patient_row = self.cohort[self.cohort['Patient Unique Identifier'] == patient_id]
+        patient_row = patient_row.iloc[0]
+        patho = 1 if patient_row['Pathophysiology'] == 'ARDS' else 0
+        target = np.zeros(2)
+        target[patho] = 1
+        return target
 
     def _pad_breath(self, flow):
         if self.seq_len - len(flow) >= 0:
@@ -326,7 +335,7 @@ class ARDSRawDataset(Dataset):
         else:
             return flow[:self.seq_len]
 
-    def get_unpadded_sequences_dataset(self, processing_func):
+    def get_unpadded_sequences_dataset(self, processing_func, target_func):
         last_patient = None
         for fidx, filename in enumerate(self.raw_files):
             gen = read_processed_file(filename, self.processed_files[fidx])
@@ -336,9 +345,7 @@ class ARDSRawDataset(Dataset):
                 breath_arr = []
                 seq_vent_bns = []
             last_patient = patient_id
-            patient_row = self.cohort[self.cohort['Patient Unique Identifier'] == patient_id]
-            patient_row = patient_row.iloc[0]
-            patho = 1 if patient_row['Pathophysiology'] == 'ARDS' else 0
+            target = target_func(patient_id)
 
             # XXX need to eventually add cutoffs based on vent time or Berlin time
             for bidx, breath in enumerate(gen):
@@ -358,8 +365,6 @@ class ARDSRawDataset(Dataset):
                         batch_arr = []
                         seq_vent_bns = []
                         continue
-                    target = np.zeros(2)
-                    target[patho] = 1
                     self.all_sequences.append([patient_id, np.array(batch_arr).reshape((self.n_sub_batches, 1, self.seq_len)), target])
                     batch_arr = []
                     seq_vent_bns = []
