@@ -38,7 +38,7 @@ class TrainModel(object):
         self.is_classification = self.args.network not in ['autoencoder', 'cnn_regressor']
 
         if self.is_classification and self.args.loss_func == 'vacillating':
-            self.criterion = VacillatingLoss(torch.FloatTensor([self.args.valpha]))
+            self.criterion = VacillatingLoss(self.cuda_wrapper(torch.FloatTensor([self.args.valpha])))
         elif self.is_classification and self.args.loss_func == 'bce':
             self.criterion = torch.nn.BCELoss()
         else:
