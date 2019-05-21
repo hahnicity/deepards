@@ -2,6 +2,8 @@ import argparse
 from glob import glob
 import multiprocessing
 import os
+import shutil
+import subprocess
 from warnings import warn
 
 import numpy as np
@@ -95,6 +97,9 @@ def main():
     parser.add_argument('--no-intermediates', help='do not use intermediates for analysis. Redo all processing', action='store_true')
     parser.add_argument('-bp', '--breaths-per-file', type=int, default=64)
     parser.add_argument('-o', '--output-dir', default='autoencoder_dataset')
+    parser.add_argument('--split-only', action='store_true', help='only split the datasets dont do any analysis')
+    parser.add_argument('--cohort-description', default='cohort-description.csv')
+    parser.add_argument('-e', '--experiment-num', type=int, default=1)
     args = parser.parse_args()
 
     if not os.path.exists(args.intermediate_results_dir):
@@ -111,10 +116,41 @@ def main():
     except OSError:
         pass
 
-    all_runs = [(patient_id, args.data_dir, args.intermediate_results_dir, args.warn_file, args.no_intermediates, args.breaths_per_file, args.output_dir) for patient_id in patient_ids]
-    if args.only_patient:
-        all_runs = filter(lambda x: x[0] == args.only_patient, all_runs)
-    run_parallel_func(func_star, all_runs, args.threads, args.debug)
+    if not args.split_only:
+        all_runs = [(patient_id, args.data_dir, args.intermediate_results_dir, args.warn_file, args.no_intermediates, args.breaths_per_file, args.output_dir) for patient_id in patient_ids]
+        if args.only_patient:
+            all_runs = filter(lambda x: x[0] == args.only_patient, all_runs)
+        run_parallel_func(func_star, all_runs, args.threads, args.debug)
+
+    # perform dataset splits and setup dirs in manner same as ardsdetection dataset
+    desc = pd.read_csv(args.cohort_description)
+    cohort_patient_ids = desc[(desc['Potential Enrollment'] == 'Y') & (desc['experiment_group'] == args.experiment_num)]['Patient Unique Identifier']
+    # this code just removes any patient who didnt have data from the cohort
+    cohort_patient_ids = set(patient_ids).intersection(cohort_patient_ids)
+    non_cohort_ids = set(patient_ids).difference(cohort_patient_ids)
+    all_data_dir = os.path.join(args.output_dir, 'experiment{}'.format(args.experiment_num), 'all_data')
+    try:
+        os.makedirs(all_data_dir)
+    except OSError:
+        pass
+    shutil.move(os.path.join(args.output_dir, 'raw'), all_data_dir)
+
+    train_raw_dir = os.path.join(args.output_dir, 'experiment{}'.format(args.experiment_num), 'prototrain', 'raw')
+    test_raw_dir = os.path.join(args.output_dir, 'experiment{}'.format(args.experiment_num), 'prototest', 'raw')
+    try:
+        os.makedirs(train_raw_dir)
+    except OSError:
+        pass
+    try:
+        os.makedirs(test_raw_dir)
+    except OSError:
+        pass
+
+    for patient in non_cohort_ids:
+        proc = subprocess.Popen(['ln', '-s', os.path.abspath(os.path.join(all_data_dir, 'raw', patient)), os.path.abspath(train_raw_dir)])
+
+    for patient in cohort_patient_ids:
+        proc = subprocess.Popen(['ln', '-s', os.path.abspath(os.path.join(all_data_dir, 'raw', patient)), os.path.abspath(test_raw_dir)])
 
 
 if __name__ == "__main__":
