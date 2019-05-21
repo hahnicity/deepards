@@ -105,9 +105,9 @@ class Meter(object):
             self._last_value.copy_(data)
             self.values = torch.cat((self.values, data.cpu().view(1)), 0)
         else:
-            self._last_value.fill_(data)
-            self.values = torch.cat((self.values, torch.FloatTensor([data])), 0)
-        self._total.add_(self._last_value)
+            self._last_value = torch.FloatTensor([data])
+            self.values = torch.cat((self.values, self._last_value), 0)
+        self._total += self._last_value
 
     def value(self):
         if self.cumulative:
