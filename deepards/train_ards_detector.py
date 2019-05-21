@@ -72,6 +72,7 @@ class TrainModel(object):
             learning_rate=self.args.learning_rate,
             n_sub_batches=self.args.n_sub_batches,
             weight_decay=self.args.weight_decay,
+            valpha=self.args.valpha,
         )
         print('Run start time: {}'.format(self.start_time))
 

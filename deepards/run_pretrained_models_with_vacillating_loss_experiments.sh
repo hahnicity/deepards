@@ -12,7 +12,7 @@ do
                 do
                     for valpha in .5 1 2
                     do
-                        ts python train_ards_detector.py -p padded_breath_by_breath-nb100-kfold.pkl -dt padded_breath_by_breath -n cnn_lstm --cuda -rip ${rip} -b ${bs} -wd ${wd} --load-pretrained resnet18-bm-limited-rip64-bs32.pth -e 15  --no-print-progress --kfolds 5 -exp with_pretrained_weight_decay -loss vacillating --valpha ${valpha}
+                        ts python train_ards_detector.py -p padded_breath_by_breath-nb100-kfold.pkl -dt padded_breath_by_breath -n cnn_lstm --cuda -rip ${rip} -b ${bs} -wd ${wd} --load-pretrained resnet18-bm-limited-rip64-bs32.pth -e 15  --no-print-progress --kfolds 5 -exp vacillating_loss -loss vacillating --valpha ${valpha}
                     done
                 done
             done
