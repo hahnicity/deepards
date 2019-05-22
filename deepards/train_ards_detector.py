@@ -301,7 +301,14 @@ class TrainModel(object):
     def _get_model(self):
         base_network = self.base_networks[self.args.base_network]
 
-        if 'resnet' in self.args.base_network:
+        if self.args.load_pretrained:
+            saved_model = torch.load(self.args.load_pretrained)
+            if isinstance(saved_model, torch.nn.DataParallel):
+                saved_model = saved_model.module
+            base_network = saved_model.breath_block
+            # XXX tmp debug
+            base_network.n_out_filters = 512
+        elif 'resnet' in self.args.base_network:
             base_network = base_network(
                 initial_planes=self.args.initial_planes,
                 first_pool_type=self.args.resnet_first_pool_type,
@@ -311,7 +318,7 @@ class TrainModel(object):
             base_network = base_network(1)
 
         if self.args.network == 'cnn_lstm':
-            model = CNNLSTMNetwork(base_network, self.n_metadata_inputs, self.args.bm_to_linear)
+            model = CNNLSTMNetwork(base_network, self.n_metadata_inputs, self.args.bm_to_linear, self.args.lstm_hidden_units)
         elif self.args.network == 'cnn_linear':
             model = CNNLinearNetwork(base_network, self.args.n_sub_batches, self.n_metadata_inputs)
         elif self.args.network == 'cnn_regressor':
@@ -321,11 +328,6 @@ class TrainModel(object):
         elif self.args.network == 'autoencoder':
             model = AutoencoderNetwork(base_network)
 
-        if self.args.load_pretrained:
-            saved_model = torch.load(self.args.load_pretrained)
-            if isinstance(saved_model, torch.nn.DataParallel):
-                saved_model = saved_model.module
-            model.breath_block.load_state_dict(saved_model.breath_block.state_dict())
         return self.model_cuda_wrapper(model)
 
     def _get_optimizer(self, model):
@@ -376,6 +378,7 @@ def main():
     parser.add_argument('-wd', '--weight-decay', type=float, default=.0001)
     parser.add_argument('-loss', '--loss-func', choices=['bce', 'vacillating'], default='bce', help='This option only works for classification. Choose the loss function you want to use for classification purposes: BCE or vacillating loss.')
     parser.add_argument('--valpha', type=float, default=float('Inf'), help='alpha value to use for vacillating loss. Lower alpha values mean vacillating loss will contribute less to overall loss of the system. Default value is inf')
+    parser.add_argument('--lstm-hidden-units', type=int, default=512)
     # XXX should probably be more explicit that we are using kfold or holdout in the future
     args = parser.parse_args()
 

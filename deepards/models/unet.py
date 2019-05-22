@@ -28,7 +28,7 @@ class UNet(nn.Module):
         self.dconv_up1 = double_conv(128 + 64, 64)
 
         self.conv_last = nn.Conv1d(64, n_class, 1)
-
+        self.n_out_filters = 512
 
     def forward(self, x):
         conv1 = self.dconv_down1(x)

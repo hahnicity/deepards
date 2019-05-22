@@ -4,22 +4,22 @@ import torch.nn as nn
 
 
 class CNNLSTMNetwork(nn.Module):
-    def __init__(self, breath_block, metadata_features, bm_to_linear):
+    def __init__(self, breath_block, metadata_features, bm_to_linear, lstm_hidden_units):
         super(CNNLSTMNetwork, self).__init__()
 
         self.seq_size = 224
         self.breath_block = breath_block
-        self.lstm_hidden_units = breath_block.inplanes
+        self.lstm_hidden_units = lstm_hidden_units
         self.lstm_layers = 2
         self.bm_to_linear = bm_to_linear
         # If you want to use DataParallel and save hidden state in the future then
         # you may not be able to use batch_first=True
         # https://discuss.pytorch.org/t/multi-layer-rnn-with-dataparallel/4450/10
         if not bm_to_linear:
-            self.lstm = nn.LSTM(breath_block.inplanes+metadata_features, self.lstm_hidden_units+metadata_features, num_layers=self.lstm_layers, batch_first=True)
+            self.lstm = nn.LSTM(breath_block.n_out_filters+metadata_features, self.lstm_hidden_units+metadata_features, num_layers=self.lstm_layers, batch_first=True)
             self.linear_final = nn.Linear(self.lstm_hidden_units+metadata_features, 2)
         else:
-            self.lstm = nn.LSTM(breath_block.inplanes, self.lstm_hidden_units, num_layers=self.lstm_layers, batch_first=True)
+            self.lstm = nn.LSTM(breath_block.n_out_filters, self.lstm_hidden_units, num_layers=self.lstm_layers, batch_first=True)
             self.linear_final = nn.Linear(self.lstm_hidden_units+metadata_features, 2)
 
         self.softmax = nn.Softmax(dim=-1)

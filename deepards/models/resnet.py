@@ -120,6 +120,7 @@ class ResNet(nn.Module):
             elif isinstance(m, nn.BatchNorm1d):
                 m.weight.data.fill_(1)
                 m.bias.data.zero_()
+        self.n_out_filters = self.inplanes
 
     def _make_layer(self, block, planes, blocks, stride=1):
         downsample = None
