@@ -93,7 +93,7 @@ def visualize_results_for_start_time(start_time):
 
 
 def visualize_results_for_experiment(experiment_name):
-    experiment_files = glob('results/{}*.pth'.format(experiment_name))
+    experiment_files = glob('results/{}_1*.pth'.format(experiment_name))
     experiment_data = [torch.load(f) for f in experiment_files]
     for i, exp_data in enumerate(experiment_data):
         if 'n_sub_batches' not in exp_data:
