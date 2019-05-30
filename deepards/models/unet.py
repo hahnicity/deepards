@@ -28,17 +28,36 @@ class UNet(nn.Module):
         self.dconv_up1 = double_conv(128 + 64, 64)
 
         self.conv_last = nn.Conv1d(64, n_class, 1)
-        self.n_out_filters = 512
+
+        # add a 5th downconv for pretrained classifiers only
+        self.dconv_down5 = nn.Conv1d(512, 512, 3, 2, padding=1)
+
+        self.breath_block = nn.Sequential(
+            self.dconv_down1,
+            self.maxpool,
+            self.dconv_down2,
+            self.maxpool,
+            self.dconv_down3,
+            self.maxpool,
+            self.dconv_down4,
+            self.maxpool,
+            self.dconv_down5,
+            nn.MaxPool1d(7),
+        )
+        self.breath_block.n_out_filters = 512
 
     def forward(self, x):
         conv1 = self.dconv_down1(x)
         x = self.maxpool(conv1)
+        # now is shape bs, 64, 112
 
         conv2 = self.dconv_down2(x)
         x = self.maxpool(conv2)
+        # now is shape bs, 128, 56
 
         conv3 = self.dconv_down3(x)
         x = self.maxpool(conv3)
+        # now is shape bs, 256, 24
 
         x = self.dconv_down4(x)
 

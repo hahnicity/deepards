@@ -30,13 +30,14 @@ class CNNLSTMNetwork(nn.Module):
             raise Exception('input breaths must have sequence length of 224')
         batches = x.shape[0]
         breaths = x.shape[1]
-        outputs = self.breath_block(x[0])
+        # make sure to squeeze last dimension in case it hasn't been in breath block
+        outputs = self.breath_block(x[0]).squeeze(-1)
         if not torch.any(torch.isnan(metadata)) and not self.bm_to_linear:
             outputs = torch.cat([outputs, metadata[0]], dim=-1)
         outputs = outputs.unsqueeze(dim=0)
 
         for i in range(1, batches):
-            block_out = self.breath_block(x[i])
+            block_out = self.breath_block(x[i]).squeeze(-1)
             if not torch.any(torch.isnan(metadata)) and not self.bm_to_linear:
                 block_out = torch.cat([block_out, metadata[i]], dim=-1)
             outputs = torch.cat([outputs, block_out.unsqueeze(dim=0)], dim=0)

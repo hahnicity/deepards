@@ -34,7 +34,8 @@ class TrainModel(object):
     def __init__(self, args):
         self.args = args
         self.cuda_wrapper = lambda x: x.cuda() if args.cuda else x
-        self.model_cuda_wrapper = lambda x: nn.DataParallel(x).cuda() if args.cuda else x
+        #self.model_cuda_wrapper = lambda x: nn.DataParallel(x).cuda() if args.cuda else x
+        self.model_cuda_wrapper = lambda x: x.cuda() if args.cuda else x
         self.is_classification = self.args.network not in ['autoencoder', 'cnn_regressor']
 
         if self.is_classification and self.args.loss_func == 'vacillating':
@@ -305,9 +306,12 @@ class TrainModel(object):
             saved_model = torch.load(self.args.load_pretrained)
             if isinstance(saved_model, torch.nn.DataParallel):
                 saved_model = saved_model.module
-            base_network = saved_model.breath_block
-            # XXX tmp debug
-            base_network.n_out_filters = 512
+            # XXX tmp hack
+            try:
+                base_network = saved_model.base_network.breath_block
+                base_network.n_out_filters = 512
+            except:
+                base_network = saved_model.breath_block
         elif 'resnet' in self.args.base_network:
             base_network = base_network(
                 initial_planes=self.args.initial_planes,
