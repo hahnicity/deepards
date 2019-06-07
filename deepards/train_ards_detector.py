@@ -20,6 +20,7 @@ from deepards.models.torch_cnn_bm_regressor import CNNRegressor
 from deepards.models.torch_cnn_linear_network import CNNLinearNetwork
 from deepards.models.torch_metadata_only_network import MetadataOnlyNetwork
 from deepards.models.unet import UNet
+from deepards.model.densenet import densenet121, densenet161, densenet169, densenet201
 
 
 class TrainModel(object):
@@ -29,6 +30,10 @@ class TrainModel(object):
         'resnet101': resnet101,
         'resnet152': resnet152,
         'unet': UNet,
+        'densenet121': densenet121,
+        'densenet161': densenet161,
+        'densenet169': densenet169,
+        'densenet201': densenet201,
     }
 
     def __init__(self, args):
@@ -316,6 +321,8 @@ class TrainModel(object):
             )
         elif 'unet' in self.args.base_network:
             base_network = base_network(1)
+        elif 'densenet' in self.args.base_network:
+            base_network = base_network()
 
         if self.args.network == 'cnn_lstm':
             model = CNNLSTMNetwork(base_network, self.n_metadata_inputs, self.args.bm_to_linear, self.args.lstm_hidden_units)
