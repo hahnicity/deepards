@@ -20,7 +20,7 @@ from deepards.models.torch_cnn_bm_regressor import CNNRegressor
 from deepards.models.torch_cnn_linear_network import CNNLinearNetwork
 from deepards.models.torch_metadata_only_network import MetadataOnlyNetwork
 from deepards.models.unet import UNet
-from deepards.model.densenet import densenet121, densenet161, densenet169, densenet201
+from deepards.models.densenet import densenet121, densenet161, densenet169, densenet201
 
 
 class TrainModel(object):
