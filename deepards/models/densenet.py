@@ -114,7 +114,7 @@ class DenseNet(nn.Module):
             elif isinstance(m, nn.Linear):
                 nn.init.constant_(m.bias, 0)
 
-        self.n_out_filters = self.inplanes
+        self.n_out_filters = num_features
         self.avgpool = nn.AvgPool1d(7, stride=1)
 
     def forward(self, x):
