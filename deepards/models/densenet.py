@@ -106,7 +106,7 @@ class DenseNet(nn.Module):
 
         # Official init from torch repo.
         for m in self.modules():
-            if isinstanc-e(m, nn.Conv2d):
+            if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight)
             elif isinstance(m, nn.BatchNorm2d):
                 nn.init.constant_(m.weight, 1)
