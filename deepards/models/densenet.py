@@ -160,7 +160,7 @@ def densenet121(pretrained=False, progress=True, **kwargs):
         pretrained (bool): If True, returns a model pre-trained on ImageNet
         progress (bool): If True, displays a progress bar of the download to stderr
     """
-    return _densenet('densenet121', 16, (6, 12, 24, 16), 64, pretrained, progress,
+    return _densenet('densenet121', 16, (3, 6, 12, 8), 64, pretrained, progress,
                      **kwargs)
 
 
