@@ -121,7 +121,7 @@ class DenseNet(nn.Module):
         features = self.features(x)
         out = F.relu(features, inplace=True)
         out = self.avgpool(out)
-        out = out.view(out.size(0), -1)
+        out = out.view(features.size(0), -1)
         #out = F.adaptive_avg_pool2d(out, (1, 1)).view(features.size(0), -1)
         #out = self.classifier(out)
         return out
