@@ -1,12 +1,13 @@
 from copy import copy
 import os
-
+import csv
 import numpy as np
 import pandas as pd
 from prettytable import PrettyTable
 from sklearn.metrics import roc_auc_score
 import torch
 
+filename = './Data/data.csv'
 
 def get_fns_idx(actual, predictions, label):
     pos = actual[actual == label]
@@ -277,6 +278,8 @@ class DeepARDSResults(object):
         table = PrettyTable()
         table.field_names = ['Patho', 'Accuracy', 'Recall', 'Precision', 'AUC', 'F1']
         for idx, row in stats_frame.iterrows():
+            with open(filename, "a") as f:
+                f.write("{},{},{},{},{},{}\n".format(row.patho, row.accuracy, row.sensitivity, row.precision, row.auc, row.f1))
             table.add_row([row.patho, row.accuracy, row.sensitivity, row.precision, row.auc, row.f1])
         print('Patient-level stats')
         print(table)
