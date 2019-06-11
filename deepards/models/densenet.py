@@ -70,7 +70,7 @@ class DenseNet(nn.Module):
         num_classes (int) - number of classification classes
     """
 
-    def __init__(self, growth_rate=32, block_config=(2, 2, 2, 2),
+    def __init__(self, growth_rate=32, block_config=(6, 12, 24, 16),
                  num_init_features=64, bn_size=4, drop_rate=0.2, num_classes=1000):
 
         super(DenseNet, self).__init__()
@@ -164,7 +164,7 @@ def densenet121(pretrained=False, progress=True, **kwargs):
         pretrained (bool): If True, returns a model pre-trained on ImageNet
         progress (bool): If True, displays a progress bar of the download to stderr
     """
-    return _densenet('densenet121', 32, (6, 12, 24, 16), 64, pretrained, progress,
+    return _densenet('densenet121', 32, (2, 2, 2, 2), 64, pretrained, progress,
                      **kwargs)
 
 
