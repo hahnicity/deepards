@@ -75,7 +75,6 @@ class Bottleneck(nn.Module):
 
         out += residual
         out = self.relu(out)
-
         return out
 
 
@@ -159,6 +158,8 @@ class ResNet(nn.Module):
 
         x = self.avgpool(x)
         x = x.view(x.size(0), -1)
+        print(self.in_planes)
+        print(self.n_out_filters)
         return x
 
 
