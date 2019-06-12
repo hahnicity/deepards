@@ -168,7 +168,7 @@ def densenet121(pretrained=False, progress=True, **kwargs):
     return _densenet('densenet121', 32, (6, 12, 24, 16), 64, pretrained, progress,
                      **kwargs)
     #return _densenet('densenet121', 32, (2, 2, 2, 2), 64, pretrained, progress,
-                     **kwargs)
+                    # **kwargs)
 
 
 def densenet161(pretrained=False, progress=True, **kwargs):
