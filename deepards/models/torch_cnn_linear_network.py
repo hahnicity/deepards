@@ -9,7 +9,7 @@ class CNNLinearNetwork(nn.Module):
 
         self.seq_size = 224
         self.breath_block = breath_block
-        self.linear_final = nn.Linear(self.breath_block.inplanes * sequence_size + metadata_features, 2)
+        self.linear_final = nn.Linear(self.breath_block.n_out_filterss * sequence_size + metadata_features, 2)
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, x, metadata):
