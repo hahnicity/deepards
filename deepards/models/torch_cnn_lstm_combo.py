@@ -42,6 +42,7 @@ class CNNLSTMNetwork(nn.Module):
             outputs = torch.cat([outputs, block_out.unsqueeze(dim=0)], dim=0)
 
         # [0] just gets the lstm outputs and ignores hx,cx
+        print(outputs.size())
         x = self.lstm(outputs)[0]
         if self.bm_to_linear:
             x = torch.cat([x, metadata], dim=-1)
