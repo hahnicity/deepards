@@ -71,3 +71,7 @@ consistently because it was just the first thing I coded and it was unclear if u
 or not. More experiments will need to be done however to validate which performs best. A further possible advantage
 of padded_breath_by_breath is that you can pretrain CNNs using breath metadata regressors and then apply it to ARDS detection.
 I will discuss this in a later section.
+
+
+
+scp -r kavish@mars.ece.ucdavis.edu:/deepards/deepards/results ~/Desktop/results
