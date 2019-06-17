@@ -234,7 +234,6 @@ class DeepARDSResults(object):
         last_epoch = sorted(self.results.epoch_num.unique())[-1]
         aggregate_stats = self._aggregate_specific_results(self.results[self.results.epoch_num == last_epoch])
         self._print_specific_results_report(aggregate_stats)
-        self.save_all()
         self.results.to_pickle('results/{}_patient_results.pkl'.format(self.start_time))
         aggregate_stats.to_pickle('results/{}_aggregate_results.pkl'.format(self.start_time))
 

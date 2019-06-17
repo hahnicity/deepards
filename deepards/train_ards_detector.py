@@ -35,14 +35,7 @@ class BaseTraining(object):
         self.args = args
         self.cuda_wrapper = lambda x: x.cuda() if args.cuda else x
         self.model_cuda_wrapper = lambda x: nn.DataParallel(x).cuda() if args.cuda else x
-        self.is_classification = self.args.network not in ['autoencoder', 'cnn_regressor']
-
-        if self.is_classification and self.args.loss_func == 'vacillating':
-            self.criterion = VacillatingLoss(self.cuda_wrapper(torch.FloatTensor([self.args.valpha])))
-        elif self.is_classification and self.args.loss_func == 'bce':
-            self.criterion = torch.nn.BCELoss()
-        else:
-            self.criterion = torch.nn.MSELoss()
+        self.set_loss_criterion()
 
         if self.args.dataset_type == 'padded_breath_by_breath_with_limited_bm_target':
             self.n_bm_features = 3
@@ -119,6 +112,7 @@ class BaseTraining(object):
         else:
             train_sequences = []
 
+        # XXX I'd like to eventually extract n_sub_batches from a pickled dataset
         kfold_num = None if self.args.kfolds is None else 0
         train_dataset = ARDSRawDataset(
             self.args.data_path,
@@ -188,49 +182,16 @@ class BaseTraining(object):
         for fold_num, (train_dataset, train_loader, test_dataset, test_loader) in enumerate(self.get_splits()):
             model = self.get_model()
             optimizer = self.get_optimizer(model)
-            for epoch in range(self.args.epochs):
-                self.run_train_epoch(model, train_loader, optimizer, epoch+1, fold_num)
-                self.perform_testing(epoch, model, test_dataset, test_loader, fold_num)
+            for epoch_num in range(self.args.epochs):
+                self.run_train_epoch(model, train_loader, optimizer, epoch_num+1, fold_num)
+                if not self.args.no_test_after_epochs or epoch_num == self.args.epochs - 1:
+                    self.run_test_epoch(epoch_num, model, test_dataset, test_loader, fold_num)
 
         if self.args.save_model:
             torch.save(model, self.args.save_model)
 
-        if self.is_classification:
-            self.results.aggregate_classification_results()
-        else:
-            self.results.save_all()
+        self.perform_post_modeling_actions()
         print('Run start time: {}'.format(self.start_time))
-
-    def run_test_epoch(self, model, test_loader, fold_num):
-        self.preds = []
-        self.pred_idx = []
-        self.epoch_targets = []
-        with torch.no_grad():
-            for idx, (obs_idx, seq, metadata, target) in enumerate(test_loader):
-                inputs = self.cuda_wrapper(Variable(seq.float()))
-                metadata = self.cuda_wrapper(Variable(metadata.float()))
-                outputs = model(inputs, metadata)
-                batch_preds = self._process_test_batch_results(outputs, target, inputs, fold_num)
-                self.pred_idx.extend(self.transform_obs_idx(obs_idx, outputs).cpu().tolist())
-                self.preds.extend(batch_preds)
-
-        if self.is_classification:
-            self.preds = pd.Series(self.preds, index=self.pred_idx)
-            self.preds = self.preds.sort_index()
-        else:
-            self.results.print_meter_results('test_mae', fold_num)
-        self._record_test_epoch_results(fold_num)
-
-        # Never really makes sense to return a self.var unless its leaving the class..
-        return self.preds
-
-    def _record_test_epoch_results(self, fold_num):
-        if self.is_classification:
-            accuracy = accuracy_score(self.epoch_targets, self.preds)
-            self.results.update_meter('epoch_test_accuracy', fold_num, accuracy)
-        else:
-            mae = mean_absolute_error(self.epoch_targets, self.preds)
-            self.results.update_meter('epoch_test_mae', fold_num, mae)
 
     def get_base_network(self):
         base_network = self.base_networks[self.args.base_network]
@@ -259,12 +220,19 @@ class BaseTraining(object):
             optimizer = torch.optim.SGD(model.parameters(), lr=self.args.learning_rate, momentum=0.9, weight_decay=self.args.weight_decay, nesterov=True)
         return optimizer
 
-    def perform_testing(self, epoch_num, model, test_dataset, test_loader, fold_num):
-        if not self.args.no_test_after_epochs or epoch_num == self.args.epochs - 1:
-            preds = self.run_test_epoch(model, test_loader, fold_num)
-            if self.is_classification:
-                y_test = test_dataset.get_ground_truth_df()
-                self.results.perform_patient_predictions(y_test, preds, fold_num, epoch_num)
+    def run_test_epoch(self, epoch_num, model, test_dataset, test_loader, fold_num):
+        self.preds = []
+        self.pred_idx = []
+        with torch.no_grad():
+            for idx, (obs_idx, seq, metadata, target) in enumerate(test_loader):
+                inputs = self.cuda_wrapper(Variable(seq.float()))
+                metadata = self.cuda_wrapper(Variable(metadata.float()))
+                outputs = model(inputs, metadata)
+                batch_preds = self._process_test_batch_results(outputs, target, inputs, fold_num)
+                self.pred_idx.extend(self.transform_obs_idx(obs_idx, outputs).cpu().tolist())
+                self.preds.extend(batch_preds)
+
+        self.record_final_epoch_testing_results(fold_num, epoch_num, test_dataset)
 
     def get_model(self):
         base_network = self.get_base_network()
@@ -278,7 +246,22 @@ class ClassifierMixin(object):
     def record_testing_results(self, target, batch_preds, fold_num):
         accuracy = accuracy_score(target, batch_preds)
         self.results.update_accuracy(fold_num, accuracy)
-        self.epoch_targets.extend(target.tolist())
+
+    def record_final_epoch_testing_results(self, fold_num, epoch_num, test_dataset):
+        self.preds = pd.Series(self.preds, index=self.pred_idx)
+        self.preds = self.preds.sort_index()
+        y_test = test_dataset.get_ground_truth_df()
+        self.results.perform_patient_predictions(y_test, self.preds, fold_num, epoch_num)
+
+    def set_loss_criterion(self):
+        if self.args.loss_func == 'vacillating':
+            self.criterion = VacillatingLoss(self.cuda_wrapper(torch.FloatTensor([self.args.valpha])))
+        elif self.args.loss_func == 'bce':
+            self.criterion = torch.nn.BCELoss()
+
+    def perform_post_modeling_actions(self):
+        self.results.aggregate_classification_results()
+        self.results.save_all()
 
 
 class RegressorMixin(object):
@@ -289,7 +272,15 @@ class RegressorMixin(object):
         self.results.update_meter('r2', fold_num, r2)
         mse = mean_squared_error(target, batch_preds)
         self.results.update_meter('test_mse', fold_num, mse)
-        self.epoch_targets.extend(target.tolist())
+
+    def record_final_epoch_testing_results(self, fold_num, epoch_num, test_dataset):
+        self.results.print_meter_results('test_mae', fold_num)
+
+    def set_loss_criterion(self):
+        self.criterion = torch.nn.MSELoss()
+
+    def perform_post_modeling_actions(self):
+        self.results.save_all()
 
 
 class CNNLSTMModel(BaseTraining, ClassifierMixin):
