@@ -5,15 +5,7 @@ class AutoencoderNetwork(nn.Module):
     def __init__(self, base_network):
         super(AutoencoderNetwork, self).__init__()
         self.base_network = base_network
-        self.breath_block = nn.Sequential(
-            self.base_network.dconv_down1,
-            self.base_network.maxpool,
-            self.base_network.dconv_down2,
-            self.base_network.maxpool,
-            self.base_network.dconv_down3,
-            self.base_network.maxpool,
-            self.base_network.dconv_down4,
-        )
+        self.breath_block = self.base_network.encoder
         self.breath_block.n_out_filters = self.base_network.n_out_filters
 
     def forward(self, x, metadata):

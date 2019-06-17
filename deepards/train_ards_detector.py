@@ -13,6 +13,7 @@ from torch.utils.data import DataLoader
 from deepards.dataset import ARDSRawDataset
 from deepards.loss import VacillatingLoss
 from deepards.metrics import DeepARDSResults, Reporting
+from deepards.models.autoencoder_cnn import AutoencoderCNN
 from deepards.models.autoencoder_network import AutoencoderNetwork
 from deepards.models.resnet import resnet18, resnet50, resnet101, resnet152
 from deepards.models.torch_cnn_lstm_combo import CNNLSTMNetwork
@@ -29,6 +30,7 @@ class BaseTraining(object):
         'resnet101': resnet101,
         'resnet152': resnet152,
         'unet': UNet,
+        'basic_cnn_ae': AutoencoderCNN,
     }
 
     def __init__(self, args):
@@ -211,6 +213,8 @@ class BaseTraining(object):
             )
         elif 'unet' in self.args.base_network:
             base_network = base_network(1)
+        else:
+            base_network = base_network()
         return base_network
 
     def get_optimizer(self, model):
