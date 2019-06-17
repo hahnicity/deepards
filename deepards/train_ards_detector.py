@@ -81,6 +81,8 @@ class BaseTraining(object):
         total_loss = 0
         with torch.enable_grad():
             print("\nrun epoch {}\n".format(epoch_num))
+            # In the future we can abstract away dataset specific outputs into separate
+            # classes, but for now I'm not convinced that the refactor is worth it.
             for idx, (obs_idx, seq, metadata, target) in enumerate(train_loader):
                 model.zero_grad()
                 target_shape = target.numpy().shape
@@ -184,11 +186,11 @@ class BaseTraining(object):
 
     def train_and_test(self):
         for fold_num, (train_dataset, train_loader, test_dataset, test_loader) in enumerate(self.get_splits()):
-            model = self._get_model()
-            optimizer = self._get_optimizer(model)
+            model = self.get_model()
+            optimizer = self.get_optimizer(model)
             for epoch in range(self.args.epochs):
                 self.run_train_epoch(model, train_loader, optimizer, epoch+1, fold_num)
-                self._perform_testing(epoch, model, test_dataset, test_loader, fold_num)
+                self.perform_testing(epoch, model, test_dataset, test_loader, fold_num)
 
         if self.args.save_model:
             torch.save(model, self.args.save_model)
@@ -208,7 +210,9 @@ class BaseTraining(object):
                 inputs = self.cuda_wrapper(Variable(seq.float()))
                 metadata = self.cuda_wrapper(Variable(metadata.float()))
                 outputs = model(inputs, metadata)
-                self._process_test_batch_results(outputs, target, inputs, fold_num, obs_idx)
+                batch_preds = self._process_test_batch_results(outputs, target, inputs, fold_num)
+                self.pred_idx.extend(self.transform_obs_idx(obs_idx, outputs).cpu().tolist())
+                self.preds.extend(batch_preds)
 
         if self.is_classification:
             self.preds = pd.Series(self.preds, index=self.pred_idx)
@@ -248,22 +252,47 @@ class BaseTraining(object):
             base_network = base_network(1)
         return base_network
 
-    def _get_optimizer(self, model):
+    def get_optimizer(self, model):
         if self.args.optimizer == 'adam':
             optimizer = torch.optim.Adam(model.parameters(), lr=self.args.learning_rate)
         elif self.args.optimizer == 'sgd':
             optimizer = torch.optim.SGD(model.parameters(), lr=self.args.learning_rate, momentum=0.9, weight_decay=self.args.weight_decay, nesterov=True)
         return optimizer
 
-    def _perform_testing(self, epoch_num, model, test_dataset, test_loader, fold_num):
+    def perform_testing(self, epoch_num, model, test_dataset, test_loader, fold_num):
         if not self.args.no_test_after_epochs or epoch_num == self.args.epochs - 1:
             preds = self.run_test_epoch(model, test_loader, fold_num)
             if self.is_classification:
                 y_test = test_dataset.get_ground_truth_df()
                 self.results.perform_patient_predictions(y_test, preds, fold_num, epoch_num)
 
+    def get_model(self):
+        base_network = self.get_base_network()
+        return self.model_cuda_wrapper(self.get_network(base_network))
 
-class CNNLSTMModel(BaseTraining):
+    def transform_obs_idx(self, obs_idx, outputs):
+        return obs_idx
+
+
+class ClassifierMixin(object):
+    def record_testing_results(self, target, batch_preds, fold_num):
+        accuracy = accuracy_score(target, batch_preds)
+        self.results.update_accuracy(fold_num, accuracy)
+        self.epoch_targets.extend(target.tolist())
+
+
+class RegressorMixin(object):
+    def record_testing_results(self, target, batch_preds, fold_num):
+        mae = mean_absolute_error(target, batch_preds)
+        self.results.update_meter('test_mae', fold_num, mae)
+        r2 = r2_score(target, batch_preds)
+        self.results.update_meter('r2', fold_num, r2)
+        mse = mean_squared_error(target, batch_preds)
+        self.results.update_meter('test_mse', fold_num, mse)
+        self.epoch_targets.extend(target.tolist())
+
+
+class CNNLSTMModel(BaseTraining, ClassifierMixin):
     def __init__(self, args):
         super(CNNLSTMModel, self).__init__(args)
 
@@ -275,42 +304,37 @@ class CNNLSTMModel(BaseTraining):
         elif self.args.loss_calc == 'last_breath':
             return self.criterion(outputs[:, -1, :], target)
 
-    def _process_test_batch_results(self, outputs, target, inputs, fold_num, obs_idx):
+    # One thing that is common in this function is that we process the outputs, process
+    # the target, record testing results, and then return batch preds. It would be
+    # so much easier if this all was just in one function
+    def _process_test_batch_results(self, outputs, target, inputs, fold_num):
         batch_preds = outputs.argmax(dim=-1).cpu().view(-1)
         target = target.argmax(dim=1).cpu().reshape((outputs.shape[0], 1)).repeat((1, outputs.shape[1])).view(-1)
-        obs_idx = obs_idx.reshape((outputs.shape[0], 1)).repeat((1, outputs.shape[1])).view(-1)
-        self.pred_idx.extend(obs_idx.cpu().tolist())
-        self.preds.extend(batch_preds.tolist())
-        accuracy = accuracy_score(target, batch_preds)
-        self.results.update_accuracy(fold_num, accuracy)
-        self.epoch_targets.extend(target.tolist())
+        self.record_testing_results(target, batch_preds, fold_num)
+        return batch_preds.tolist()
 
-    def get_model(self):
-        base_network = self.get_base_network()
-        model = CNNLSTMNetwork(base_network, self.n_metadata_inputs, self.args.bm_to_linear, self.args.lstm_hidden_units)
-        return self.model_cuda_wrapper(model)
+    def get_network(self, base_network):
+        return CNNLSTMNetwork(base_network, self.n_metadata_inputs, self.args.bm_to_linear, self.args.lstm_hidden_units)
+
+    def transform_obs_idx(self, obs_idx, outputs):
+        return obs_idx.reshape((outputs.shape[0], 1)).repeat((1, outputs.shape[1])).view(-1)
 
 
-class CNNLinearModel(BaseTraining):
+class CNNLinearModel(BaseTraining, ClassifierMixin):
     def __init__(self, args):
         super(CNNLinearModel, self).__init__(args)
 
     def calc_loss(self, outputs, target, inputs):
         return self.criterion(outputs, target)
 
-    def _process_test_batch_results(self, outputs, target, inputs, fold_num, obs_idx):
+    def _process_test_batch_results(self, outputs, target, inputs, fold_num):
         batch_preds = outputs.argmax(dim=-1).cpu()
         target = target.argmax(dim=1).cpu()
-        self.pred_idx.extend(obs_idx.cpu().tolist())
-        self.preds.extend(batch_preds.tolist())
-        accuracy = accuracy_score(target, batch_preds)
-        self.results.update_accuracy(fold_num, accuracy)
-        self.epoch_targets.extend(target.tolist())
+        self.record_testing_results(target, batch_preds, fold_num)
+        return batch_preds.tolist()
 
-    def get_model(self):
-        base_network = self.get_base_network()
-        model = CNNLinearNetwork(base_network, self.args.n_sub_batches, self.n_metadata_inputs)
-        return self.model_cuda_wrapper(model)
+    def get_network(self, base_network):
+        return CNNLinearNetwork(base_network, self.args.n_sub_batches, self.n_metadata_inputs)
 
 
 class MetadataOnlyModel(BaseTraining):
@@ -320,20 +344,14 @@ class MetadataOnlyModel(BaseTraining):
     def calc_loss(self, outputs, target, inputs):
         return self.criterion(outputs, target)
 
-    def _process_test_batch_results(self, outputs, target, inputs, fold_num, obs_idx):
+    def _process_test_batch_results(self, outputs, target, inputs, fold_num):
         batch_preds = outputs.argmax(dim=-1).cpu()
         target = target.argmax(dim=1).cpu()
-        # XXX maybe do a classifier mixin for this?
-        self.pred_idx.extend(obs_idx.cpu().tolist())
-        self.preds.extend(batch_preds.tolist())
-        accuracy = accuracy_score(target, batch_preds)
-        self.results.update_accuracy(fold_num, accuracy)
-        self.epoch_targets.extend(target.tolist())
+        self.record_testing_results(target, batch_preds, fold_num)
+        return batch_preds.tolist()
 
-    def get_model(self):
-        base_network = self.get_base_network()
-        model = MetadataOnlyNetwork()
-        return self.model_cuda_wrapper(model)
+    def get_network(self, _):
+        return MetadataOnlyNetwork()
 
 
 class CNNRegressorModel(BaseTraining):
@@ -343,47 +361,31 @@ class CNNRegressorModel(BaseTraining):
     def calc_loss(self, outputs, target, inputs):
         return self.criterion(outputs, target)
 
-    def _process_test_batch_results(self, outputs, target, inputs, fold_num, obs_idx):
+    def _process_test_batch_results(self, outputs, target, inputs, fold_num):
         batch_preds = outputs.cpu().numpy()
         target = target.cpu()
-        self.preds.extend(batch_preds.tolist())
-        mae = mean_absolute_error(target, batch_preds)
-        self.results.update_meter('test_mae', fold_num, mae)
-        r2 = r2_score(target, batch_preds)
-        self.results.update_meter('r2', fold_num, r2)
-        mse = mean_squared_error(target, batch_preds)
-        self.results.update_meter('test_mse', fold_num, mse)
-        self.epoch_targets.extend(target.tolist())
+        self.record_testing_results(target, batch_preds, fold_num)
+        return batch_preds.tolist()
 
-    def get_model(self):
-        base_network = self.get_base_network()
-        model = CNNRegressor(base_network, self.n_bm_features)
-        return self.model_cuda_wrapper(model)
+    def get_network(self, base_network):
+        return CNNRegressor(base_network, self.n_bm_features)
 
 
 class AutoencoderModel(BaseTraining):
     def __init__(self, args):
         super(AutoencoderModel, self).__init__(args)
 
-    def _process_test_batch_results(self, outputs, target, inputs, fold_num, obs_idx):
+    def _process_test_batch_results(self, outputs, target, inputs, fold_num):
         batch_preds = outputs.cpu().numpy().squeeze(1)
         target = inputs.view((inputs.shape[0]*inputs.shape[1], inputs.shape[2], inputs.shape[3])).squeeze(1)
-        self.preds.extend(batch_preds.tolist())
-        mae = mean_absolute_error(target, batch_preds)
-        self.results.update_meter('test_mae', fold_num, mae)
-        r2 = r2_score(target, batch_preds)
-        self.results.update_meter('r2', fold_num, r2)
-        mse = mean_squared_error(target, batch_preds)
-        self.results.update_meter('test_mse', fold_num, mse)
-        self.epoch_targets.extend(target.tolist())
+        self.record_testing_results(target, batch_preds, fold_num)
+        return batch_preds.tolist()
 
     def calc_loss(self, outputs, target, inputs):
         return self.criterion(outputs, inputs.view((inputs.shape[0]*inputs.shape[1], inputs.shape[2], inputs.shape[3])))
 
-    def get_model(self):
-        base_network = self.get_base_network()
-        model = AutoencoderNetwork(base_network)
-        return self.model_cuda_wrapper(model)
+    def get_network(self, base_network):
+        return AutoencoderNetwork(base_network)
 
 
 def main():
@@ -399,7 +401,7 @@ def main():
     parser.add_argument('--test-to-pickle')
     parser.add_argument('--cuda', action='store_true')
     parser.add_argument('-b', '--batch-size', type=int, default=16)
-    parser.add_argument('--base-network', choices=TrainModel.base_networks, default='resnet18')
+    parser.add_argument('--base-network', choices=BaseTraining.base_networks, default='resnet18')
     parser.add_argument('-lc', '--loss-calc', choices=['all_breaths', 'last_breath'], default='all_breaths')
     parser.add_argument('-nb', '--n-sub-batches', type=int, default=100, help=(
         "number of breath-subbatches for each breath frame. This has different "
