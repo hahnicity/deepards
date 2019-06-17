@@ -36,7 +36,10 @@ class BaseTraining(object):
     def __init__(self, args):
         self.args = args
         self.cuda_wrapper = lambda x: x.cuda() if args.cuda else x
-        self.model_cuda_wrapper = lambda x: nn.DataParallel(x).cuda() if args.cuda else x
+        if self.args.debug:
+            self.model_cuda_wrapper = lambda x: x.cuda() if args.cuda else x
+        else:
+            self.model_cuda_wrapper = lambda x: nn.DataParallel(x).cuda() if args.cuda else x
         self.set_loss_criterion()
 
         if self.args.dataset_type == 'padded_breath_by_breath_with_limited_bm_target':
