@@ -328,7 +328,7 @@ class CNNLinearModel(BaseTraining, ClassifierMixin):
         return CNNLinearNetwork(base_network, self.args.n_sub_batches, self.n_metadata_inputs)
 
 
-class MetadataOnlyModel(BaseTraining):
+class MetadataOnlyModel(BaseTraining, ClassifierMixin):
     def __init__(self, args):
         super(CNNMetadataModel, self).__init__(args)
 
@@ -345,7 +345,7 @@ class MetadataOnlyModel(BaseTraining):
         return MetadataOnlyNetwork()
 
 
-class CNNRegressorModel(BaseTraining):
+class CNNRegressorModel(BaseTraining, RegressorMixin):
     def __init__(self, args):
         super(CNNRegressorModel, self).__init__(args)
 
@@ -362,7 +362,7 @@ class CNNRegressorModel(BaseTraining):
         return CNNRegressor(base_network, self.n_bm_features)
 
 
-class AutoencoderModel(BaseTraining):
+class AutoencoderModel(BaseTraining, RegressorMixin):
     def __init__(self, args):
         super(AutoencoderModel, self).__init__(args)
 
