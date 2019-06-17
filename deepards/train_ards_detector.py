@@ -11,7 +11,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from deepards.dataset import ARDSRawDataset
-from deepards.loss import VacillatingLoss
+from deepards.loss import ConfidencePenaltyLoss, VacillatingLoss
 from deepards.metrics import DeepARDSResults, Reporting
 from deepards.models.autoencoder_cnn import AutoencoderCNN
 from deepards.models.autoencoder_network import AutoencoderNetwork
@@ -265,6 +265,8 @@ class ClassifierMixin(object):
             self.criterion = VacillatingLoss(self.cuda_wrapper(torch.FloatTensor([self.args.valpha])))
         elif self.args.loss_func == 'bce':
             self.criterion = torch.nn.BCELoss()
+        elif self.args.loss_func == 'confidence':
+            self.criterion = ConfidencePenaltyLoss(self.args.conf_beta)
 
     def perform_post_modeling_actions(self):
         self.results.aggregate_classification_results()
@@ -424,8 +426,9 @@ def main():
     parser.add_argument('--downsample-factor', type=float, default=4.0)
     parser.add_argument('--no-drop-frames', action='store_false')
     parser.add_argument('-wd', '--weight-decay', type=float, default=.0001)
-    parser.add_argument('-loss', '--loss-func', choices=['bce', 'vacillating'], default='bce', help='This option only works for classification. Choose the loss function you want to use for classification purposes: BCE or vacillating loss.')
+    parser.add_argument('-loss', '--loss-func', choices=['bce', 'vacillating', 'confidence'], default='bce', help='This option only works for classification. Choose the loss function you want to use for classification purposes: BCE or vacillating loss.')
     parser.add_argument('--valpha', type=float, default=float('Inf'), help='alpha value to use for vacillating loss. Lower alpha values mean vacillating loss will contribute less to overall loss of the system. Default value is inf')
+    parser.add_argument('--conf-beta', type=float, default=1.0, help='Modifier to the intensity of the confidence penalty')
     parser.add_argument('--lstm-hidden-units', type=int, default=512)
     args = parser.parse_args()
 
