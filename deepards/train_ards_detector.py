@@ -57,9 +57,6 @@ class BaseTraining(object):
         if self.n_runs > 1:
             self.args.test_to_pickle = None
 
-        if self.args.save_model and self.n_runs > 1:
-            raise NotImplementedError('We currently do not support saving kfold models')
-
         self.start_time = datetime.now().strftime('%s')
         self.results = DeepARDSResults(
             self.start_time,
@@ -71,6 +68,7 @@ class BaseTraining(object):
             n_sub_batches=self.args.n_sub_batches,
             weight_decay=self.args.weight_decay,
             valpha=self.args.valpha,
+            confidence_beta=self.args.conf_beta,
         )
         print('Run start time: {}'.format(self.start_time))
 
@@ -192,8 +190,9 @@ class BaseTraining(object):
                 if not self.args.no_test_after_epochs or epoch_num == self.args.epochs - 1:
                     self.run_test_epoch(epoch_num, model, test_dataset, test_loader, fold_num)
 
-        if self.args.save_model:
-            torch.save(model, self.args.save_model)
+            if self.args.save_model:
+                model_path = self.args.save_model.replace('.pth', '') + "-fold-{}.pth".format(fold_num) if self.n_runs > 1 else self.args.save_model
+                torch.save(model, model_path)
 
         self.perform_post_modeling_actions()
         print('Run start time: {}'.format(self.start_time))
