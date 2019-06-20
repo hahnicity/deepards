@@ -11,8 +11,9 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from deepards.dataset import ARDSRawDataset
-from deepards.loss import VacillatingLoss
+from deepards.loss import ConfidencePenaltyLoss, VacillatingLoss
 from deepards.metrics import DeepARDSResults, Reporting
+from deepards.models.autoencoder_cnn import AutoencoderCNN
 from deepards.models.autoencoder_network import AutoencoderNetwork
 from deepards.models.resnet import resnet18, resnet50, resnet101, resnet152
 from deepards.models.torch_cnn_lstm_combo import CNNLSTMNetwork
@@ -23,7 +24,7 @@ from deepards.models.unet import UNet
 from models.densenet import densenet121, densenet161, densenet169, densenet201
 
 
-class TrainModel(object):
+class BaseTraining(object):
     base_networks = {
         'resnet18': resnet18,
         'resnet50': resnet50,
@@ -34,20 +35,17 @@ class TrainModel(object):
         'densenet161': densenet161,
         'densenet169': densenet169,
         'densenet201': densenet201,
+        'basic_cnn_ae': AutoencoderCNN,
     }
 
     def __init__(self, args):
         self.args = args
         self.cuda_wrapper = lambda x: x.cuda() if args.cuda else x
-        self.model_cuda_wrapper = lambda x: nn.DataParallel(x).cuda() if args.cuda else x
-        self.is_classification = self.args.network not in ['autoencoder', 'cnn_regressor']
-
-        if self.is_classification and self.args.loss_func == 'vacillating':
-            self.criterion = VacillatingLoss(self.cuda_wrapper(torch.FloatTensor([self.args.valpha])))
-        elif self.is_classification and self.args.loss_func == 'bce':
-            self.criterion = torch.nn.BCELoss()
+        if self.args.debug:
+            self.model_cuda_wrapper = lambda x: x.cuda() if args.cuda else x
         else:
-            self.criterion = torch.nn.MSELoss()
+            self.model_cuda_wrapper = lambda x: nn.DataParallel(x).cuda() if args.cuda else x
+        self.set_loss_criterion()
 
         if self.args.dataset_type == 'padded_breath_by_breath_with_limited_bm_target':
             self.n_bm_features = 3
@@ -64,9 +62,6 @@ class TrainModel(object):
         if self.n_runs > 1:
             self.args.test_to_pickle = None
 
-        if self.args.save_model and self.n_runs > 1:
-            raise NotImplementedError('We currently do not support saving kfold models')
-
         self.start_time = datetime.now().strftime('%s')
         self.results = DeepARDSResults(
             self.start_time,
@@ -78,26 +73,17 @@ class TrainModel(object):
             n_sub_batches=self.args.n_sub_batches,
             weight_decay=self.args.weight_decay,
             valpha=self.args.valpha,
+            confidence_beta=self.args.conf_beta,
         )
         print('Run start time: {}'.format(self.start_time))
-
-    def calc_loss(self, outputs, target, inputs):
-        if self.args.loss_calc == 'all_breaths' and self.args.network == 'cnn_lstm':
-            if self.args.batch_size > 1:
-                target = target.unsqueeze(1)
-            return self.criterion(outputs, target.repeat((1, self.args.n_sub_batches, 1)))
-        elif self.args.loss_calc == 'last_breath' and self.args.network == 'cnn_lstm':
-            return self.criterion(outputs[:, -1, :], target)
-        elif self.args.network == 'autoencoder':
-            return self.criterion(outputs, inputs.view((inputs.shape[0]*inputs.shape[1], inputs.shape[2], inputs.shape[3])))
-        else:
-            return self.criterion(outputs, target)
 
     def run_train_epoch(self, model, train_loader, optimizer, epoch_num, fold_num):
         n_loss = 0
         total_loss = 0
         with torch.enable_grad():
             print("\nrun epoch {}\n".format(epoch_num))
+            # In the future we can abstract away dataset specific outputs into separate
+            # classes, but for now I'm not convinced that the refactor is worth it.
             for idx, (obs_idx, seq, metadata, target) in enumerate(train_loader):
                 model.zero_grad()
                 target_shape = target.numpy().shape
@@ -121,91 +107,11 @@ class TrainModel(object):
                 if self.args.debug:
                     break
 
-    def run_test_epoch(self, model, test_loader, fold_num):
-        self.preds = []
-        self.pred_idx = []
-        self.epoch_targets = []
-        with torch.no_grad():
-            for idx, (obs_idx, seq, metadata, target) in enumerate(test_loader):
-                inputs = self.cuda_wrapper(Variable(seq.float()))
-                metadata = self.cuda_wrapper(Variable(metadata.float()))
-                outputs = model(inputs, metadata)
-                self._process_test_batch_results(outputs, target, inputs, fold_num, obs_idx)
-
-        if self.is_classification:
-            self.preds = pd.Series(self.preds, index=self.pred_idx)
-            self.preds = self.preds.sort_index()
-        else:
-            self.results.print_meter_results('test_mae', fold_num)
-        self._record_test_epoch_results(fold_num)
-
-        # Never really makes sense to return a self.var unless its leaving the class..
-        return self.preds
-
-    def _record_test_epoch_results(self, fold_num):
-        if self.is_classification:
-            accuracy = accuracy_score(self.epoch_targets, self.preds)
-            self.results.update_meter('epoch_test_accuracy', fold_num, accuracy)
-        else:
-            mae = mean_absolute_error(self.epoch_targets, self.preds)
-            self.results.update_meter('epoch_test_mae', fold_num, mae)
-
-    def _process_test_batch_results(self, outputs, target, inputs, fold_num, obs_idx):
-        # XXX the coding in this section is getting way too convoluted
-
-        # process batch predictions
-        if self.args.network in ['cnn_linear', 'metadata_only']:
-            batch_preds = outputs.argmax(dim=-1).cpu()
-        elif self.args.network == 'cnn_lstm':
-            batch_preds = outputs.argmax(dim=-1).cpu().view(-1)
-        elif self.args.network == 'cnn_regressor':
-            batch_preds = outputs.cpu().numpy()
-        elif self.args.network == 'autoencoder':
-            batch_preds = outputs.cpu().numpy().squeeze(1)
-
-        # process target
-        if self.args.network == 'cnn_lstm':
-            target = target.argmax(dim=1).cpu().reshape((outputs.shape[0], 1)).repeat((1, outputs.shape[1])).view(-1)
-            obs_idx = obs_idx.reshape((outputs.shape[0], 1)).repeat((1, outputs.shape[1])).view(-1)
-        elif self.args.network in ['cnn_linear', 'metadata_only']:
-            target = target.argmax(dim=1).cpu()
-        elif self.args.network == 'autoencoder':
-            # reshape our inputs to match our autoencoder outputs and then squeeze out
-            # the channels dimension
-            target = inputs.view((inputs.shape[0]*inputs.shape[1], inputs.shape[2], inputs.shape[3])).squeeze(1)
-        elif self.args.network == 'cnn_regressor':
-            target = target.cpu()
-
-        # record any results
-        if self.is_classification:
-            self.pred_idx.extend(obs_idx.cpu().tolist())
-            self.preds.extend(batch_preds.tolist())
-            accuracy = accuracy_score(target, batch_preds)
-            self.results.update_accuracy(fold_num, accuracy)
-            # XXX fix so we can get an accurate test loss. What we have now is not test loss
-            #self.results.update_meter('test_loss', fold_num, self.criterion(outputs.float(), target.float()))
-        else:
-            self.preds.extend(batch_preds.tolist())
-            mae = mean_absolute_error(target, batch_preds)
-            self.results.update_meter('test_mae', fold_num, mae)
-            r2 = r2_score(target, batch_preds)
-            self.results.update_meter('r2', fold_num, r2)
-            mse = mean_squared_error(target, batch_preds)
-            self.results.update_meter('test_mse', fold_num, mse)
-            # XXX I'm having difficulty on types here between the autoencoder and the
-            # breath meta regressor. So just punt on this for now
-            #self.results.update_meter('test_loss', fold_num, self.criterion(torch.DoubleTensor(batch_preds), target).float())
-
-        self.epoch_targets.extend(target.tolist())
-
     def get_base_datasets(self):
         # We are doing things this way by loading sequence information here so that
         # train and test datasets can access the same reference to the sequence array
         # stored in memory if we are using kfold. It is a bit awkward on the coding
         # side but it saves us memory.
-        #
-        # XXX in future this function should probably handle to_pickle as well. Either
-        # that or we just have a separate function that handles pickling
 
         # for holdout and kfold
         if self.args.train_from_pickle:
@@ -214,6 +120,7 @@ class TrainModel(object):
         else:
             train_sequences = []
 
+        # XXX I'd like to eventually extract n_sub_batches from a pickled dataset
         kfold_num = None if self.args.kfolds is None else 0
         train_dataset = ARDSRawDataset(
             self.args.data_path,
@@ -238,7 +145,7 @@ class TrainModel(object):
         else:
             test_sequences = []
 
-        # I can't easily the train dataset as the test set because doing so would
+        # I can't easily use the train dataset as the test set because doing so would
         # involve changing internal propeties on the train set
         test_dataset = ARDSRawDataset(
             self.args.data_path,
@@ -281,29 +188,21 @@ class TrainModel(object):
 
     def train_and_test(self):
         for fold_num, (train_dataset, train_loader, test_dataset, test_loader) in enumerate(self.get_splits()):
-            model = self._get_model()
-            optimizer = self._get_optimizer(model)
-            for epoch in range(self.args.epochs):
-                self.run_train_epoch(model, train_loader, optimizer, epoch+1, fold_num)
-                self._perform_testing(epoch, model, test_dataset, test_loader, fold_num)
+            model = self.get_model()
+            optimizer = self.get_optimizer(model)
+            for epoch_num in range(self.args.epochs):
+                self.run_train_epoch(model, train_loader, optimizer, epoch_num+1, fold_num)
+                if not self.args.no_test_after_epochs or epoch_num == self.args.epochs - 1:
+                    self.run_test_epoch(epoch_num, model, test_dataset, test_loader, fold_num)
 
-        if self.args.save_model:
-            torch.save(model, self.args.save_model)
+            if self.args.save_model:
+                model_path = self.args.save_model.replace('.pth', '') + "-fold-{}.pth".format(fold_num) if self.n_runs > 1 else self.args.save_model
+                torch.save(model, model_path)
 
-        if self.is_classification:
-            self.results.aggregate_classification_results()
-        else:
-            self.results.save_all()
+        self.perform_post_modeling_actions()
         print('Run start time: {}'.format(self.start_time))
 
-    def _perform_testing(self, epoch_num, model, test_dataset, test_loader, fold_num):
-        if not self.args.no_test_after_epochs or epoch_num == self.args.epochs - 1:
-            preds = self.run_test_epoch(model, test_loader, fold_num)
-            if self.is_classification:
-                y_test = test_dataset.get_ground_truth_df()
-                self.results.perform_patient_predictions(y_test, preds, fold_num, epoch_num)
-
-    def _get_model(self):
+    def get_base_network(self):
         base_network = self.base_networks[self.args.base_network]
 
         if self.args.load_pretrained:
@@ -321,28 +220,176 @@ class TrainModel(object):
             )
         elif 'unet' in self.args.base_network:
             base_network = base_network(1)
-        elif 'densenet' in self.args.base_network:
+        else:
             base_network = base_network()
+        return base_network
 
-        if self.args.network == 'cnn_lstm':
-            model = CNNLSTMNetwork(base_network, self.n_metadata_inputs, self.args.bm_to_linear, self.args.lstm_hidden_units)
-        elif self.args.network == 'cnn_linear':
-            model = CNNLinearNetwork(base_network, self.args.n_sub_batches, self.n_metadata_inputs)
-        elif self.args.network == 'cnn_regressor':
-            model = CNNRegressor(base_network, self.n_bm_features)
-        elif self.args.network == 'metadata_only':
-            model = MetadataOnlyNetwork()
-        elif self.args.network == 'autoencoder':
-            model = AutoencoderNetwork(base_network)
-
-        return self.model_cuda_wrapper(model)
-
-    def _get_optimizer(self, model):
+    def get_optimizer(self, model):
         if self.args.optimizer == 'adam':
             optimizer = torch.optim.Adam(model.parameters(), lr=self.args.learning_rate)
         elif self.args.optimizer == 'sgd':
             optimizer = torch.optim.SGD(model.parameters(), lr=self.args.learning_rate, momentum=0.9, weight_decay=self.args.weight_decay, nesterov=True)
         return optimizer
+
+    def run_test_epoch(self, epoch_num, model, test_dataset, test_loader, fold_num):
+        self.preds = []
+        self.pred_idx = []
+        with torch.no_grad():
+            for idx, (obs_idx, seq, metadata, target) in enumerate(test_loader):
+                inputs = self.cuda_wrapper(Variable(seq.float()))
+                metadata = self.cuda_wrapper(Variable(metadata.float()))
+                outputs = model(inputs, metadata)
+                batch_preds = self._process_test_batch_results(outputs, target, inputs, fold_num)
+                self.pred_idx.extend(self.transform_obs_idx(obs_idx, outputs).cpu().tolist())
+                self.preds.extend(batch_preds)
+
+        self.record_final_epoch_testing_results(fold_num, epoch_num, test_dataset)
+
+    def get_model(self):
+        base_network = self.get_base_network()
+        return self.model_cuda_wrapper(self.get_network(base_network))
+
+    def transform_obs_idx(self, obs_idx, outputs):
+        return obs_idx
+
+
+class ClassifierMixin(object):
+    def record_testing_results(self, target, batch_preds, fold_num):
+        accuracy = accuracy_score(target, batch_preds)
+        self.results.update_accuracy(fold_num, accuracy)
+
+    def record_final_epoch_testing_results(self, fold_num, epoch_num, test_dataset):
+        self.preds = pd.Series(self.preds, index=self.pred_idx)
+        self.preds = self.preds.sort_index()
+        y_test = test_dataset.get_ground_truth_df()
+        self.results.perform_patient_predictions(y_test, self.preds, fold_num, epoch_num)
+
+    def set_loss_criterion(self):
+        if self.args.loss_func == 'vacillating':
+            self.criterion = VacillatingLoss(self.cuda_wrapper(torch.FloatTensor([self.args.valpha])))
+        elif self.args.loss_func == 'bce':
+            self.criterion = torch.nn.BCELoss()
+        elif self.args.loss_func == 'confidence':
+            self.criterion = ConfidencePenaltyLoss(self.args.conf_beta)
+
+    def perform_post_modeling_actions(self):
+        self.results.aggregate_classification_results()
+        self.results.save_all()
+
+
+class RegressorMixin(object):
+    def record_testing_results(self, target, batch_preds, fold_num):
+        mae = mean_absolute_error(target, batch_preds)
+        self.results.update_meter('test_mae', fold_num, mae)
+        r2 = r2_score(target, batch_preds)
+        self.results.update_meter('r2', fold_num, r2)
+        mse = mean_squared_error(target, batch_preds)
+        self.results.update_meter('test_mse', fold_num, mse)
+
+    def record_final_epoch_testing_results(self, fold_num, epoch_num, test_dataset):
+        self.results.print_meter_results('test_mae', fold_num)
+
+    def set_loss_criterion(self):
+        self.criterion = torch.nn.MSELoss()
+
+    def perform_post_modeling_actions(self):
+        self.results.save_all()
+
+
+class CNNLSTMModel(BaseTraining, ClassifierMixin):
+    def __init__(self, args):
+        super(CNNLSTMModel, self).__init__(args)
+
+    def calc_loss(self, outputs, target, inputs):
+        if self.args.loss_calc == 'all_breaths':
+            if self.args.batch_size > 1:
+                target = target.unsqueeze(1)
+            return self.criterion(outputs, target.repeat((1, self.args.n_sub_batches, 1)))
+        elif self.args.loss_calc == 'last_breath':
+            return self.criterion(outputs[:, -1, :], target)
+
+    # One thing that is common in this function is that we process the outputs, process
+    # the target, record testing results, and then return batch preds. It would be
+    # so much easier if this all was just in one function
+    def _process_test_batch_results(self, outputs, target, inputs, fold_num):
+        batch_preds = outputs.argmax(dim=-1).cpu().view(-1)
+        target = target.argmax(dim=1).cpu().reshape((outputs.shape[0], 1)).repeat((1, outputs.shape[1])).view(-1)
+        self.record_testing_results(target, batch_preds, fold_num)
+        return batch_preds.tolist()
+
+    def get_network(self, base_network):
+        return CNNLSTMNetwork(base_network, self.n_metadata_inputs, self.args.bm_to_linear, self.args.lstm_hidden_units)
+
+    def transform_obs_idx(self, obs_idx, outputs):
+        return obs_idx.reshape((outputs.shape[0], 1)).repeat((1, outputs.shape[1])).view(-1)
+
+
+class CNNLinearModel(BaseTraining, ClassifierMixin):
+    def __init__(self, args):
+        super(CNNLinearModel, self).__init__(args)
+
+    def calc_loss(self, outputs, target, inputs):
+        return self.criterion(outputs, target)
+
+    def _process_test_batch_results(self, outputs, target, inputs, fold_num):
+        batch_preds = outputs.argmax(dim=-1).cpu()
+        target = target.argmax(dim=1).cpu()
+        self.record_testing_results(target, batch_preds, fold_num)
+        return batch_preds.tolist()
+
+    def get_network(self, base_network):
+        return CNNLinearNetwork(base_network, self.args.n_sub_batches, self.n_metadata_inputs)
+
+
+class MetadataOnlyModel(BaseTraining, ClassifierMixin):
+    def __init__(self, args):
+        super(CNNMetadataModel, self).__init__(args)
+
+    def calc_loss(self, outputs, target, inputs):
+        return self.criterion(outputs, target)
+
+    def _process_test_batch_results(self, outputs, target, inputs, fold_num):
+        batch_preds = outputs.argmax(dim=-1).cpu()
+        target = target.argmax(dim=1).cpu()
+        self.record_testing_results(target, batch_preds, fold_num)
+        return batch_preds.tolist()
+
+    def get_network(self, _):
+        return MetadataOnlyNetwork()
+
+
+class CNNRegressorModel(BaseTraining, RegressorMixin):
+    def __init__(self, args):
+        super(CNNRegressorModel, self).__init__(args)
+
+    def calc_loss(self, outputs, target, inputs):
+        return self.criterion(outputs, target)
+
+    def _process_test_batch_results(self, outputs, target, inputs, fold_num):
+        batch_preds = outputs.cpu().numpy()
+        target = target.cpu()
+        self.record_testing_results(target, batch_preds, fold_num)
+        return batch_preds.tolist()
+
+    def get_network(self, base_network):
+        return CNNRegressor(base_network, self.n_bm_features)
+
+
+class AutoencoderModel(BaseTraining, RegressorMixin):
+    def __init__(self, args):
+        super(AutoencoderModel, self).__init__(args)
+
+    def _process_test_batch_results(self, outputs, target, inputs, fold_num):
+        batch_preds = outputs.cpu().numpy().squeeze(1)
+        target = inputs.view((inputs.shape[0]*inputs.shape[1], inputs.shape[2], inputs.shape[3])).squeeze(1)
+        self.record_testing_results(target, batch_preds, fold_num)
+        return batch_preds.tolist()
+
+    def calc_loss(self, outputs, target, inputs):
+        return self.criterion(outputs, inputs.view((inputs.shape[0]*inputs.shape[1], inputs.shape[2], inputs.shape[3])))
+
+    def get_network(self, base_network):
+        return AutoencoderNetwork(base_network)
 
 
 def main():
@@ -358,7 +405,7 @@ def main():
     parser.add_argument('--test-to-pickle')
     parser.add_argument('--cuda', action='store_true')
     parser.add_argument('-b', '--batch-size', type=int, default=16)
-    parser.add_argument('--base-network', choices=TrainModel.base_networks, default='resnet18')
+    parser.add_argument('--base-network', choices=BaseTraining.base_networks, default='resnet18')
     parser.add_argument('-lc', '--loss-calc', choices=['all_breaths', 'last_breath'], default='all_breaths')
     parser.add_argument('-nb', '--n-sub-batches', type=int, default=100, help=(
         "number of breath-subbatches for each breath frame. This has different "
@@ -383,13 +430,14 @@ def main():
     parser.add_argument('--downsample-factor', type=float, default=4.0)
     parser.add_argument('--no-drop-frames', action='store_false')
     parser.add_argument('-wd', '--weight-decay', type=float, default=.0001)
-    parser.add_argument('-loss', '--loss-func', choices=['bce', 'vacillating'], default='bce', help='This option only works for classification. Choose the loss function you want to use for classification purposes: BCE or vacillating loss.')
+    parser.add_argument('-loss', '--loss-func', choices=['bce', 'vacillating', 'confidence'], default='bce', help='This option only works for classification. Choose the loss function you want to use for classification purposes: BCE or vacillating loss.')
     parser.add_argument('--valpha', type=float, default=float('Inf'), help='alpha value to use for vacillating loss. Lower alpha values mean vacillating loss will contribute less to overall loss of the system. Default value is inf')
+    parser.add_argument('--conf-beta', type=float, default=1.0, help='Modifier to the intensity of the confidence penalty')
     parser.add_argument('--lstm-hidden-units', type=int, default=512)
-    # XXX should probably be more explicit that we are using kfold or holdout in the future
     args = parser.parse_args()
 
-    cls = TrainModel(args)
+    network_map = {'cnn_lstm': CNNLSTMModel, 'cnn_linear': CNNLinearModel, 'cnn_regressor': CNNRegressorModel, 'metadata_only': MetadataOnlyModel, 'autoencoder': AutoencoderModel}
+    cls = network_map[args.network](args)
     cls.train_and_test()
 
 

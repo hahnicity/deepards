@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 from torch import nn
 
 
@@ -18,3 +19,15 @@ class VacillatingLoss(nn.Module):
         lh[(lh > self.alpha) | torch.isnan(lh)] = rh[rh <= self.alpha]
         vacillating_loss = lh.mean()
         return bce_loss + vacillating_loss
+
+
+class ConfidencePenaltyLoss(nn.Module):
+    def __init__(self, beta):
+        super(ConfidencePenaltyLoss, self).__init__()
+        self.bce = nn.BCELoss()
+        self.beta = beta
+
+    def forward(self, pred, target):
+        bce_loss = self.bce(pred, target)
+        confidence_loss = -(self.beta * (F.softmax(pred, dim=2) * F.log_softmax(pred, dim=2))).mean()
+        return (bce_loss - confidence_loss)
