@@ -158,6 +158,7 @@ def _densenet(arch, growth_rate, block_config, num_init_features, pretrained, pr
     return model
 
 
+# XXX this should really be renamed to densenet18
 def densenet121(pretrained=False, progress=True, **kwargs):
     r"""Densenet-121 model from
     `"Densely Connected Convolutional Networks" <https://arxiv.org/pdf/1608.06993.pdf>`_
