@@ -219,8 +219,7 @@ class BaseTraining(object):
             if isinstance(saved_model, torch.nn.DataParallel):
                 saved_model = saved_model.module
             base_network = saved_model.breath_block
-            # XXX tmp debug
-            base_network.n_out_filters = 512
+            self.results.hyperparams['base_network'] = base_network.network_name
         elif self.args.base_network in ['resnet18', 'resnet50', 'resnet101', 'resnet152']:
             base_network = base_network(
                 initial_planes=self.args.initial_planes,

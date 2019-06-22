@@ -328,25 +328,15 @@ class SENet(nn.Module):
         return x
 
 
-def initialize_pretrained_model(model, num_classes, settings):
-    assert num_classes == settings['num_classes'], \
-        'num_classes should be {}, but is {}'.format(
-            settings['num_classes'], num_classes)
-    model.load_state_dict(model_zoo.load_url(settings['url']))
-    model.input_space = settings['input_space']
-    model.input_size = settings['input_size']
-    model.input_range = settings['input_range']
-    model.mean = settings['mean']
-    model.std = settings['std']
-
-
 def senet18():
     model = SENet(SEBasicBlock, [2, 2, 2, 2], groups=64, reduction=4, dropout_p=0.2)
+    model.network_name = 'senet18'
     return model
 
 
 def senet154():
     model = SENet(SEBottleneck, [3, 8, 36, 3], groups=64, reduction=16, dropout_p=0.2)
+    model.network_name = 'senet154'
     return model
 
 
@@ -354,6 +344,7 @@ def se_resnet18():
     model = SENet(SEBasicBlock, [2, 2, 2, 2], groups=1, reduction=4,
                   dropout_p=None, inplanes=64, input_3x3=False,
                   downsample_kernel_size=1, downsample_padding=0)
+    model.network_name = 'se_resnet18'
     return model
 
 
@@ -361,6 +352,7 @@ def se_resnet50():
     model = SENet(SEResNetBottleneck, [3, 4, 6, 3], groups=1, reduction=16,
                   dropout_p=None, inplanes=64, input_3x3=False,
                   downsample_kernel_size=1, downsample_padding=0)
+    model.network_name = 'se_resnet50'
     return model
 
 
@@ -368,6 +360,7 @@ def se_resnet101():
     model = SENet(SEResNetBottleneck, [3, 4, 23, 3], groups=1, reduction=16,
                   dropout_p=None, inplanes=64, input_3x3=False,
                   downsample_kernel_size=1, downsample_padding=0)
+    model.network_name = 'se_resnet101'
     return model
 
 
@@ -375,6 +368,7 @@ def se_resnet152():
     model = SENet(SEResNetBottleneck, [3, 8, 36, 3], groups=1, reduction=16,
                   dropout_p=None, inplanes=64, input_3x3=False,
                   downsample_kernel_size=1, downsample_padding=0)
+    model.network_name = 'se_resnet152'
     return model
 
 
@@ -382,6 +376,7 @@ def se_resnext50_32x4d():
     model = SENet(SEResNeXtBottleneck, [3, 4, 6, 3], groups=32, reduction=16,
                   dropout_p=None, inplanes=64, input_3x3=False,
                   downsample_kernel_size=1, downsample_padding=0)
+    model.network_name = 'se_resnext50_32x4d'
     return model
 
 
@@ -389,4 +384,5 @@ def se_resnext101_32x4d():
     model = SENet(SEResNeXtBottleneck, [3, 4, 23, 3], groups=32, reduction=16,
                   dropout_p=None, inplanes=64, input_3x3=False,
                   downsample_kernel_size=1, downsample_padding=0)
+    model.network_name = 'se_resnext101_32x4d'
     return model
