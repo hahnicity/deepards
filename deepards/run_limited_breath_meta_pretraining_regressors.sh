@@ -1,6 +1,6 @@
 #!/bin/bash
 
-for base_network in 'densenet121' 'densenet161' 'densenet201'
+for base_network in 'senet18' 'senet154' 'se_resnet18' 'se_reset50' 'se_resnext50_32x4d'
 do
     for bs in 64 128 256
     do
