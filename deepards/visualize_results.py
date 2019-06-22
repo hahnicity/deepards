@@ -98,13 +98,13 @@ def visualize_results_for_experiment(experiment_name):
     for i, exp_data in enumerate(experiment_data):
         if 'n_sub_batches' not in exp_data:
             exp_data['n_sub_batches'] = np.nan
-    experiment_data = sorted(experiment_data, key=lambda x: (x['n_sub_batches'], x['batch_size'], x['learning_rate'], x['confidence_beta']))
+    experiment_data = sorted(experiment_data, key=lambda x: (x['start_time']))
 
     if len(experiment_data) == 0:
         raise Exception('no experiments found with name: {}'.format(experiment_name))
 
     if experiment_data[0]['network'] in ['cnn_lstm', 'cnn_linear']:
-        metrics = ['auc', 'f1_ards']
+        metrics = ['auc', 'patient_accuracy', 'f1_ards', 'f1_other']
     else:
         metrics = ['test_mae']
 

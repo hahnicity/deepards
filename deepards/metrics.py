@@ -343,6 +343,7 @@ class DeepARDSResults(object):
         self.update_meter('test_sen_ards', fold_num, stats[stats.patho == 'ARDS'].iloc[0].sensitivity)
         self.update_meter('test_f1_other', fold_num, stats[stats.patho == 'OTHER'].iloc[0].f1)
         self.update_meter('test_f1_ards', fold_num, stats[stats.patho == 'ARDS'].iloc[0].f1)
+        self.update_meter('test_patient_accuracy', fold_num, stats[stats.patho == 'ARDS'].iloc[0].accuracy)
 
         self._print_specific_results_report(stats)
         incorrect_pts = chunked_results[chunked_results.patho != chunked_results.prediction]
