@@ -34,6 +34,40 @@ class SEModule(nn.Module):
         return module_input * x
 
 
+class SEBasicBlock(nn.Module):
+    expansion = 1
+
+    def __init__(self, inplanes, planes, groups, reduction, stride=1,
+                 downsample=None):
+        super(SEBasicBlock, self).__init__()
+        self.conv1 = nn.Conv1d(inplanes, planes, kernel_size=3, stride=stride, padding=1, bias=False, groups=groups)
+        self.bn1 = nn.BatchNorm1d(planes)
+        self.relu = nn.ReLU(inplace=True)
+        self.conv2 = nn.Conv1d(planes, planes, kernel_size=3, stride=1, padding=1, bias=False, groups=groups)
+        self.se_module = SEModule(planes, reduction=reduction)
+        self.bn2 = nn.BatchNorm1d(planes)
+        self.downsample = downsample
+        self.stride = stride
+
+    def forward(self, x):
+        residual = x
+
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+
+        if self.downsample is not None:
+            residual = self.downsample(x)
+
+        out = self.se_module(out) + residual
+        out = self.relu(out)
+
+        return out
+
+
 class Bottleneck(nn.Module):
     """
     Base class for bottlenecks that implements `forward()` method.
@@ -306,9 +340,20 @@ def initialize_pretrained_model(model, num_classes, settings):
     model.std = settings['std']
 
 
+def senet18():
+    model = SENet(SEBasicBlock, [2, 2, 2, 2], groups=64, reduction=4, dropout_p=0.2)
+    return model
+
+
 def senet154():
-    model = SENet(SEBottleneck, [3, 8, 36, 3], groups=64, reduction=16,
-                  dropout_p=0.2)
+    model = SENet(SEBottleneck, [3, 8, 36, 3], groups=64, reduction=16, dropout_p=0.2)
+    return model
+
+
+def se_resnet18():
+    model = SENet(SEBasicBlock, [2, 2, 2, 2], groups=1, reduction=4,
+                  dropout_p=None, inplanes=64, input_3x3=False,
+                  downsample_kernel_size=1, downsample_padding=0)
     return model
 
 

@@ -17,7 +17,7 @@ from deepards.models.autoencoder_cnn import AutoencoderCNN
 from deepards.models.autoencoder_network import AutoencoderNetwork
 from deepards.models.densenet import densenet121, densenet161, densenet169, densenet201
 from deepards.models.resnet import resnet18, resnet50, resnet101, resnet152
-from deepards.models.senet import senet154, se_resnet50, se_resnet101, se_resnet152, se_resnext50_32x4d, se_resnext101_32x4d
+from deepards.models.senet import senet18, senet154, se_resnet18, se_resnet50, se_resnet101, se_resnet152, se_resnext50_32x4d, se_resnext101_32x4d
 from deepards.models.torch_cnn_lstm_combo import CNNLSTMNetwork
 from deepards.models.torch_cnn_bm_regressor import CNNRegressor
 from deepards.models.torch_cnn_linear_network import CNNLinearNetwork
@@ -37,7 +37,9 @@ class BaseTraining(object):
         'densenet169': densenet169,
         'densenet201': densenet201,
         'basic_cnn_ae': AutoencoderCNN,
+        'senet18': senet18,
         'senet154': senet154,
+        'se_resnet18': se_resnet18,
         'se_resnet50': se_resnet50,
         'se_resnet101': se_resnet101,
         'se_resnet152': se_resnet152,
