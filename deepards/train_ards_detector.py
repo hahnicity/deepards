@@ -15,13 +15,14 @@ from deepards.loss import ConfidencePenaltyLoss, VacillatingLoss
 from deepards.metrics import DeepARDSResults, Reporting
 from deepards.models.autoencoder_cnn import AutoencoderCNN
 from deepards.models.autoencoder_network import AutoencoderNetwork
+from deepards.models.densenet import densenet121, densenet161, densenet169, densenet201
 from deepards.models.resnet import resnet18, resnet50, resnet101, resnet152
+from deepards.models.senet import senet154, se_resnet50, se_resnet101, se_resnet152, se_resnext50_32x4d, se_resnext101_32x4d
 from deepards.models.torch_cnn_lstm_combo import CNNLSTMNetwork
 from deepards.models.torch_cnn_bm_regressor import CNNRegressor
 from deepards.models.torch_cnn_linear_network import CNNLinearNetwork
 from deepards.models.torch_metadata_only_network import MetadataOnlyNetwork
 from deepards.models.unet import UNet
-from models.densenet import densenet121, densenet161, densenet169, densenet201
 
 
 class BaseTraining(object):
@@ -36,6 +37,12 @@ class BaseTraining(object):
         'densenet169': densenet169,
         'densenet201': densenet201,
         'basic_cnn_ae': AutoencoderCNN,
+        'senet154': senet154,
+        'se_resnet50': se_resnet50,
+        'se_resnet101': se_resnet101,
+        'se_resnet152': se_resnet152,
+        'se_resnext50_32x4d': se_resnext50_32x4d,
+        'se_resnext101_32x4d': se_resnext101_32x4d,
     }
 
     def __init__(self, args):
@@ -212,7 +219,7 @@ class BaseTraining(object):
             base_network = saved_model.breath_block
             # XXX tmp debug
             base_network.n_out_filters = 512
-        elif 'resnet' in self.args.base_network:
+        elif self.args.base_network in ['resnet18', 'resnet50', 'resnet101', 'resnet152']:
             base_network = base_network(
                 initial_planes=self.args.initial_planes,
                 first_pool_type=self.args.resnet_first_pool_type,
