@@ -15,7 +15,7 @@ from deepards.loss import ConfidencePenaltyLoss, VacillatingLoss
 from deepards.metrics import DeepARDSResults, Reporting
 from deepards.models.autoencoder_cnn import AutoencoderCNN
 from deepards.models.autoencoder_network import AutoencoderNetwork
-from deepards.models.densenet import densenet121, densenet161, densenet169, densenet201
+from deepards.models.densenet import densenet18, densenet121, densenet161, densenet169, densenet201
 from deepards.models.resnet import resnet18, resnet50, resnet101, resnet152
 from deepards.models.senet import senet18, senet154, se_resnet18, se_resnet50, se_resnet101, se_resnet152, se_resnext50_32x4d, se_resnext101_32x4d
 from deepards.models.torch_cnn_lstm_combo import CNNLSTMNetwork
@@ -32,6 +32,7 @@ class BaseTraining(object):
         'resnet101': resnet101,
         'resnet152': resnet152,
         'unet': UNet,
+        'densenet18': densenet18,
         'densenet121': densenet121,
         'densenet161': densenet161,
         'densenet169': densenet169,
