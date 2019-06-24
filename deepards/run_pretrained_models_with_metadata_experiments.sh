@@ -2,7 +2,7 @@
 
 for network in 'cnn_linear' 'cnn_lstm'
 do
-    for base_network in 'densenet18' 'densenet161' 'densenet201'
+    for base_network in 'densenet18' 'densenet161'
     do
         for bs in 16
         do
