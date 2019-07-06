@@ -111,6 +111,10 @@ class ARDSRawDataset(Dataset):
             self._get_breath_by_breath_dataset(self._perform_spaced_padding, self._pathophysiology_target)
         elif dataset_type == 'unpadded_sequences':
             self.get_unpadded_sequences_dataset(self._regular_unpadded_processing, self._pathophysiology_target)
+        elif dataset_type == 'unpadded_centered_sequences':
+            self.get_unpadded_sequences_dataset(self._unpadded_centered_processing, self._pathophysiology_target)
+        elif dataset_type == 'unpadded_centered_downsampled_sequences':
+            self.get_unpadded_sequences_dataset(self._downsampled_centered_processing, self._pathophysiology_target)
         elif dataset_type == 'unpadded_downsampled_sequences':
             self.get_unpadded_sequences_dataset(self._downsampled_unpadded_processing, self._pathophysiology_target)
         elif dataset_type == 'unpadded_downsampled_autoencoder_sequences':
@@ -386,6 +390,21 @@ class ARDSRawDataset(Dataset):
         new_samples = int(math.ceil(len(flow) / float(self.unpadded_downsample_factor)))
         flow = list(resample(flow, new_samples))
         return self._regular_unpadded_processing(flow, breath_arr, batch_arr)
+
+    def _unpadded_centered_processing(self, flow, breath_arr, batch_arr):
+        if (len(flow) + len(breath_arr)) < self.seq_len:
+            breath_arr.extend(flow)
+        else:
+            remaining = self.seq_len - len(breath_arr)
+            breath_arr.extend(flow[:remaining])
+            batch_arr.append((np.array(breath_arr) - self.mu) / self.std)
+            breath_arr = []
+        return batch_arr, breath_arr
+
+    def _downsampled_centered_processing(self, flow, breath_arr, batch_arr):
+        new_samples = int(math.ceil(len(flow) / float(self.unpadded_downsample_factor)))
+        flow = list(resample(flow, new_samples))
+        return self._unpadded_centered_processing(flow, breath_arr, batch_arr)
 
     def _get_patient_id_from_file(self, filename):
         match = re.search(r'(0\d{3}RPI\d{10})', filename)
