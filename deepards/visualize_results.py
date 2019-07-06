@@ -125,10 +125,10 @@ def visualize_results_for_experiment(experiment_name):
                 else:
                     vals += torch.load(f).values.numpy()
             av = vals / len(metric_files)
-            plt.plot(av, label='average {} run {}'.format(metric, i))
-        plt.legend()
+            plt.plot(av, label='run {}'.format(i))
+        plt.legend(loc='lower right', prop={'size': 8})
         plt.grid()
-        plt.ylabel(metric)
+        plt.ylabel(metric.replace('_', ' '))
         plt.show()
 
 
