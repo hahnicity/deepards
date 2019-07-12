@@ -67,6 +67,9 @@ class BaseTraining(object):
         else:
             self.n_metadata_inputs = 0
 
+        if self.args.unshuffled and self.args.batch_size > 1:
+            raise Exception('Currently we can only run unshuffled runs with a batch size of 1!')
+
         self.n_runs = self.args.kfolds if self.args.kfolds is not None else 1
         # Train and test both load from the same dataset in the case of kfold
         if self.n_runs > 1:
@@ -88,34 +91,28 @@ class BaseTraining(object):
         print('Run start time: {}'.format(self.start_time))
 
     def run_train_epoch(self, model, train_loader, optimizer, epoch_num, fold_num):
-        n_loss = 0
-        total_loss = 0
         with torch.enable_grad():
             print("\nrun epoch {}\n".format(epoch_num))
-            # In the future we can abstract away dataset specific outputs into separate
-            # classes, but for now I'm not convinced that the refactor is worth it.
             for idx, (obs_idx, seq, metadata, target) in enumerate(train_loader):
                 model.zero_grad()
-                target_shape = target.numpy().shape
                 target = self.cuda_wrapper(target.float())
                 inputs = self.cuda_wrapper(Variable(seq.float()))
                 metadata = self.cuda_wrapper(Variable(metadata.float()))
                 outputs = model(inputs, metadata)
-                loss = self.calc_loss(outputs, target, inputs)
-                loss.backward()
-                optimizer.step()
-                optimizer.zero_grad()
-                # print individual loss and total loss
-                total_loss += loss.data
-                self.results.update_loss(fold_num, loss.data)
-                n_loss += 1
-                # If the average loss jumps by > 100% then drop into debugger
-                #if n_loss > 1 and (total_loss / n_loss) / ((total_loss-loss.data) / (n_loss-1)) > 1.5:
-                #    import IPython; IPython.embed()
-                if not self.args.no_print_progress:
-                    print("batch num: {}/{}, avg loss: {}\r".format(idx+1, len(train_loader), total_loss/n_loss), end="")
+                self.handle_train_optimization(optimizer, outputs, target, inputs, fold_num, len(train_loader), idx)
                 if self.args.debug:
                     break
+
+    def handle_train_optimization(self, optimizer, outputs, target, inputs, fold_num, total_batches, batch_idx):
+        loss = self.calc_loss(outputs, target, inputs)
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+        self.results.update_loss(fold_num, loss.data)
+
+        # print individual loss and total loss
+        if not self.args.no_print_progress:
+            print("batch num: {}/{}, avg loss: {}\r".format(batch_idx, total_batches, self.results.get_meter('loss', fold_num), end=""))
 
     def get_base_datasets(self):
         # We are doing things this way by loading sequence information here so that
@@ -183,14 +180,14 @@ class BaseTraining(object):
             train_loader = DataLoader(
                 train_dataset,
                 batch_size=self.args.batch_size,
-                shuffle=True,
+                shuffle=True if not self.args.unshuffled else False,
                 pin_memory=self.args.cuda,
                 num_workers=self.args.loader_threads,
             )
             test_loader = DataLoader(
                 test_dataset,
                 batch_size=self.args.batch_size,
-                shuffle=True,
+                shuffle=True if not self.args.unshuffled else False,
                 pin_memory=self.args.cuda,
                 num_workers=self.args.loader_threads,
             )
@@ -313,7 +310,7 @@ class CNNLSTMModel(BaseTraining, ClassifierMixin):
         if self.args.loss_calc == 'all_breaths':
             if self.args.batch_size > 1:
                 target = target.unsqueeze(1)
-            return self.criterion(outputs, target.repeat((1, self.args.n_sub_batches, 1)))
+            return self.criterion(outputs, target.repeat((1, outputs.shape[1], 1)))
         elif self.args.loss_calc == 'last_breath':
             return self.criterion(outputs[:, -1, :], target)
 
@@ -331,6 +328,52 @@ class CNNLSTMModel(BaseTraining, ClassifierMixin):
 
     def transform_obs_idx(self, obs_idx, outputs):
         return obs_idx.reshape((outputs.shape[0], 1)).repeat((1, outputs.shape[1])).view(-1)
+
+    def run_train_epoch(self, model, train_loader, optimizer, epoch_num, fold_num):
+        print("\nrun epoch {}\n".format(epoch_num))
+        gt_df = train_loader.dataset.get_ground_truth_df()
+        last_pt = None
+        with torch.enable_grad():
+            for idx, (obs_idx, seq, metadata, target) in enumerate(train_loader):
+                model.zero_grad()
+                target = self.cuda_wrapper(target.float())
+                inputs = self.cuda_wrapper(Variable(seq.float()))
+                metadata = self.cuda_wrapper(Variable(metadata.float()))
+                if not self.args.unshuffled:
+                    outputs, _ = model(inputs, metadata, None)
+                else:
+                    cur_pt = gt_df.loc[obs_idx].patient.unique()[0]
+                    if cur_pt != last_pt:
+                        hx_cx = None
+                    outputs, hx_cx = model(inputs, metadata, hx_cx)
+                    last_pt = cur_pt
+                self.handle_train_optimization(optimizer, outputs, target, inputs, fold_num, len(train_loader), idx)
+
+                if self.args.debug:
+                    break
+
+    def run_test_epoch(self, epoch_num, model, test_dataset, test_loader, fold_num):
+        self.preds = []
+        self.pred_idx = []
+        gt_df = test_dataset.get_ground_truth_df()
+        last_pt = None
+        with torch.no_grad():
+            for idx, (obs_idx, seq, metadata, target) in enumerate(test_loader):
+                inputs = self.cuda_wrapper(Variable(seq.float()))
+                metadata = self.cuda_wrapper(Variable(metadata.float()))
+                if not self.args.unshuffled:
+                    outputs, _ = model(inputs, metadata, None)
+                else:
+                    cur_pt = gt_df.loc[obs_idx].patient.unique()[0]
+                    if cur_pt != last_pt:
+                        hx_cx = None
+                    outputs, hx_cx = model(inputs, metadata, hx_cx)
+                    last_pt = cur_pt
+                batch_preds = self._process_test_batch_results(outputs, target, inputs, fold_num)
+                self.pred_idx.extend(self.transform_obs_idx(obs_idx, outputs).cpu().tolist())
+                self.preds.extend(batch_preds)
+
+        self.record_final_epoch_testing_results(fold_num, epoch_num, test_dataset)
 
 
 class CNNLinearModel(BaseTraining, ClassifierMixin):
@@ -455,6 +498,7 @@ def main():
     parser.add_argument('--valpha', type=float, default=float('Inf'), help='alpha value to use for vacillating loss. Lower alpha values mean vacillating loss will contribute less to overall loss of the system. Default value is inf')
     parser.add_argument('--conf-beta', type=float, default=1.0, help='Modifier to the intensity of the confidence penalty')
     parser.add_argument('--lstm-hidden-units', type=int, default=512)
+    parser.add_argument('--unshuffled', action='store_true', help='dont shuffle data for lstm processing')
     args = parser.parse_args()
 
     network_map = {'cnn_lstm': CNNLSTMModel, 'cnn_linear': CNNLinearModel, 'cnn_regressor': CNNRegressorModel, 'metadata_only': MetadataOnlyModel, 'autoencoder': AutoencoderModel}

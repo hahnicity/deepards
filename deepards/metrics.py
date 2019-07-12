@@ -298,6 +298,12 @@ class DeepARDSResults(object):
             self.reporting.new_meter(meter_name)
         self.reporting.update(meter_name, val)
 
+    def get_meter(self, metric_name, fold_num):
+        meter_name = '{}_fold_{}'.format(metric_name, fold_num)
+        if not self.reporting.does_meter_exist(meter_name):
+            self.reporting.new_meter(meter_name)
+        return self.reporting.meters[meter_name]
+
     def print_meter_results(self, metric_name, fold_num):
         meter_name = '{}_fold_{}'.format(metric_name, fold_num)
         print(self.reporting.meters[meter_name])

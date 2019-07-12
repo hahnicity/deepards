@@ -26,7 +26,7 @@ class CNNLSTMNetwork(nn.Module):
 
         self.softmax = nn.Softmax(dim=-1)
 
-    def forward(self, x, metadata):
+    def forward(self, x, metadata, hx_cx):
         # input should be in shape: (batches, breaths in seq, chans, 224)
         if x.shape[-1] != 224:
             raise Exception('input breaths must have sequence length of 224')
@@ -44,11 +44,8 @@ class CNNLSTMNetwork(nn.Module):
             block_out = block_out.unsqueeze(dim=0)
             outputs = torch.cat([outputs, block_out], dim=0)
 
-        # [0] just gets the lstm outputs and ignores hx,cx
-        #print(outputs.size())
-        x = self.lstm(outputs)[0]
-        #print(x.size())
+        x, (hx, cx) = self.lstm(outputs, hx_cx)
         if self.bm_to_linear:
             x = torch.cat([x, metadata], dim=-1)
         x = self.linear_final(x)
-        return self.softmax(x)
+        return self.softmax(x), (hx, cx)
