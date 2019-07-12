@@ -98,10 +98,15 @@ def visualize_results_for_experiment(experiment_name):
     for i, exp_data in enumerate(experiment_data):
         if 'n_sub_batches' not in exp_data:
             exp_data['n_sub_batches'] = np.nan
-    experiment_data = sorted(experiment_data, key=lambda x: (x['n_sub_batches'], x['batch_size'], x['learning_rate']))
+    experiment_data = sorted(experiment_data, key=lambda x: (x['start_time']))
 
-    # haven't figured out how to do accuracy yet
-    metrics = ['auc', 'f1_ards', 'epoch_test_accuracy']
+    if len(experiment_data) == 0:
+        raise Exception('no experiments found with name: {}'.format(experiment_name))
+
+    if experiment_data[0]['network'] in ['cnn_lstm', 'cnn_linear']:
+        metrics = ['auc', 'patient_accuracy', 'f1_ards', 'f1_other']
+    else:
+        metrics = ['test_mae']
 
     for i, exp_data in enumerate(experiment_data):
         print('Run {}. Params: {}'.format(i, exp_data))
@@ -120,10 +125,10 @@ def visualize_results_for_experiment(experiment_name):
                 else:
                     vals += torch.load(f).values.numpy()
             av = vals / len(metric_files)
-            plt.plot(av, label='average {} run {}'.format(metric, i))
-        plt.legend()
+            plt.plot(av, label='run {}'.format(i))
+        plt.legend(loc='lower right', prop={'size': 8})
         plt.grid()
-        plt.ylabel(metric)
+        plt.ylabel(metric.replace('_', ' '))
         plt.show()
 
 

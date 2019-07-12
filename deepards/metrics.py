@@ -235,7 +235,6 @@ class DeepARDSResults(object):
         last_epoch = sorted(self.results.epoch_num.unique())[-1]
         aggregate_stats = self._aggregate_specific_results(self.results[self.results.epoch_num == last_epoch])
         self._print_specific_results_report(aggregate_stats)
-        self.save_all()
         self.results.to_pickle('results/{}_patient_results.pkl'.format(self.start_time))
         aggregate_stats.to_pickle('results/{}_aggregate_results.pkl'.format(self.start_time))
 
@@ -299,6 +298,12 @@ class DeepARDSResults(object):
             self.reporting.new_meter(meter_name)
         self.reporting.update(meter_name, val)
 
+    def get_meter(self, metric_name, fold_num):
+        meter_name = '{}_fold_{}'.format(metric_name, fold_num)
+        if not self.reporting.does_meter_exist(meter_name):
+            self.reporting.new_meter(meter_name)
+        return self.reporting.meters[meter_name]
+
     def print_meter_results(self, metric_name, fold_num):
         meter_name = '{}_fold_{}'.format(metric_name, fold_num)
         print(self.reporting.meters[meter_name])
@@ -344,6 +349,7 @@ class DeepARDSResults(object):
         self.update_meter('test_sen_ards', fold_num, stats[stats.patho == 'ARDS'].iloc[0].sensitivity)
         self.update_meter('test_f1_other', fold_num, stats[stats.patho == 'OTHER'].iloc[0].f1)
         self.update_meter('test_f1_ards', fold_num, stats[stats.patho == 'ARDS'].iloc[0].f1)
+        self.update_meter('test_patient_accuracy', fold_num, stats[stats.patho == 'ARDS'].iloc[0].accuracy)
 
         self._print_specific_results_report(stats)
         incorrect_pts = chunked_results[chunked_results.patho != chunked_results.prediction]

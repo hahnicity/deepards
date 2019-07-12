@@ -40,6 +40,13 @@ By default, after each epoch the model will run a testing epoch to evaluate trai
 want this to happen in the future you can provide the `--no-test-after-epochs` to the training CLI.
 You may have to wait for awhile for the model to finish. So feel free to do other work while it runs.
 
+If you want to run an experiment to test a number of different parameters you should do so by passing the `-exp` flag to the `train_ards_detector.py` script.
+This will allow the results reporting to understand that you wish to compare different runs in the same cluster of experiments to each other. Example
+
+    python train_ards_detector.py -lr .001 --kfolds 5 -exp test_learning_rate_changes
+    python train_ards_detector.py -lr .0001 --kfolds 5 -exp test_learning_rate_changes
+    python train_ards_detector.py -lr .00001 --kfolds 5 -exp test_learning_rate_changes
+
 ## Dataset Types
 
 You may have noticed the `-dt` flag we specified above. This stands for `--dataset-type`. Different
@@ -72,6 +79,43 @@ or not. More experiments will need to be done however to validate which performs
 of padded_breath_by_breath is that you can pretrain CNNs using breath metadata regressors and then apply it to ARDS detection.
 I will discuss this in a later section.
 
+## Visualizing Results
+Now that you've run everything you will want to visualize your results in an informative way. You can do so using the `visualize_results.py` script. You can use this
+a few different ways.
 
+ 1. Pass in the starting time of a run. This starting time is given to you via the CLI
 
-scp -r kavish@mars.ece.ucdavis.edu:/deepards/deepards/results ~/Desktop/results
+        python visualize_results.py -st 1561106349
+
+ 2. Pass in the experiment name you wish to compare. This will allow you to compare different parameters in an experiment
+
+        python visualize_results.py -exp test_learning_rate_changes
+
+## Pretraining
+It has been noted that training a neural network on a related task and then applying it to your dataset in question has
+either improved results of the classifier or improved the speed at which a classifier converges. We can do this using the ARDS
+dataset by training the neural network to determine specific metadata properties of a breath. These properties can be computed
+computationally using non-ML algorithms, but the advantage of using them in a neural network is that learning these properties
+can teach the network to recognize breaths before it is applied to the ARDS dataset.
+
+### Dataset
+First we need a dataset of breaths and corresponding breath metadata. We can set this up by using the `create_separate_breath_meta_dataset.py` script. We should ensure the
+script trains on a dataset of patients that do not have relation to the current ARDS
+cohort. Of course evaluating the performance of the regressor on ARDS dataset patients
+is OK though. This script operates by K-means clustering and then randomly picks a number
+of breaths from the cluster. This helps to ensure that we have a heterogeneous sampling
+of breaths to draw from so that we are not overtraining our regressor on a single breath type. The script will ensure that a given number of breaths are chosen from each cluster.
+You can create the dataset:
+
+    python create_separate_breath_meta_dataset.py -dp /path/to/patient/dirs --clusters 75 -bp 100
+
+This implementation will find 75 clusters of breaths from each patient in our dataset and
+then will extract a maximum of 100 breaths from each of these clusters. At maximum this
+will ensure we get 7500 breaths from each patient.
+
+### Pretraining
+Once the dataset is created you can train your regressor on it.
+
+    python train_ards_detector.py -n cnn_regressor --cuda --save-model pretrained-model.pth -dp /path/to/breath/meta/dataset -dt padded_breath_by_breath_with_limited_bm_target
+
+This will save a deep CNN model that you can use to analyze your breath data in future runs.

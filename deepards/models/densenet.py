@@ -153,9 +153,21 @@ def _load_state_dict(model, model_url, progress):
 def _densenet(arch, growth_rate, block_config, num_init_features, pretrained, progress,
               **kwargs):
     model = DenseNet(growth_rate, block_config, num_init_features, **kwargs)
+    model.network_name = arch
     if pretrained:
         _load_state_dict(model, model_urls[arch], progress)
     return model
+
+
+def densenet18(pretrained=False, progress=True, **kwargs):
+    r"""Densenet-18 model from
+    `"Densely Connected Convolutional Networks" <https://arxiv.org/pdf/1608.06993.pdf>`_
+    Args:
+        pretrained (bool): If True, returns a model pre-trained on ImageNet
+        progress (bool): If True, displays a progress bar of the download to stderr
+    """
+    return _densenet('densenet18', 32, (2, 2, 2, 2), 64, pretrained, progress,
+                     **kwargs)
 
 
 def densenet121(pretrained=False, progress=True, **kwargs):
@@ -165,10 +177,8 @@ def densenet121(pretrained=False, progress=True, **kwargs):
         pretrained (bool): If True, returns a model pre-trained on ImageNet
         progress (bool): If True, displays a progress bar of the download to stderr
     """
-    return _densenet('densenet121', 32, (2, 2, 2, 2), 64, pretrained, progress,
+    return _densenet('densenet121', 32, (6, 12, 24, 16), 64, pretrained, progress,
                      **kwargs)
-    #return _densenet('densenet121', 32, (2, 2, 2, 2), 64, pretrained, progress,
-                    # **kwargs)
 
 
 def densenet161(pretrained=False, progress=True, **kwargs):

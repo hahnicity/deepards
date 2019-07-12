@@ -7,6 +7,9 @@ __pycache__/
 *pkl.gz
 results/
 *.pth
+*.DS_Store
+*.Rhistory
+Data/
 
 # C extensions
 *.so

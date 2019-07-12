@@ -119,7 +119,7 @@ class ResNet(nn.Module):
             elif isinstance(m, nn.BatchNorm1d):
                 m.weight.data.fill_(1)
                 m.bias.data.zero_()
-        self.n_out_filters = self.inplanes
+        self.n_out_filters = self.inplanes * block.expansion
 
     def _make_layer(self, block, planes, blocks, stride=1):
         downsample = None
@@ -170,6 +170,7 @@ def resnet18(pretrained=False, **kwargs):
         pretrained (bool): If True, returns a model pre-trained on ImageNet
     """
     model = ResNet(BasicBlock, [2, 2, 2, 2], **kwargs)
+    model.network_name = 'resnet18'
     return model
 
 
@@ -181,6 +182,7 @@ def resnet34(pretrained=False, **kwargs):
         pretrained (bool): If True, returns a model pre-trained on ImageNet
     """
     model = ResNet(BasicBlock, [3, 4, 6, 3], **kwargs)
+    model.network_name = 'resnet34'
     return model
 
 
@@ -192,6 +194,7 @@ def resnet50(pretrained=False, **kwargs):
         pretrained (bool): If True, returns a model pre-trained on ImageNet
     """
     model = ResNet(Bottleneck, [3, 4, 6, 3], **kwargs)
+    model.network_name = 'resnet50'
     return model
 
 
@@ -203,6 +206,7 @@ def resnet101(pretrained=False, **kwargs):
         pretrained (bool): If True, returns a model pre-trained on ImageNet
     """
     model = ResNet(Bottleneck, [3, 4, 23, 3], **kwargs)
+    model.network_name = 'resnet101'
     return model
 
 
@@ -214,4 +218,5 @@ def resnet152(pretrained=False, **kwargs):
         pretrained (bool): If True, returns a model pre-trained on ImageNet
     """
     model = ResNet(Bottleneck, [3, 8, 36, 3], **kwargs)
+    model.network_name = 'resnet152'
     return model
