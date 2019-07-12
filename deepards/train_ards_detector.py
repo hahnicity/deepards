@@ -360,6 +360,16 @@ class CNNLSTMModel(BaseTraining, ClassifierMixin):
         last_pt = None
         with torch.no_grad():
             for idx, (obs_idx, seq, metadata, target) in enumerate(test_loader):
+                if seq.shape[0] % 2 == 1:
+                    # cutoff odd numbered observation because data parallel doesnt
+                    # play well with odd batch sizes for some reason in not entirely
+                    # known circumstances
+                    new_dim = seq.shape[0] - 1
+                    obs_idx = obs_idx[:new_dim]
+                    seq = seq[:new_dim]
+                    target = target[:new_dim]
+                    metadata = metadata[:new_dim]
+                    continue
                 inputs = self.cuda_wrapper(Variable(seq.float()))
                 metadata = self.cuda_wrapper(Variable(metadata.float()))
                 if not self.args.unshuffled:
