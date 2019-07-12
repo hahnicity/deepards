@@ -346,6 +346,7 @@ class CNNLSTMModel(BaseTraining, ClassifierMixin):
                     if cur_pt != last_pt:
                         hx_cx = None
                     outputs, hx_cx = model(inputs, metadata, hx_cx)
+                    hx_cx = (hx_cx[0].detach(), hx_cx[1].detach())
                     last_pt = cur_pt
                 self.handle_train_optimization(optimizer, outputs, target, inputs, fold_num, len(train_loader), idx)
 
