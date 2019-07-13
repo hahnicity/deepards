@@ -95,6 +95,7 @@ class BaseTraining(object):
             print("\nrun epoch {}\n".format(epoch_num))
             for idx, (obs_idx, seq, metadata, target) in enumerate(train_loader):
                 model.zero_grad()
+                obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)
                 target = self.cuda_wrapper(target.float())
                 inputs = self.cuda_wrapper(Variable(seq.float()))
                 metadata = self.cuda_wrapper(Variable(metadata.float()))
@@ -242,6 +243,7 @@ class BaseTraining(object):
         self.pred_idx = []
         with torch.no_grad():
             for idx, (obs_idx, seq, metadata, target) in enumerate(test_loader):
+                obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)
                 inputs = self.cuda_wrapper(Variable(seq.float()))
                 metadata = self.cuda_wrapper(Variable(metadata.float()))
                 outputs = model(inputs, metadata)
@@ -257,6 +259,18 @@ class BaseTraining(object):
 
     def transform_obs_idx(self, obs_idx, outputs):
         return obs_idx
+
+    def clip_odd_batch_sizes(self, obs_idx, seq, metadata, target):
+        if seq.shape[0] % 2 == 1:
+            # cutoff odd numbered observation because data parallel doesnt
+            # play well with odd batch sizes for some reason in not entirely
+            # known circumstances
+            new_dim = seq.shape[0] - 1
+            obs_idx = obs_idx[:new_dim]
+            seq = seq[:new_dim]
+            target = target[:new_dim]
+            metadata = metadata[:new_dim]
+        return obs_idx, seq, metadata, target
 
 
 class ClassifierMixin(object):
@@ -336,6 +350,7 @@ class CNNLSTMModel(BaseTraining, ClassifierMixin):
         with torch.enable_grad():
             for idx, (obs_idx, seq, metadata, target) in enumerate(train_loader):
                 model.zero_grad()
+                obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)
                 target = self.cuda_wrapper(target.float())
                 inputs = self.cuda_wrapper(Variable(seq.float()))
                 metadata = self.cuda_wrapper(Variable(metadata.float()))
@@ -360,16 +375,7 @@ class CNNLSTMModel(BaseTraining, ClassifierMixin):
         last_pt = None
         with torch.no_grad():
             for idx, (obs_idx, seq, metadata, target) in enumerate(test_loader):
-                if seq.shape[0] % 2 == 1:
-                    # cutoff odd numbered observation because data parallel doesnt
-                    # play well with odd batch sizes for some reason in not entirely
-                    # known circumstances
-                    new_dim = seq.shape[0] - 1
-                    obs_idx = obs_idx[:new_dim]
-                    seq = seq[:new_dim]
-                    target = target[:new_dim]
-                    metadata = metadata[:new_dim]
-                    continue
+                obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)
                 inputs = self.cuda_wrapper(Variable(seq.float()))
                 metadata = self.cuda_wrapper(Variable(metadata.float()))
                 if not self.args.unshuffled:
