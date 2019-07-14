@@ -111,9 +111,8 @@ if __name__ == "__main__":
         If run seperately, does a simple sanity check,
         by doing a random forward pass
     """
-    t = Transformer(10, 20, 5, 3)
+    t = Transformer(512, 512, 5, 4)
 
-    input = Variable(torch.rand(40,20,10))
+    input = Variable(torch.rand(16,100,512))
 
     print t(input)
-    import IPython; IPython.embed()

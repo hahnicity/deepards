@@ -305,7 +305,7 @@ class RegressorMixin(object):
 
 class CNNTransformerModel(BaseTraining, ClassifierMixin):
     def __init__(self, args):
-        super(CNNLSTMModel, self).__init__(args)
+        super(CNNTransformerModel, self).__init__(args)
 
     def calc_loss(self, outputs, target, inputs):
         if self.args.batch_size > 1:

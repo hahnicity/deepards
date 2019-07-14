@@ -14,11 +14,11 @@ class CNNTransformerNetwork(nn.Module):
         self.bm_to_linear = bm_to_linear
 
         if not bm_to_linear:
-            self.transformer = Transformer(breath_block.n_out_filters+metadata_features, hidden_units, num_blocks, 3)
-            self.linear_final = nn.Linear(self.lstm_hidden_units+metadata_features, 2)
+            self.transformer = Transformer(breath_block.n_out_filters+metadata_features, hidden_units, num_blocks, 4)
+            self.linear_final = nn.Linear(hidden_units+metadata_features, 2)
         else:
-            self.transformer = Transformer(breath_block.n_out_filters, hidden_units, num_blocks, 3)
-            self.linear_final = nn.Linear(self.lstm_hidden_units+metadata_features, 2)
+            self.transformer = Transformer(breath_block.n_out_filters, hidden_units, num_blocks, 4)
+            self.linear_final = nn.Linear(hidden_units+metadata_features, 2)
 
         self.softmax = nn.Softmax(dim=-1)
 
