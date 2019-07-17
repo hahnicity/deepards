@@ -2,6 +2,7 @@ import argparse
 from glob import glob
 
 import matplotlib.pyplot as plt
+plt.switch_backend('tkagg')
 import numpy as np
 from pprint import pprint
 from prettytable import PrettyTable
