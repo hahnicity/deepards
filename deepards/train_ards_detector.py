@@ -23,6 +23,7 @@ from deepards.models.torch_cnn_bm_regressor import CNNRegressor
 from deepards.models.torch_cnn_linear_network import CNNLinearNetwork
 from deepards.models.torch_metadata_only_network import MetadataOnlyNetwork
 from deepards.models.unet import UNet
+from deepards.models.vgg import vgg11_bn, vgg13_bn
 
 
 class BaseTraining(object):
@@ -46,6 +47,8 @@ class BaseTraining(object):
         'se_resnet152': se_resnet152,
         'se_resnext50_32x4d': se_resnext50_32x4d,
         'se_resnext101_32x4d': se_resnext101_32x4d,
+        'vgg11': vgg11_bn,
+        'vgg13': vgg13_bn,
     }
 
     def __init__(self, args):
