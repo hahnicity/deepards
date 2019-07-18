@@ -2,20 +2,17 @@
 Created on Thu Oct 26 11:06:51 2017
 @author: Utku Ozbulak - github.com/utkuozbulak
 """
-from PIL import Image
 import numpy as np
 import torch
-
-from misc_functions import get_example_params, save_class_activation_images
-
+import argparse
+import pickle
 
 class CamExtractor():
     """
         Extracts cam features from the model
     """
-    def __init__(self, model, target_layer):
+    def __init__(self, model):
         self.model = model
-        self.target_layer = target_layer
         self.gradients = None
 
     def save_gradient(self, grad):
@@ -26,11 +23,16 @@ class CamExtractor():
             Does a forward pass on convolutions, hooks the function at given layer
         """
         conv_output = None
+        '''
         for module_pos, module in self.model.features._modules.items():
             x = module(x)  # Forward
             if int(module_pos) == self.target_layer:
                 x.register_hook(self.save_gradient)
                 conv_output = x  # Save the convolution output on that layer
+        '''
+        x = self.model.module.breath_block.features(x)
+        x.register_hook(self.save_gradient)
+        conv_output = x
         return conv_output, x
 
     def forward_pass(self, x):
@@ -39,9 +41,11 @@ class CamExtractor():
         """
         # Forward pass on the convolutions
         conv_output, x = self.forward_pass_on_convolutions(x)
-        x = x.view(x.size(0), -1)  # Flatten
+        x = self.model.module.breath_block.avgpool(x)
+        x = x.view(-1)  # Flatten
         # Forward pass on the classifier
-        x = self.model.classifier(x)
+        x = self.model.module.linear_final(x).unsqueeze(0)
+        x = self.model.modue.softmax(x)
         return conv_output, x
 
 
@@ -49,11 +53,11 @@ class GradCam():
     """
         Produces class activation map
     """
-    def __init__(self, model, target_layer):
+    def __init__(self, model):
         self.model = model
         self.model.eval()
         # Define extractor
-        self.extractor = CamExtractor(self.model, target_layer)
+        self.extractor = CamExtractor(self.model)
 
     def generate_cam(self, input_image, target_class=None):
         # Full forward pass
@@ -66,14 +70,16 @@ class GradCam():
         one_hot_output = torch.FloatTensor(1, model_output.size()[-1]).zero_()
         one_hot_output[0][target_class] = 1
         # Zero grads
-        self.model.features.zero_grad()
-        self.model.classifier.zero_grad()
+        self.model.zero_grad()
+        #self.model.classifier.zero_grad()
         # Backward pass with specified target
         model_output.backward(gradient=one_hot_output, retain_graph=True)
         # Get hooked gradients
         guided_gradients = self.extractor.gradients.data.numpy()[0]
         # Get convolution outputs
         target = conv_output.data.numpy()[0]
+        print(guided_gradients.shape)
+        '''
         # Get weights from gradients
         weights = np.mean(guided_gradients, axis=(1, 2))  # Take averages for each gradient
         # Create empty numpy array for cam
@@ -93,22 +99,40 @@ class GradCam():
         # I briefly convert matrix to PIL image and then back.
         # If there is a more beautiful way, do not hesitate to send a PR.
         return cam
+        '''
+        return 1
 
+
+def get_sequence(filename):
+    data = pickle.load( open( pickle_file_name, "rb" ) )
+    first_seq = data[0]
+    br = first_seq[1][0]
+    br = np.expand_dims(br, 0)
+    #br = torch.from_numpy(br)
+    br = torch.FloatTensor(br).cuda()
+    return br
 
 if __name__ == '__main__':
 
+    parser = argparse.ArgumentParser()
+
     #Getting the pretrained model
-    PATH = 'densenet-kf5-model-fold-3.pth'
+    PATH = 'densenet-linear-kf5-model--fold-3.pth'
     pretrained_model = torch.load(PATH)
     
+    parser.add_argument('-pdp', '--pickled-data-path', help = 'PATH to pickled data')
+    args = parser.parse_args()
+    #taking the pickle file we need to extract data from
+    pickle_file_name = args.pickled_data_path
     # Get params
-    target_example = 0  # Snake
-    (original_image, prep_img, target_class, file_name_to_export, pretrained_model) =\
-        get_example_params(target_example)
+    #target_example = 0  # Snake
+    target_class = None
+    file_name_to_export = 'gradcam_output.png'
+    breath_sequence = get_sequence(pickle_file_name)
     # Grad cam
-    grad_cam = GradCam(pretrained_model, target_layer=11)
+    grad_cam = GradCam(pretrained_model)
     # Generate cam mask
-    cam = grad_cam.generate_cam(prep_img, target_class)
+    cam = grad_cam.generate_cam(breath_sequence, target_class)
     # Save mask
-    save_class_activation_images(original_image, cam, file_name_to_export)
+    #save_class_activation_images(breath_sequence, cam, file_name_to_export)
     print('Grad cam completed')

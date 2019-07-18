@@ -18,25 +18,29 @@ pickle_file_name = args.pickled_data_path
 data = pickle.load( open( pickle_file_name, "rb" ) )
 
 #taking the first 100 sequence of the data
-first_seq = data
-for i in range(len(first_seq)):
-    print('Patient: {} Class: {}'.format(first_seq[i][0], first_seq[i][2]))
+first_seq = data[0]
+#for i in range(len(first_seq)):
+    #print('Patient: {} Class: {}'.format(first_seq[i][0], first_seq[i][2]))
 
+#print(len(first_seq))
 #taking the first breath 
-br = first_seq[0][0]
+br = first_seq[1][0]
+br = np.expand_dims(br, 0)
+
+print(br.shape)
 
 #arranging the x-axis since the data is of 224 
-dt = 1
-t = np.arange(0, 224, dt)
+#dt = 1
+#t = np.arange(0, 224, dt)
 
 #inizializing the image variable to 224 pickles with 0
-img = np.zeros((224,1))
+#img = np.zeros((224,1))
 
 #since the br is in 1 x 224 format we are transfering it into 224 x 1 format
-for i in range(0,224):
-    img[i][0] = br[0][i]
+#for i in range(0,224):
+    #img[i][0] = br[0][i]
 
 
 #plotting the image
-plt.plot(t, img)
-plt.show()
+#plt.plot(t, img)
+#plt.show()
