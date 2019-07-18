@@ -14,6 +14,7 @@ setup(name='deepards',
           'scipy',
           'scikit-learn<0.21.0',
           'ventmap',
+          'ucdpvanalysis>=1.5',
       ],
       entry_points={
       },
