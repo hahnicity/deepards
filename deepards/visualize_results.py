@@ -103,7 +103,7 @@ def visualize_results_for_experiment(experiment_name):
     if len(experiment_data) == 0:
         raise Exception('no experiments found with name: {}'.format(experiment_name))
 
-    if experiment_data[0]['network'] in ['cnn_lstm', 'cnn_linear']:
+    if experiment_data[0]['network'] in ['cnn_lstm', 'cnn_linear', 'cnn_transformer']:
         metrics = ['auc', 'patient_accuracy', 'f1_ards', 'f1_other']
     else:
         metrics = ['test_mae']
