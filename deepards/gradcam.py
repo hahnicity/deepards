@@ -39,13 +39,17 @@ class CamExtractor():
         """
             Does a full forward pass on the model
         """
+        print(x.shape)
         # Forward pass on the convolutions
         conv_output, x = self.forward_pass_on_convolutions(x)
+        print(conv_output.shape)
+        #print(x.shape)
         x = self.model.module.breath_block.avgpool(x)
+        print(x.shape)
         x = x.view(-1)  # Flatten
         # Forward pass on the classifier
         x = self.model.module.linear_final(x).unsqueeze(0)
-        x = self.model.modue.softmax(x)
+        x = self.model.module.softmax(x)
         return conv_output, x
 
 
@@ -64,32 +68,45 @@ class GradCam():
         # conv_output is the output of convolutions at specified layer
         # model_output is the final output of the model (1, 1000)
         conv_output, model_output = self.extractor.forward_pass(input_image)
+        print(model_output)
         if target_class is None:
-            target_class = np.argmax(model_output.data.numpy())
+            target_class = np.argmax(model_output.cpu().data.numpy())
         # Target for backprop
         one_hot_output = torch.FloatTensor(1, model_output.size()[-1]).zero_()
+        #print(one_hot_output.shape)
         one_hot_output[0][target_class] = 1
         # Zero grads
         self.model.zero_grad()
         #self.model.classifier.zero_grad()
         # Backward pass with specified target
-        model_output.backward(gradient=one_hot_output, retain_graph=True)
+        model_output.backward(gradient=one_hot_output.cuda(), retain_graph=True)
         # Get hooked gradients
-        guided_gradients = self.extractor.gradients.data.numpy()[0]
+        guided_gradients = self.extractor.gradients.cpu().data.numpy()
+        #print(guided_gradients)
         # Get convolution outputs
-        target = conv_output.data.numpy()[0]
-        print(guided_gradients.shape)
-        '''
+        target = conv_output.cpu().data.numpy()
+        #print(guided_gradients.shape)
+        #print(target.shape[1:])
         # Get weights from gradients
-        weights = np.mean(guided_gradients, axis=(1, 2))  # Take averages for each gradient
+        weights = np.mean(guided_gradients, axis = 0)  # Take averages for each gradient
         # Create empty numpy array for cam
         cam = np.ones(target.shape[1:], dtype=np.float32)
+        print(weights.shape)
+        print(target[:,1, :].shape)
+        #print(cam.shape)
         # Multiply each weight with its conv output and then, sum
-        for i, w in enumerate(weights):
-            cam += w * target[i, :, :]
+        for j in range(100):
+            for i, w in enumerate(weights):
+                cam += w * target[j,i,:]
+        
+        
+        cam = np.mean(cam, axis = 0)
         cam = np.maximum(cam, 0)
         cam = (cam - np.min(cam)) / (np.max(cam) - np.min(cam))  # Normalize between 0-1
         cam = np.uint8(cam * 255)  # Scale between 0-255 to visualize
+        print(cam)
+
+        '''
         cam = np.uint8(Image.fromarray(cam).resize((input_image.shape[2],
                        input_image.shape[3]), Image.ANTIALIAS))/255
         # ^ I am extremely unhappy with this line. Originally resizing was done in cv2 which
@@ -105,9 +122,19 @@ class GradCam():
 
 def get_sequence(filename):
     data = pickle.load( open( pickle_file_name, "rb" ) )
-    first_seq = data[0]
-    br = first_seq[1][0]
-    br = np.expand_dims(br, 0)
+    first_seq = None
+    count = 0
+    for i, d in enumerate(data):
+        if d[2][1] == 0:
+            if count == 2500:
+                first_seq = d
+                break
+            count = count + 1
+            continue 
+    #first_seq = data[1]
+    print(first_seq[2])
+    br = first_seq[1]
+    #br = np.expand_dims(br, 0)
     #br = torch.from_numpy(br)
     br = torch.FloatTensor(br).cuda()
     return br
