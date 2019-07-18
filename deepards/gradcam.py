@@ -88,23 +88,26 @@ class GradCam():
         #print(guided_gradients.shape)
         #print(target.shape[1:])
         # Get weights from gradients
-        weights = np.mean(guided_gradients, axis = 0)  # Take averages for each gradient
+        #weights = np.mean(guided_gradients, axis = 0)
+        #print(weights[0])
+        weights = np.mean(guided_gradients, axis = (0,2))
+        #print(weights[0])
+        target = np.mean(target, axis = 0)  # Take averages for each gradient
         # Create empty numpy array for cam
         cam = np.ones(target.shape[1:], dtype=np.float32)
-        print(weights.shape)
-        print(target[:,1, :].shape)
+        #print(weights.shape)
+        #print(target[:,1, :].shape)
         #print(cam.shape)
         # Multiply each weight with its conv output and then, sum
-        for j in range(100):
-            for i, w in enumerate(weights):
-                cam += w * target[j,i,:]
+        for i, w in enumerate(weights):
+            cam += w * target[i,:]
         
         
-        cam = np.mean(cam, axis = 0)
+        #cam = np.mean(cam, axis = 0)
         cam = np.maximum(cam, 0)
         cam = (cam - np.min(cam)) / (np.max(cam) - np.min(cam))  # Normalize between 0-1
         cam = np.uint8(cam * 255)  # Scale between 0-255 to visualize
-        print(cam)
+        #print(cam)
 
         '''
         cam = np.uint8(Image.fromarray(cam).resize((input_image.shape[2],
@@ -117,16 +120,17 @@ class GradCam():
         # If there is a more beautiful way, do not hesitate to send a PR.
         return cam
         '''
-        return 1
+        return cam
 
 
 def get_sequence(filename):
     data = pickle.load( open( pickle_file_name, "rb" ) )
+    #print(len(data))
     first_seq = None
     count = 0
     for i, d in enumerate(data):
-        if d[2][1] == 0:
-            if count == 2500:
+        if d[2][1] == 1:
+            if count == 2:
                 first_seq = d
                 break
             count = count + 1
