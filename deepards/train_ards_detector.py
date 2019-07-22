@@ -63,6 +63,8 @@ class BaseTraining(object):
 
         if self.args.dataset_type == 'padded_breath_by_breath_with_limited_bm_target':
             self.n_bm_features = 3
+        if self.args.dataset_type == 'padded_breath_by_breath_with_experimental_bm_target':
+            self.n_bm_features = 7
         elif self.args.dataset_type == 'padded_breath_by_breath_with_full_bm_target':
             self.n_bm_features = 9
 
@@ -480,6 +482,10 @@ class CNNRegressorModel(BaseTraining, RegressorMixin):
         return batch_preds.tolist()
 
     def get_network(self, base_network):
+        try:
+            self.n_bm_features
+        except:
+            raise Exception('You have specified cnn regressor without specifying which dataset you want to use. Do so with the -dt flag')
         return CNNRegressor(base_network, self.n_bm_features)
 
 
@@ -537,6 +543,7 @@ def main():
         'stretched_breath_by_breath',
         'padded_breath_by_breath_with_full_bm_target',
         'padded_breath_by_breath_with_limited_bm_target',
+        'padded_breath_by_breath_with_experimental_bm_target',
         'padded_breath_by_breath_with_flow_time_features',
         'unpadded_downsampled_autoencoder_sequences'
     ], default='padded_breath_by_breath')
