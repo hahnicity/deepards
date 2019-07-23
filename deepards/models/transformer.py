@@ -3,6 +3,7 @@ transformer
 ~~~~~~~~~~~
 
 Credit to https://github.com/jensjepsen/imdb-transformer/blob/master/model.py
+with slight modifications and bug fixes by myself
 """
 import torch
 from torch import nn
