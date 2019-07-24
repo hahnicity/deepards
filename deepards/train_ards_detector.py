@@ -8,9 +8,10 @@ from sklearn.metrics import accuracy_score, classification_report, mean_absolute
 import torch
 from torch.autograd import Variable
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
-from deepards.dataset import ARDSRawDataset
+from deepards.dataset import ARDSRawDataset, SiameseNetworkDataset
 from deepards.loss import ConfidencePenaltyLoss, VacillatingLoss
 from deepards.metrics import DeepARDSResults, Reporting
 from deepards.models.autoencoder_cnn import AutoencoderCNN
@@ -19,6 +20,7 @@ from deepards.models.cnn_transformer import CNNTransformerNetwork
 from deepards.models.densenet import densenet18, densenet121, densenet161, densenet169, densenet201
 from deepards.models.resnet import resnet18, resnet50, resnet101, resnet152
 from deepards.models.senet import senet18, senet154, se_resnet18, se_resnet50, se_resnet101, se_resnet152, se_resnext50_32x4d, se_resnext101_32x4d
+from deepards.models.siamese_cnn_lstm import SiameseCNNLSTMNetwork
 from deepards.models.torch_cnn_lstm_combo import CNNLSTMNetwork
 from deepards.models.torch_cnn_bm_regressor import CNNRegressor
 from deepards.models.torch_cnn_linear_network import CNNLinearNetwork
@@ -136,7 +138,6 @@ class BaseTraining(object):
         else:
             train_sequences = []
 
-        # XXX I'd like to eventually extract n_sub_batches from a pickled dataset
         kfold_num = None if self.args.kfolds is None else 0
         train_dataset = ARDSRawDataset(
             self.args.data_path,
@@ -285,7 +286,7 @@ class BaseTraining(object):
         return obs_idx, seq, metadata, target
 
 
-class ClassifierMixin(object):
+class PatientClassifierMixin(object):
     def record_testing_results(self, target, batch_preds, fold_num):
         accuracy = accuracy_score(target, batch_preds)
         self.results.update_accuracy(fold_num, accuracy)
@@ -309,6 +310,27 @@ class ClassifierMixin(object):
         self.results.save_all()
 
 
+class SiameseMixin(object):
+    def record_testing_results(self, target, batch_preds, fold_num):
+        # XXX target will be a bit different because its composed of either
+        # positive or negative examples. So it would make sense to update them both
+        accuracy = accuracy_score(target, batch_preds)
+        self.results.update_accuracy(fold_num, accuracy)
+
+    def record_final_epoch_testing_results(self, fold_num, epoch_num, test_dataset):
+        # XXX this will have to change too
+        self.preds = pd.Series(self.preds, index=self.pred_idx)
+        self.preds = self.preds.sort_index()
+        y_test = test_dataset.get_ground_truth_df()
+        self.results.perform_patient_predictions(y_test, self.preds, fold_num, epoch_num)
+
+    def set_loss_criterion(self):
+        self.criterion = torch.nn.BCEWithLogitsLoss()
+
+    def perform_post_modeling_actions(self):
+        self.results.save_all()
+
+
 class RegressorMixin(object):
     def record_testing_results(self, target, batch_preds, fold_num):
         mae = mean_absolute_error(target, batch_preds)
@@ -328,7 +350,7 @@ class RegressorMixin(object):
         self.results.save_all()
 
 
-class CNNTransformerModel(BaseTraining, ClassifierMixin):
+class CNNTransformerModel(BaseTraining, PatientClassifierMixin):
     def __init__(self, args):
         super(CNNTransformerModel, self).__init__(args)
 
@@ -353,7 +375,7 @@ class CNNTransformerModel(BaseTraining, ClassifierMixin):
         return obs_idx.reshape((outputs.shape[0], 1)).repeat((1, outputs.shape[1])).view(-1)
 
 
-class CNNLSTMModel(BaseTraining, ClassifierMixin):
+class CNNLSTMModel(BaseTraining, PatientClassifierMixin):
     def __init__(self, args):
         super(CNNLSTMModel, self).__init__(args)
 
@@ -434,7 +456,7 @@ class CNNLSTMModel(BaseTraining, ClassifierMixin):
         self.record_final_epoch_testing_results(fold_num, epoch_num, test_dataset)
 
 
-class CNNLinearModel(BaseTraining, ClassifierMixin):
+class CNNLinearModel(BaseTraining, PatientClassifierMixin):
     def __init__(self, args):
         super(CNNLinearModel, self).__init__(args)
 
@@ -451,7 +473,7 @@ class CNNLinearModel(BaseTraining, ClassifierMixin):
         return CNNLinearNetwork(base_network, self.args.n_sub_batches, self.n_metadata_inputs)
 
 
-class MetadataOnlyModel(BaseTraining, ClassifierMixin):
+class MetadataOnlyModel(BaseTraining, PatientClassifierMixin):
     def __init__(self, args):
         super(CNNMetadataModel, self).__init__(args)
 
@@ -506,12 +528,105 @@ class AutoencoderModel(BaseTraining, RegressorMixin):
         return AutoencoderNetwork(base_network)
 
 
+class SiameseCNNLSTMModel(BaseTraining, SiameseMixin):
+    def __init__(self, args):
+        super(SiameseCNNLSTMModel, self).__init__(args)
+
+    def _process_test_batch_results(self, outputs, target, inputs, fold_num):
+        pass
+        # XXX
+
+    def calc_loss(self, outputs_pos, outputs_neg):
+        target_pos = torch.LongTensor([[0, 1]]).repeat((outputs_pos.shape[0], 1))
+        target_neg = torch.LongTensor([[1, 0]]).repeat((outputs_neg.shape[0], 1))
+        loss_pos = self.criterion(outputs_pos, target_pos, size_average=True)
+        loss_neg = self.criterion(outputs_neg, target_neg, size_average=True)
+        return loss_pos + loss_neg
+
+    def get_network(self, base_network):
+        return SiameseCNNLSTMModel(base_network, self.args.time_series_hidden_units)
+
+    def get_base_datasets(self):
+        # for holdout and kfold
+        if self.args.train_from_pickle:
+            train_sequences = pd.read_pickle(self.args.train_from_pickle)
+        # no pickle
+        else:
+            train_sequences = []
+
+        train_dataset = SiameseNetworkDataset(
+            self.args.data_path,
+            self.args.experiment_num,
+            self.args.n_sub_batches,
+            dataset_type=self.args.dataset_type,
+            all_sequences=train_sequences,
+            to_pickle=self.args.train_to_pickle,
+        )
+        # for holdout
+        if self.args.test_from_pickle:
+            test_sequences = pd.read_pickle(self.args.test_from_pickle)
+        # holdout, no pickle, no kfolds
+        else:
+            test_sequences = []
+
+        test_dataset = SiameseNetworkDataset(
+            self.args.data_path,
+            self.args.experiment_num,
+            self.args.n_sub_batches,
+            dataset_type=self.args.dataset_type,
+            all_sequences=test_sequences,
+            to_pickle=self.args.train_to_pickle,
+        )
+        return train_dataset, test_dataset
+
+    def run_train_epoch(self, model, train_loader, optimizer, epoch_num, fold_num):
+        with torch.enable_grad():
+            print("\nrun epoch {}\n".format(epoch_num))
+            for idx, (seq, pos_compr, neg_compr) in enumerate(train_loader):
+                model.zero_grad()
+                # XXX do we need this?
+                #obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)
+                if seq.shape[0] == 0:
+                    continue
+                seq = self.cuda_wrapper(Variable(seq.float()))
+                pos_compr = self.cuda_wrapper(Variable(pos_compr.float()))
+                neg_compr = self.cuda_wrapper(Variable(neg_compr.float()))
+                # XXX do I need to provide a copy of the first sequence to make sure
+                # the graph computation is performed OK?
+                pos_outputs = model(seq, pos_compr)
+                neg_outputs = model(seq, neg_compr)
+                loss = self.calc_loss(outputs, target, inputs)
+                loss.backward()
+                optimizer.step()
+                optimizer.zero_grad()
+                self.results.update_loss(fold_num, loss.data)
+
+                # print individual loss and total loss
+                if not self.args.no_print_progress:
+                    print("batch num: {}/{}, avg loss: {}\r".format(batch_idx, total_batches, self.results.get_meter('loss', fold_num), end=""))
+
+                if self.args.debug:
+                    break
+
+    def run_test_epoch(self, epoch_num, model, test_dataset, test_loader, fold_num):
+        pass
+        # XXX
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-dp', '--data-path', default='/fastdata/ardsdetection', help='Path to ARDS detection dataset')
     parser.add_argument('-en', '--experiment-num', type=int, default=1)
     parser.add_argument('-c', '--cohort-file', default='cohort-description.csv')
-    parser.add_argument('-n', '--network', choices=['cnn_lstm', 'cnn_linear', 'cnn_regressor', 'metadata_only', 'autoencoder', 'cnn_transformer'], default='cnn_lstm')
+    parser.add_argument('-n', '--network', choices=[
+        'cnn_lstm',
+        'cnn_linear',
+        'cnn_regressor',
+        'metadata_only',
+        'autoencoder',
+        'cnn_transformer'
+        'siamese_cnn_lstm',
+    ], default='cnn_lstm')
     parser.add_argument('-e', '--epochs', type=int, default=5)
     parser.add_argument('-p', '--train-from-pickle')
     parser.add_argument('--train-to-pickle')
@@ -565,7 +680,15 @@ def main():
     parser.add_argument('--unshuffled', action='store_true', help='dont shuffle data for lstm processing')
     args = parser.parse_args()
 
-    network_map = {'cnn_lstm': CNNLSTMModel, 'cnn_linear': CNNLinearModel, 'cnn_regressor': CNNRegressorModel, 'metadata_only': MetadataOnlyModel, 'autoencoder': AutoencoderModel, 'cnn_transformer': CNNTransformerModel}
+    network_map = {
+        'cnn_lstm': CNNLSTMModel,
+        'cnn_linear': CNNLinearModel,
+        'cnn_regressor': CNNRegressorModel,
+        'metadata_only': MetadataOnlyModel,
+        'autoencoder': AutoencoderModel,
+        'cnn_transformer': CNNTransformerModel,
+        'siamese_cnn_lstm': SiameseCNNLSTMModel,
+    }
     cls = network_map[args.network](args)
     cls.train_and_test()
 

@@ -22,10 +22,10 @@ class SiameseNetworkDataset(ARDSRawDataset):
                  n_sub_batches,
                  dataset_type,
                  all_sequences=[],
-                 to_pickle=None,
-                 train=True):
+                 to_pickle=None):
 
         self.all_sequences = all_sequences
+        self.n_sub_batches = n_sub_batches if all_sequences == [] else all_sequences[0][1].shape[0]
         data_subdir = 'prototrain' if train else 'prototest'
         raw_dir = os.path.join(data_path, 'experiment{}'.format(experiment_num), data_subdir, 'raw')
 
@@ -34,7 +34,7 @@ class SiameseNetworkDataset(ARDSRawDataset):
         self.raw_files = sorted(glob(os.path.join(raw_dir, '*/*.raw.npy')))
         self.processed_files = sorted(glob(os.path.join(raw_dir, '*/*.processed.npy')))
 
-        if self.all_sequences == []:
+        if self.all_sequences == [] and dataset_type == 'padded_breath_by_breath':
             self._process_padded_breath_by_breath_sequences(self._pad_breath)
 
         if to_pickle:
@@ -144,7 +144,7 @@ class ARDSRawDataset(Dataset):
         self.total_kfolds = total_kfolds
         self.vent_bn_frac_missing = .5
         self.frames_dropped = dict()
-        self.n_sub_batches = n_sub_batches
+        self.n_sub_batches = n_sub_batches if all_sequences == [] else all_sequences[0][1].shape[0]
         self.unpadded_downsample_factor = unpadded_downsample_factor
         self.drop_frame_if_frac_missing = drop_frame_if_frac_missing
 
