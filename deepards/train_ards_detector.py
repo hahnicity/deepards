@@ -312,10 +312,8 @@ class PatientClassifierMixin(object):
 
 
 class SiameseMixin(object):
-    def record_testing_results(self, target, batch_preds, fold_num):
-        # XXX target will be a bit different because its composed of either
-        # positive or negative examples. So it would make sense to update them both
-        accuracy = accuracy_score(target, batch_preds)
+    def record_testing_results(self, batch_preds, batch_target, fold_num):
+        accuracy = accuracy_score(batch_target, batch_preds)
         self.results.update_accuracy(fold_num, accuracy)
 
     def calc_loss(self, outputs_pos, outputs_neg):
@@ -326,13 +324,6 @@ class SiameseMixin(object):
         loss_pos = self.criterion(outputs_pos, target_pos)
         loss_neg = self.criterion(outputs_neg, target_neg)
         return loss_pos + loss_neg
-
-    def record_final_epoch_testing_results(self, fold_num, epoch_num, test_dataset):
-        # XXX this will have to change too
-        self.preds = pd.Series(self.preds, index=self.pred_idx)
-        self.preds = self.preds.sort_index()
-        y_test = test_dataset.get_ground_truth_df()
-        self.results.perform_patient_predictions(y_test, self.preds, fold_num, epoch_num)
 
     def set_loss_criterion(self):
         self.criterion = torch.nn.BCEWithLogitsLoss()
@@ -383,8 +374,8 @@ class SiameseMixin(object):
                 model.zero_grad()
                 # XXX do we need this?
                 #obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)
-                if seq.shape[0] == 0:
-                    continue
+                #if seq.shape[0] == 0:
+                #    continue
                 seq = self.cuda_wrapper(Variable(seq.float()))
                 pos_compr = self.cuda_wrapper(Variable(pos_compr.float()))
                 neg_compr = self.cuda_wrapper(Variable(neg_compr.float()))
@@ -404,12 +395,28 @@ class SiameseMixin(object):
                     break
 
     def run_test_epoch(self, epoch_num, model, test_dataset, test_loader, fold_num):
-        pass
-        # XXX
-        #
-    def _process_test_batch_results(self, outputs, target, inputs, fold_num):
-        pass
-        # XXX
+        self.preds = []
+        self.pred_idx = []
+        with torch.no_grad():
+            for batch_idx, (seq, pos_compr, neg_compr) in enumerate(test_loader):
+                #obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)
+                #if seq.shape[0] == 0:
+                #    continue
+                seq = self.cuda_wrapper(Variable(seq.float()))
+                pos_compr = self.cuda_wrapper(Variable(pos_compr.float()))
+                neg_compr = self.cuda_wrapper(Variable(neg_compr.float()))
+                outputs_pos = model(seq, pos_compr)
+                outputs_neg = model(seq, neg_compr)
+                loss = self.calc_loss(outputs_pos, outputs_neg)
+                batch_preds, batch_target = self._process_test_batch_results(outputs_pos, outputs_neg)
+                self.record_testing_results(batch_preds, batch_target, fold_num)
+
+    def _process_test_batch_results(self, outputs_pos, outputs_neg):
+        target_pos = [1] * 8
+        target_neg = [0] * 8
+        cat = torch.cat([outputs_pos, outputs_neg], dim=0)
+        preds = torch.argmax(cat, dim=1).cpu().numpy()
+        return preds, target_pos + target_neg
 
 
 class RegressorMixin(object):
