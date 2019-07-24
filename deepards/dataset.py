@@ -15,107 +15,6 @@ from algorithms.breath_meta import get_experimental_breath_meta
 from algorithms.constants import EXPERIMENTAL_META_HEADER
 
 
-class SiameseNetworkDataset(ARDSRawDataset):
-    def __init__(self,
-                 data_path,
-                 experiment_num,
-                 n_sub_batches,
-                 dataset_type,
-                 all_sequences=[],
-                 to_pickle=None):
-
-        self.all_sequences = all_sequences
-        self.n_sub_batches = n_sub_batches if all_sequences == [] else all_sequences[0][1].shape[0]
-        data_subdir = 'prototrain' if train else 'prototest'
-        raw_dir = os.path.join(data_path, 'experiment{}'.format(experiment_num), data_subdir, 'raw')
-
-        if not os.path.exists(raw_dir):
-            raise Exception('No directory {} exists!'.format(raw_dir))
-        self.raw_files = sorted(glob(os.path.join(raw_dir, '*/*.raw.npy')))
-        self.processed_files = sorted(glob(os.path.join(raw_dir, '*/*.processed.npy')))
-
-        if self.all_sequences == [] and dataset_type == 'padded_breath_by_breath':
-            self._process_padded_breath_by_breath_sequences(self._pad_breath)
-
-        if to_pickle:
-            pd.to_pickle(self.all_sequences, to_pickle)
-        self._create_patient_mapping()
-
-        # we can use the patient mapping to both keep track of the positive examples
-        # we've already used and the indexing for our reads.
-        self.patient_mapping = {}
-        for idx, (patient_id, _) in enumerate(self.all_sequences):
-            if patient_id not in self.patient_mapping:
-                # The structure kinda looks like
-                # {
-                #   patient: [[master list of idx], [available pos list of idx]],
-                #   ...
-                # }
-                self.patient_mapping[patient_id] = [[idx], [idx]]
-            else:
-                self.patient_mapping[patient_id][0].append(idx)
-                self.patient_mapping[patient_id][1].append(idx)
-        self.available_neg_idxs = range(len(self.all_sequences))
-
-    def _process_padded_breath_by_breath_sequences(self, process_breath_func):
-        last_patient = None
-
-        for fidx, filename in enumerate(self.raw_files):
-            gen = read_processed_file(filename, self.processed_files[fidx])
-            patient_id = self._get_patient_id_from_file(filename)
-            if patient_id != last_patient:
-                batch_arr = []
-                last_vent_bn = None
-
-            for bidx, breath in enumerate(gen):
-                ## determine if we should drop the cluster
-                if last_vent_bn is None:
-                    last_vent_bn = breath['vent_bn']
-                elif breath['vent_bn'] - 50 > last_vent_bn:
-                    batch_arr = []
-                    last_vent_bn = None
-
-                flow = (np.array(breath['flow']) - self.mu) / self.std
-                b_seq = process_breath_func(flow)
-                batch_arr.append(b_seq)
-                if len(batch_arr) == self.n_sub_batches:
-                    if self._should_we_drop_frame(seq_vent_bns, patient_id):
-                        batch_arr = []
-                        seq_vent_bns = []
-                        continue
-                    self.all_sequences.append([
-                        patient_id,
-                        np.array(batch_arr).reshape((self.n_sub_batches, 1, self.seq_len))
-                    ])
-                    batch_arr = []
-                    last_vent_bn = None
-
-    def __getitem__(self, index):
-        # Here the trick is to save memory so you want to sequentially go down the
-        # list of reads but then dynamically generate positive/negative examples on
-        # the fly.
-        patient_id, seq = self.all_sequences[index]
-        pt_avail_pos = list(set(self.patient_mapping[patient_id][1]).difference({index}))
-        pt_available_neg = list(set(self.available_neg_idxs).difference(set(self.patient_mapping[patient_id][0])))
-
-        # get positive idx so that we can choose without replacement
-        pos_idx = np.random.choice(pt_avail_pos)
-        pos_compr = self.all_sequences[pos_idx][1]
-        del_idx = pt_avail_pos.index(pos_idx)
-        del self.patient_mapping[patient_id][1][del_idx]
-
-        # get negative examples so that we can choose without replacement
-        neg_idx = np.random.choice(self.pt_available_neg)
-        neg_compr = self.all_sequences[neg_idx][1]
-        del_idx = self.available_neg_idxs.index(neg_idx)
-        del self.available_neg_idxs[del_idx]
-
-        return data, pos_compr, neg_compr
-
-    def __len__(self):
-        return len(self.all_sequences)
-
-
 class ARDSRawDataset(Dataset):
     mu = -0.16998896167389502
     std = 25.332015720945343
@@ -603,3 +502,107 @@ class ARDSRawDataset(Dataset):
             elif split_num == self.kfold_num and not self.train:
                 self.kfold_indexes = ground_truth[ground_truth.patient.isin(test_pts)].index
                 break
+
+
+class SiameseNetworkDataset(ARDSRawDataset):
+    def __init__(self,
+                 data_path,
+                 experiment_num,
+                 n_sub_batches,
+                 dataset_type,
+                 all_sequences=[],
+                 to_pickle=None,
+                 train=True):
+
+        self.all_sequences = all_sequences
+        self.n_sub_batches = n_sub_batches if all_sequences == [] else all_sequences[0][1].shape[0]
+        data_subdir = 'prototrain' if train else 'prototest'
+        raw_dir = os.path.join(data_path, 'experiment{}'.format(experiment_num), data_subdir, 'raw')
+
+        if not os.path.exists(raw_dir):
+            raise Exception('No directory {} exists!'.format(raw_dir))
+        self.raw_files = sorted(glob(os.path.join(raw_dir, '*/*.raw.npy')))
+        self.processed_files = sorted(glob(os.path.join(raw_dir, '*/*.processed.npy')))
+
+        if self.all_sequences == [] and dataset_type == 'padded_breath_by_breath':
+            self._process_padded_breath_by_breath_sequences(self._pad_breath)
+
+        if to_pickle:
+            pd.to_pickle(self.all_sequences, to_pickle)
+
+        # remove any patients who only have 1 observation because we cannot find a
+        # positive example to compare for them
+        patient_ids = [patient_id for (patient_id, _) in self.all_sequences]
+        pt_counts = pd.Series(patient_ids).value_counts()
+        pts_to_drop = pt_counts[pt_counts == 1].index
+        idxs_to_drop = [idx for idx, pt in enumerate(patient_ids) if pt in pts_to_drop]
+        for offset, idx in enumerate(idxs_to_drop):
+            self.all_sequences.pop(idx - offset)
+
+        # we can use the patient mapping to both keep track of the positive
+        # examples we've already used and the indexing for our reads.
+        self.patient_mapping = {}
+        for idx, (patient_id, _) in enumerate(self.all_sequences):
+            if patient_id not in self.patient_mapping:
+                # The structure kinda looks like
+                # {
+                #   patient: [[master list of idx], [available pos list of idx]],
+                #   ...
+                # }
+                self.patient_mapping[patient_id] = [idx]
+            else:
+                self.patient_mapping[patient_id].append(idx)
+        self.available_neg_idxs = range(len(self.all_sequences))
+
+    def _process_padded_breath_by_breath_sequences(self, process_breath_func):
+        last_patient = None
+
+        for fidx, filename in enumerate(self.raw_files):
+            gen = read_processed_file(filename, self.processed_files[fidx])
+            patient_id = self._get_patient_id_from_file(filename)
+            if patient_id != last_patient:
+                batch_arr = []
+                last_vent_bn = None
+
+            for bidx, breath in enumerate(gen):
+                ## determine if we should drop the cluster
+                if last_vent_bn is None:
+                    last_vent_bn = breath['vent_bn']
+                elif breath['vent_bn'] - 50 > last_vent_bn:
+                    batch_arr = []
+
+                flow = (np.array(breath['flow']) - self.mu) / self.std
+                b_seq = process_breath_func(flow)
+                batch_arr.append(b_seq)
+                if len(batch_arr) == self.n_sub_batches:
+                    self.all_sequences.append([
+                        patient_id,
+                        np.array(batch_arr).reshape((self.n_sub_batches, 1, self.seq_len))
+                    ])
+                    batch_arr = []
+                    last_vent_bn = None
+                last_vent_bn = breath['vent_bn']
+
+    def __getitem__(self, index):
+        # Here the trick is to save memory so you want to sequentially go down the
+        # list of reads but then dynamically generate positive/negative examples on
+        # the fly.
+        patient_id, seq = self.all_sequences[index]
+        pt_avail_pos = self.patient_mapping[patient_id]
+        pt_available_neg = list(set(self.available_neg_idxs).difference(set(self.patient_mapping[patient_id])))
+
+        # get positive idx after current epoch
+        rel_idx = pt_avail_pos.index(index)
+        if rel_idx == len(pt_avail_pos) - 1:
+            pos_idx = pt_avail_pos[rel_idx - 1]
+        else:
+            pos_idx = pt_avail_pos[rel_idx + 1]
+        pos_compr = self.all_sequences[pos_idx][1]
+
+        # get negative examples so that we can choose without replacement
+        neg_idx = np.random.choice(pt_available_neg)
+        neg_compr = self.all_sequences[neg_idx][1]
+        return seq, pos_compr, neg_compr
+
+    def __len__(self):
+        return len(self.all_sequences)

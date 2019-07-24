@@ -53,7 +53,7 @@ def perform_breath_meta_splits(dataset_dir):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('dataset_dir')
+    parser.add_argument('dataset_dir', help='base directory where pretraining dataset resides eg. /home/greg/ardsdata')
     args = parser.parse_args()
 
     perform_breath_meta_splits(args.dataset_dir)

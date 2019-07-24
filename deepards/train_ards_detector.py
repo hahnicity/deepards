@@ -21,6 +21,7 @@ from deepards.models.densenet import densenet18, densenet121, densenet161, dense
 from deepards.models.resnet import resnet18, resnet50, resnet101, resnet152
 from deepards.models.senet import senet18, senet154, se_resnet18, se_resnet50, se_resnet101, se_resnet152, se_resnext50_32x4d, se_resnext101_32x4d
 from deepards.models.siamese_cnn_lstm import SiameseCNNLSTMNetwork
+from deepards.models.siamese_cnn_transformer import SiameseCNNTransformerNetwork
 from deepards.models.torch_cnn_lstm_combo import CNNLSTMNetwork
 from deepards.models.torch_cnn_bm_regressor import CNNRegressor
 from deepards.models.torch_cnn_linear_network import CNNLinearNetwork
@@ -317,6 +318,15 @@ class SiameseMixin(object):
         accuracy = accuracy_score(target, batch_preds)
         self.results.update_accuracy(fold_num, accuracy)
 
+    def calc_loss(self, outputs_pos, outputs_neg):
+        # We  want to do a loss on a read by read basis. You don't want to do
+        # breath by breath
+        target_pos = self.cuda_wrapper(torch.FloatTensor([[0, 1]])).repeat((outputs_pos.shape[0], 1))
+        target_neg = self.cuda_wrapper(torch.FloatTensor([[1, 0]])).repeat((outputs_neg.shape[0], 1))
+        loss_pos = self.criterion(outputs_pos, target_pos)
+        loss_neg = self.criterion(outputs_neg, target_neg)
+        return loss_pos + loss_neg
+
     def record_final_epoch_testing_results(self, fold_num, epoch_num, test_dataset):
         # XXX this will have to change too
         self.preds = pd.Series(self.preds, index=self.pred_idx)
@@ -329,6 +339,77 @@ class SiameseMixin(object):
 
     def perform_post_modeling_actions(self):
         self.results.save_all()
+
+    def get_base_datasets(self):
+        # for holdout and kfold
+        if self.args.train_from_pickle:
+            train_sequences = pd.read_pickle(self.args.train_from_pickle)
+        # no pickle
+        else:
+            train_sequences = []
+
+        train_dataset = SiameseNetworkDataset(
+            self.args.data_path,
+            self.args.experiment_num,
+            self.args.n_sub_batches,
+            dataset_type=self.args.dataset_type,
+            all_sequences=train_sequences,
+            to_pickle=self.args.train_to_pickle,
+            train=True,
+        )
+        self.n_sub_batches = train_dataset.n_sub_batches
+        # for holdout
+        if self.args.test_from_pickle:
+            test_sequences = pd.read_pickle(self.args.test_from_pickle)
+        # holdout, no pickle, no kfolds
+        else:
+            test_sequences = []
+
+        test_dataset = SiameseNetworkDataset(
+            self.args.data_path,
+            self.args.experiment_num,
+            self.args.n_sub_batches,
+            dataset_type=self.args.dataset_type,
+            all_sequences=test_sequences,
+            to_pickle=self.args.test_to_pickle,
+            train=False,
+        )
+        return train_dataset, test_dataset
+
+    def run_train_epoch(self, model, train_loader, optimizer, epoch_num, fold_num):
+        with torch.enable_grad():
+            print("\nrun epoch {}\n".format(epoch_num))
+            for batch_idx, (seq, pos_compr, neg_compr) in enumerate(train_loader):
+                model.zero_grad()
+                # XXX do we need this?
+                #obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)
+                if seq.shape[0] == 0:
+                    continue
+                seq = self.cuda_wrapper(Variable(seq.float()))
+                pos_compr = self.cuda_wrapper(Variable(pos_compr.float()))
+                neg_compr = self.cuda_wrapper(Variable(neg_compr.float()))
+                outputs_pos = model(seq, pos_compr)
+                outputs_neg = model(seq, neg_compr)
+                loss = self.calc_loss(outputs_pos, outputs_neg)
+                loss.backward()
+                optimizer.step()
+                optimizer.zero_grad()
+                self.results.update_loss(fold_num, loss.data)
+
+                # print individual loss and total loss
+                if not self.args.no_print_progress:
+                    print("batch num: {}/{}, avg loss: {}\r".format(batch_idx, len(train_loader), self.results.get_meter('loss', fold_num), end=""))
+
+                if self.args.debug:
+                    break
+
+    def run_test_epoch(self, epoch_num, model, test_dataset, test_loader, fold_num):
+        pass
+        # XXX
+        #
+    def _process_test_batch_results(self, outputs, target, inputs, fold_num):
+        pass
+        # XXX
 
 
 class RegressorMixin(object):
@@ -528,89 +609,20 @@ class AutoencoderModel(BaseTraining, RegressorMixin):
         return AutoencoderNetwork(base_network)
 
 
-class SiameseCNNLSTMModel(BaseTraining, SiameseMixin):
+class SiameseCNNLSTMModel(SiameseMixin, BaseTraining):
     def __init__(self, args):
         super(SiameseCNNLSTMModel, self).__init__(args)
 
-    def _process_test_batch_results(self, outputs, target, inputs, fold_num):
-        pass
-        # XXX
+    def get_network(self, base_network):
+        return SiameseCNNLSTMNetwork(base_network, self.args.time_series_hidden_units, self.n_sub_batches)
 
-    def calc_loss(self, outputs_pos, outputs_neg):
-        target_pos = torch.LongTensor([[0, 1]]).repeat((outputs_pos.shape[0], 1))
-        target_neg = torch.LongTensor([[1, 0]]).repeat((outputs_neg.shape[0], 1))
-        loss_pos = self.criterion(outputs_pos, target_pos, size_average=True)
-        loss_neg = self.criterion(outputs_neg, target_neg, size_average=True)
-        return loss_pos + loss_neg
+
+class SiameseCNNTransformerModel(SiameseMixin, BaseTraining):
+    def __init__(self, args):
+        super(SiameseCNNTransformerModel, self).__init__(args)
 
     def get_network(self, base_network):
-        return SiameseCNNLSTMModel(base_network, self.args.time_series_hidden_units)
-
-    def get_base_datasets(self):
-        # for holdout and kfold
-        if self.args.train_from_pickle:
-            train_sequences = pd.read_pickle(self.args.train_from_pickle)
-        # no pickle
-        else:
-            train_sequences = []
-
-        train_dataset = SiameseNetworkDataset(
-            self.args.data_path,
-            self.args.experiment_num,
-            self.args.n_sub_batches,
-            dataset_type=self.args.dataset_type,
-            all_sequences=train_sequences,
-            to_pickle=self.args.train_to_pickle,
-        )
-        # for holdout
-        if self.args.test_from_pickle:
-            test_sequences = pd.read_pickle(self.args.test_from_pickle)
-        # holdout, no pickle, no kfolds
-        else:
-            test_sequences = []
-
-        test_dataset = SiameseNetworkDataset(
-            self.args.data_path,
-            self.args.experiment_num,
-            self.args.n_sub_batches,
-            dataset_type=self.args.dataset_type,
-            all_sequences=test_sequences,
-            to_pickle=self.args.train_to_pickle,
-        )
-        return train_dataset, test_dataset
-
-    def run_train_epoch(self, model, train_loader, optimizer, epoch_num, fold_num):
-        with torch.enable_grad():
-            print("\nrun epoch {}\n".format(epoch_num))
-            for idx, (seq, pos_compr, neg_compr) in enumerate(train_loader):
-                model.zero_grad()
-                # XXX do we need this?
-                #obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)
-                if seq.shape[0] == 0:
-                    continue
-                seq = self.cuda_wrapper(Variable(seq.float()))
-                pos_compr = self.cuda_wrapper(Variable(pos_compr.float()))
-                neg_compr = self.cuda_wrapper(Variable(neg_compr.float()))
-                # XXX do I need to provide a copy of the first sequence to make sure
-                # the graph computation is performed OK?
-                pos_outputs = model(seq, pos_compr)
-                neg_outputs = model(seq, neg_compr)
-                loss = self.calc_loss(outputs, target, inputs)
-                loss.backward()
-                optimizer.step()
-                optimizer.zero_grad()
-                self.results.update_loss(fold_num, loss.data)
-
-                # print individual loss and total loss
-                if not self.args.no_print_progress:
-                    print("batch num: {}/{}, avg loss: {}\r".format(batch_idx, total_batches, self.results.get_meter('loss', fold_num), end=""))
-
-                if self.args.debug:
-                    break
-
-    def run_test_epoch(self, epoch_num, model, test_dataset, test_loader, fold_num):
-        pass
-        # XXX
+        return SiameseCNNTransformerNetwork(base_network, self.args.time_series_hidden_units, self.n_sub_batches)
 
 
 def main():
@@ -624,8 +636,9 @@ def main():
         'cnn_regressor',
         'metadata_only',
         'autoencoder',
-        'cnn_transformer'
+        'cnn_transformer',
         'siamese_cnn_lstm',
+        'siamese_cnn_transformer',
     ], default='cnn_lstm')
     parser.add_argument('-e', '--epochs', type=int, default=5)
     parser.add_argument('-p', '--train-from-pickle')
@@ -688,6 +701,7 @@ def main():
         'autoencoder': AutoencoderModel,
         'cnn_transformer': CNNTransformerModel,
         'siamese_cnn_lstm': SiameseCNNLSTMModel,
+        'siamese_cnn_transformer': SiameseCNNTransformerModel,
     }
     cls = network_map[args.network](args)
     cls.train_and_test()
