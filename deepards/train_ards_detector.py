@@ -412,8 +412,8 @@ class SiameseMixin(object):
                 self.record_testing_results(batch_preds, batch_target, fold_num)
 
     def _process_test_batch_results(self, outputs_pos, outputs_neg):
-        target_pos = [1] * 8
-        target_neg = [0] * 8
+        target_pos = [1] * self.args.batch_size
+        target_neg = [0] * self.args.batch_size
         cat = torch.cat([outputs_pos, outputs_neg], dim=0)
         preds = torch.argmax(cat, dim=1).cpu().numpy()
         return preds, target_pos + target_neg
