@@ -312,9 +312,10 @@ class PatientClassifierMixin(object):
 
 
 class SiameseMixin(object):
-    def record_testing_results(self, batch_preds, batch_target, fold_num):
+    def record_testing_results(self, batch_preds, batch_target, epoch_num, fold_num):
         accuracy = accuracy_score(batch_target, batch_preds)
-        self.results.update_accuracy(fold_num, accuracy)
+        self.results.update_meter('accuracy', fold_num, accuracy)
+        self.results.update_epoch_meter('accuracy', epoch_num, accuracy)
 
     def calc_loss(self, outputs_pos, outputs_neg):
         # We  want to do a loss on a read by read basis. You don't want to do
@@ -409,11 +410,13 @@ class SiameseMixin(object):
                 outputs_neg = model(seq, neg_compr)
                 loss = self.calc_loss(outputs_pos, outputs_neg)
                 batch_preds, batch_target = self._process_test_batch_results(outputs_pos, outputs_neg)
-                self.record_testing_results(batch_preds, batch_target, fold_num)
+                self.record_testing_results(batch_preds, batch_target, epoch_num, fold_num)
+            self.results.print_meter_results('accuracy', fold_num)
+            self.results.print_epoch_meter_results('accuracy', epoch_num)
 
     def _process_test_batch_results(self, outputs_pos, outputs_neg):
-        target_pos = [1] * self.args.batch_size
-        target_neg = [0] * self.args.batch_size
+        target_pos = [1] * outputs_pos.shape[0]
+        target_neg = [0] * outputs_pos.shape[0]
         cat = torch.cat([outputs_pos, outputs_neg], dim=0)
         preds = torch.argmax(cat, dim=1).cpu().numpy()
         return preds, target_pos + target_neg

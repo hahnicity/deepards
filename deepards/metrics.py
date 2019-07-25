@@ -298,6 +298,12 @@ class DeepARDSResults(object):
             self.reporting.new_meter(meter_name)
         self.reporting.update(meter_name, val)
 
+    def update_epoch_meter(self, metric_name, epoch_num, val):
+        meter_name = '{}_epoch_{}'.format(metric_name, epoch_num)
+        if not self.reporting.does_meter_exist(meter_name):
+            self.reporting.new_meter(meter_name)
+        self.reporting.update(meter_name, val)
+
     def get_meter(self, metric_name, fold_num):
         meter_name = '{}_fold_{}'.format(metric_name, fold_num)
         if not self.reporting.does_meter_exist(meter_name):
@@ -306,6 +312,10 @@ class DeepARDSResults(object):
 
     def print_meter_results(self, metric_name, fold_num):
         meter_name = '{}_fold_{}'.format(metric_name, fold_num)
+        print(self.reporting.meters[meter_name])
+
+    def print_epoch_meter_results(self, metric_name, epoch_num):
+        meter_name = '{}_epoch_{}'.format(metric_name, epoch_num)
         print(self.reporting.meters[meter_name])
 
     def perform_patient_predictions(self, y_test, predictions, fold_num, epoch_num):
