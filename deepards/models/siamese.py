@@ -16,7 +16,6 @@ class SiameseARDSClassifier(nn.Module):
         super(SiameseARDSClassifier, self).__init__()
         self.pretrained_network = pretrained_network
         self.pretrained_network.linear_intermediate = Identity()
-        # XXX this is just for v.1 of the siamese nets
         try:
             self.pretrained_network.linear_final = nn.Linear(self.pretrained_network.lstm.hidden_size, 2)
         except NameError:
@@ -34,8 +33,10 @@ class SiameseARDSClassifier(nn.Module):
             block_out = block_out.unsqueeze(dim=0)
             outputs = torch.cat([outputs, block_out], dim=0)
 
-        # XXX janky and only covers lstm
-        x = self.pretrained_network.lstm(outputs)[0]
+        try:
+            x = self.pretrained_network.lstm(outputs)[0]
+        except NameError:
+            x = self.pretrained_network.transformer(outputs)
         x = self.pretrained_network.linear_final(x)
         return self.softmax(x)
 
@@ -48,7 +49,7 @@ class SiameseCNNTransformerNetwork(nn.Module):
         self.breath_block = breath_block
         num_blocks = 2
         self.time_layer_hidden_units = hidden_units
-        self.time_layer = Transformer(breath_block.n_out_filters, hidden_units, num_blocks, 4)
+        self.transformer = Transformer(breath_block.n_out_filters, hidden_units, num_blocks, 4)
         self.linear_intermediate = nn.Linear(hidden_units, 2)
         self.linear_final = nn.Linear(2 * sub_batch_size, 2)
 
@@ -59,7 +60,7 @@ class SiameseCNNTransformerNetwork(nn.Module):
         for i in range(1, batches):
             block_out = self.breath_block(inputs[i]).squeeze().unsqueeze(dim=0)
             outputs = torch.cat([outputs, block_out], dim=0)
-        return self.time_layer(outputs)
+        return self.transformer(outputs)
 
     def forward(self, x, compr):
         # input should be in shape: (batches, breaths in seq, chans, 224)
@@ -74,17 +75,17 @@ class SiameseCNNTransformerNetwork(nn.Module):
 
 
 class SiameseCNNLSTMNetwork(nn.Module):
-    def __init__(self, breath_block, lstm_hidden_units, sub_batch_size):
+    def __init__(self, breath_block, hidden_units, sub_batch_size):
         super(SiameseCNNLSTMNetwork, self).__init__()
 
         self.seq_size = 224
         self.breath_block = breath_block
-        self.time_layer_hidden_units = lstm_hidden_units
+        self.hidden_units = hidden_units
         self.lstm_layers = 1
         # If you want to use DataParallel and save hidden state in the future then
         # you may not be able to use batch_first=True
         # https://discuss.pytorch.org/t/multi-layer-rnn-with-dataparallel/4450/10
-        self.time_layer = nn.LSTM(
+        self.lstm = nn.LSTM(
             breath_block.n_out_filters,
             hidden_units,
             num_layers=self.lstm_layers,
@@ -100,7 +101,7 @@ class SiameseCNNLSTMNetwork(nn.Module):
         for i in range(1, batches):
             block_out = self.breath_block(inputs[i]).squeeze().unsqueeze(dim=0)
             outputs = torch.cat([outputs, block_out], dim=0)
-        return self.time_layer(outputs)[0]
+        return self.lstm(outputs)[0]
 
     def forward(self, x, compr):
         # input should be in shape: (batches, breaths in seq, chans, 224)

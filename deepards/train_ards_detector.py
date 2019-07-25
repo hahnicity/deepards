@@ -313,6 +313,25 @@ class PatientClassifierMixin(object):
         self.results.save_all()
 
 
+class WithTimeLayerClassifierMixin(object):
+    def calc_loss(self, outputs, target, inputs):
+        if self.args.batch_size > 1:
+            target = target.unsqueeze(1)
+        return self.criterion(outputs, target.repeat((1, outputs.shape[1], 1)))
+
+    # One thing that is common in this function is that we process the outputs, process
+    # the target, record testing results, and then return batch preds. It would be
+    # so much easier if this all was just in one function
+    def _process_test_batch_results(self, outputs, target, inputs, fold_num):
+        batch_preds = outputs.argmax(dim=-1).cpu().view(-1)
+        target = target.argmax(dim=1).cpu().reshape((outputs.shape[0], 1)).repeat((1, outputs.shape[1])).view(-1)
+        self.record_testing_results(target, batch_preds, fold_num)
+        return batch_preds.tolist()
+
+    def transform_obs_idx(self, obs_idx, outputs):
+        return obs_idx.reshape((outputs.shape[0], 1)).repeat((1, outputs.shape[1])).view(-1)
+
+
 class SiameseMixin(object):
     def record_testing_results(self, batch_preds, batch_target, epoch_num, fold_num):
         accuracy = accuracy_score(batch_target, batch_preds)
@@ -445,32 +464,15 @@ class RegressorMixin(object):
         self.results.save_all()
 
 
-class CNNTransformerModel(BaseTraining, PatientClassifierMixin):
+class CNNTransformerModel(WithTimeLayerClassifierMixin, BaseTraining, PatientClassifierMixin):
     def __init__(self, args):
         super(CNNTransformerModel, self).__init__(args)
-
-    def calc_loss(self, outputs, target, inputs):
-        if self.args.batch_size > 1:
-            target = target.unsqueeze(1)
-        return self.criterion(outputs, target.repeat((1, outputs.shape[1], 1)))
-
-    # One thing that is common in this function is that we process the outputs, process
-    # the target, record testing results, and then return batch preds. It would be
-    # so much easier if this all was just in one function
-    def _process_test_batch_results(self, outputs, target, inputs, fold_num):
-        batch_preds = outputs.argmax(dim=-1).cpu().view(-1)
-        target = target.argmax(dim=1).cpu().reshape((outputs.shape[0], 1)).repeat((1, outputs.shape[1])).view(-1)
-        self.record_testing_results(target, batch_preds, fold_num)
-        return batch_preds.tolist()
 
     def get_network(self, base_network):
         return CNNTransformerNetwork(base_network, self.n_metadata_inputs, self.args.bm_to_linear, self.args.time_series_hidden_units, self.args.transformer_blocks)
 
-    def transform_obs_idx(self, obs_idx, outputs):
-        return obs_idx.reshape((outputs.shape[0], 1)).repeat((1, outputs.shape[1])).view(-1)
 
-
-class CNNLSTMModel(BaseTraining, PatientClassifierMixin):
+class CNNLSTMModel(WithTimeLayerClassifierMixin, BaseTraining, PatientClassifierMixin):
     def __init__(self, args):
         super(CNNLSTMModel, self).__init__(args)
 
@@ -482,20 +484,8 @@ class CNNLSTMModel(BaseTraining, PatientClassifierMixin):
         elif self.args.loss_calc == 'last_breath':
             return self.criterion(outputs[:, -1, :], target)
 
-    # One thing that is common in this function is that we process the outputs, process
-    # the target, record testing results, and then return batch preds. It would be
-    # so much easier if this all was just in one function
-    def _process_test_batch_results(self, outputs, target, inputs, fold_num):
-        batch_preds = outputs.argmax(dim=-1).cpu().view(-1)
-        target = target.argmax(dim=1).cpu().reshape((outputs.shape[0], 1)).repeat((1, outputs.shape[1])).view(-1)
-        self.record_testing_results(target, batch_preds, fold_num)
-        return batch_preds.tolist()
-
     def get_network(self, base_network):
         return CNNLSTMNetwork(base_network, self.n_metadata_inputs, self.args.bm_to_linear, self.args.time_series_hidden_units)
-
-    def transform_obs_idx(self, obs_idx, outputs):
-        return obs_idx.reshape((outputs.shape[0], 1)).repeat((1, outputs.shape[1])).view(-1)
 
     def run_train_epoch(self, model, train_loader, optimizer, epoch_num, fold_num):
         print("\nrun epoch {}\n".format(epoch_num))
@@ -642,32 +632,15 @@ class SiameseCNNTransformerModel(SiameseMixin, BaseTraining):
         return SiameseCNNTransformerNetwork(base_network, self.args.time_series_hidden_units, self.n_sub_batches)
 
 
-class SiamesePretrainedModel(BaseTraining, PatientClassifierMixin):
+class SiamesePretrainedModel(WithTimeLayerClassifierMixin, BaseTraining, PatientClassifierMixin):
     def __init__(self, args):
         super(SiamesePretrainedModel, self).__init__(args)
-
-    def calc_loss(self, outputs, target, inputs):
-        if self.args.batch_size > 1:
-            target = target.unsqueeze(1)
-        return self.criterion(outputs, target.repeat((1, outputs.shape[1], 1)))
-
-    # One thing that is common in this function is that we process the outputs, process
-    # the target, record testing results, and then return batch preds. It would be
-    # so much easier if this all was just in one function
-    def _process_test_batch_results(self, outputs, target, inputs, fold_num):
-        batch_preds = outputs.argmax(dim=-1).cpu().view(-1)
-        target = target.argmax(dim=1).cpu().reshape((outputs.shape[0], 1)).repeat((1, outputs.shape[1])).view(-1)
-        self.record_testing_results(target, batch_preds, fold_num)
-        return batch_preds.tolist()
 
     def get_network(self, base_network):
         network = torch.load(self.args.load_siamese)
         if isinstance(network, nn.DataParallel):
             network = network.module
         return SiameseARDSClassifier(network)
-
-    def transform_obs_idx(self, obs_idx, outputs):
-        return obs_idx.reshape((outputs.shape[0], 1)).repeat((1, outputs.shape[1])).view(-1)
 
 
 def main():
@@ -739,6 +712,10 @@ def main():
     parser.add_argument('--unshuffled', action='store_true', help='dont shuffle data for lstm processing')
     parser.add_argument('--load-siamese', help='load a siamese network pretrained model')
     args = parser.parse_args()
+
+    # convenience code
+    if args.load_siamese:
+        args.network = 'siamese_pretrained'
 
     network_map = {
         'cnn_lstm': CNNLSTMModel,
