@@ -10,7 +10,6 @@ class CNNLinearNetwork(nn.Module):
         self.seq_size = 224
         self.breath_block = breath_block
         self.linear_final = nn.Linear(self.breath_block.n_out_filters * sequence_size + metadata_features, 2)
-        self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, x, metadata):
         # input should be in shape: (batches, breaths in seq, chans, 224)
@@ -22,4 +21,4 @@ class CNNLinearNetwork(nn.Module):
         outputs = self.linear_final(self.breath_block(x[0]).view(-1)).unsqueeze(0)
         for i in range(1, batches):
             outputs = torch.cat([outputs, self.linear_final(self.breath_block(x[i]).view(-1)).unsqueeze(0)], dim=0)
-        return self.softmax(outputs)
+        return outputs

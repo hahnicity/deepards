@@ -17,11 +17,10 @@ class MetadataOnlyNetwork(nn.Module):
         self.linear1 = nn.Linear(9, 32)
         self.linear2 = nn.Linear(32, 16)
         self.linear3 = nn.Linear(16, 2)
-        self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, _, metadata):
         if torch.any(torch.isnan(metadata)):
             raise Exception('Your metadata has nans in it. Perhaps you are utilizing the wrong dataset type?')
         metadata = metadata.mean(dim=1)
         x = self.linear3(self.linear2(self.linear1(metadata)))
-        return self.softmax(x)
+        return x

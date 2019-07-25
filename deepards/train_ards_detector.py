@@ -304,7 +304,7 @@ class PatientClassifierMixin(object):
         if self.args.loss_func == 'vacillating':
             self.criterion = VacillatingLoss(self.cuda_wrapper(torch.FloatTensor([self.args.valpha])))
         elif self.args.loss_func == 'bce':
-            self.criterion = torch.nn.BCELoss()
+            self.criterion = torch.nn.BCEWithLogitsLoss()
         elif self.args.loss_func == 'confidence':
             self.criterion = ConfidencePenaltyLoss(self.args.conf_beta)
 

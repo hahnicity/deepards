@@ -16,13 +16,9 @@ class SiameseARDSClassifier(nn.Module):
         super(SiameseARDSClassifier, self).__init__()
         self.pretrained_network = pretrained_network
         self.pretrained_network.linear_intermediate = Identity()
-        try:
-            self.pretrained_network.linear_final = nn.Linear(self.pretrained_network.lstm.hidden_size, 2)
-        except NameError:
-            self.pretrained_network.linear_final = nn.Linear(self.pretrained_network.time_layer_hidden_size, 2)
-        self.softmax = nn.Softmax(dim=-1)
+        self.pretrained_network.linear_final = nn.Linear(self.pretrained_network.time_layer_hidden_size, 2)
 
-    def forward(self, x, metadata):
+    def forward(self, x, _):
         # input should be in shape: (batches, breaths in seq, chans, 224)
         batches = x.shape[0]
         outputs = self.pretrained_network.breath_block(x[0]).squeeze()
@@ -37,8 +33,7 @@ class SiameseARDSClassifier(nn.Module):
             x = self.pretrained_network.lstm(outputs)[0]
         except NameError:
             x = self.pretrained_network.transformer(outputs)
-        x = self.pretrained_network.linear_final(x)
-        return self.softmax(x)
+        return self.pretrained_network.linear_final(x)
 
 
 class SiameseCNNTransformerNetwork(nn.Module):
@@ -80,7 +75,7 @@ class SiameseCNNLSTMNetwork(nn.Module):
 
         self.seq_size = 224
         self.breath_block = breath_block
-        self.hidden_units = hidden_units
+        self.time_layer_hidden_units = hidden_units
         self.lstm_layers = 1
         # If you want to use DataParallel and save hidden state in the future then
         # you may not be able to use batch_first=True

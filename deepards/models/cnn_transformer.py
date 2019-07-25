@@ -20,8 +20,6 @@ class CNNTransformerNetwork(nn.Module):
             self.transformer = Transformer(breath_block.n_out_filters, hidden_units, num_blocks, 4)
             self.linear_final = nn.Linear(breath_block.n_out_filters+metadata_features, 2)
 
-        self.softmax = nn.Softmax(dim=-1)
-
     def forward(self, x, metadata):
         # input should be in shape: (batches, breaths in seq, chans, 224)
         if x.shape[-1] != 224:
@@ -43,5 +41,4 @@ class CNNTransformerNetwork(nn.Module):
         x = self.transformer(outputs)
         if self.bm_to_linear:
             x = torch.cat([x, metadata], dim=-1)
-        x = self.linear_final(x)
-        return self.softmax(x)
+        return self.linear_final(x)

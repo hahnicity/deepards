@@ -24,7 +24,6 @@ class CNNLSTMNetwork(nn.Module):
             self.lstm = nn.LSTM(breath_block.n_out_filters, self.lstm_hidden_units, num_layers=self.lstm_layers, batch_first=True)
             self.linear_final = nn.Linear(self.lstm_hidden_units+metadata_features, 2)
 
-        self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, x, metadata, hx_cx):
         # input should be in shape: (batches, breaths in seq, chans, 224)
@@ -48,4 +47,4 @@ class CNNLSTMNetwork(nn.Module):
         if self.bm_to_linear:
             x = torch.cat([x, metadata], dim=-1)
         x = self.linear_final(x)
-        return self.softmax(x), (hx, cx)
+        return x, (hx, cx)

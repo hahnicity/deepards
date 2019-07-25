@@ -8,11 +8,12 @@ class VacillatingLoss(nn.Module):
         super(VacillatingLoss, self).__init__()
         self.left_hand_func = lambda x: -torch.log(2 * (torch.exp(-alpha) - 1) * x + 1)
         self.right_hand_func = lambda x: -torch.log(2 * torch.exp(-alpha) * (1 - x) + 2 * x - 1)
-        self.bce = nn.BCELoss()
+        self.bce = nn.BCEWithLogitsLoss()
         self.alpha = alpha
 
     def forward(self, pred, target):
         bce_loss = self.bce(pred, target)
+        pred = nn.Softmax(dim=-1)(pred)
         lh = self.left_hand_func((pred.sum(dim=1) / pred.shape[1]))
         rh = self.right_hand_func((pred.sum(dim=1) / pred.shape[1]))
         # ensure that nans and values above alpha are dealt with
@@ -24,7 +25,7 @@ class VacillatingLoss(nn.Module):
 class ConfidencePenaltyLoss(nn.Module):
     def __init__(self, beta):
         super(ConfidencePenaltyLoss, self).__init__()
-        self.bce = nn.BCELoss()
+        self.bce = nn.BCEWithLogitsLoss()
         self.beta = beta
 
     def forward(self, pred, target):
