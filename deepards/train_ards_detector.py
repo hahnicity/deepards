@@ -20,8 +20,7 @@ from deepards.models.cnn_transformer import CNNTransformerNetwork
 from deepards.models.densenet import densenet18, densenet121, densenet161, densenet169, densenet201
 from deepards.models.resnet import resnet18, resnet50, resnet101, resnet152
 from deepards.models.senet import senet18, senet154, se_resnet18, se_resnet50, se_resnet101, se_resnet152, se_resnext50_32x4d, se_resnext101_32x4d
-from deepards.models.siamese_cnn_lstm import SiameseCNNLSTMNetwork
-from deepards.models.siamese_cnn_transformer import SiameseCNNTransformerNetwork
+from deepards.models.siamese import SiameseARDSClassifier, SiameseCNNLSTMNetwork, SiameseCNNTransformerNetwork
 from deepards.models.torch_cnn_lstm_combo import CNNLSTMNetwork
 from deepards.models.torch_cnn_bm_regressor import CNNRegressor
 from deepards.models.torch_cnn_linear_network import CNNLinearNetwork
@@ -635,6 +634,34 @@ class SiameseCNNTransformerModel(SiameseMixin, BaseTraining):
         return SiameseCNNTransformerNetwork(base_network, self.args.time_series_hidden_units, self.n_sub_batches)
 
 
+class SiamesePretrainedModel(BaseTraining, PatientClassifierMixin):
+    def __init__(self, args):
+        super(SiamesePretrainedModel, self).__init__(args)
+
+    def calc_loss(self, outputs, target, inputs):
+        if self.args.batch_size > 1:
+            target = target.unsqueeze(1)
+        return self.criterion(outputs, target.repeat((1, outputs.shape[1], 1)))
+
+    # One thing that is common in this function is that we process the outputs, process
+    # the target, record testing results, and then return batch preds. It would be
+    # so much easier if this all was just in one function
+    def _process_test_batch_results(self, outputs, target, inputs, fold_num):
+        batch_preds = outputs.argmax(dim=-1).cpu().view(-1)
+        target = target.argmax(dim=1).cpu().reshape((outputs.shape[0], 1)).repeat((1, outputs.shape[1])).view(-1)
+        self.record_testing_results(target, batch_preds, fold_num)
+        return batch_preds.tolist()
+
+    def get_network(self, base_network):
+        network = torch.load(self.args.load_siamese)
+        if isinstance(network, nn.DataParallel):
+            network = network.module
+        return SiameseARDSClassifier(network)
+
+    def transform_obs_idx(self, obs_idx, outputs):
+        return obs_idx.reshape((outputs.shape[0], 1)).repeat((1, outputs.shape[1])).view(-1)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-dp', '--data-path', default='/fastdata/ardsdetection', help='Path to ARDS detection dataset')
@@ -649,6 +676,7 @@ def main():
         'cnn_transformer',
         'siamese_cnn_lstm',
         'siamese_cnn_transformer',
+        'siamese_pretrained',
     ], default='cnn_lstm')
     parser.add_argument('-e', '--epochs', type=int, default=5)
     parser.add_argument('-p', '--train-from-pickle')
@@ -701,6 +729,7 @@ def main():
     parser.add_argument('--time-series-hidden-units', type=int, default=512)
     parser.add_argument('--transformer-blocks', type=int, default=10)
     parser.add_argument('--unshuffled', action='store_true', help='dont shuffle data for lstm processing')
+    parser.add_argument('--load-siamese', help='load a siamese network pretrained model')
     args = parser.parse_args()
 
     network_map = {
@@ -712,6 +741,7 @@ def main():
         'cnn_transformer': CNNTransformerModel,
         'siamese_cnn_lstm': SiameseCNNLSTMModel,
         'siamese_cnn_transformer': SiameseCNNTransformerModel,
+        'siamese_pretrained': SiamesePretrainedModel,
     }
     cls = network_map[args.network](args)
     cls.train_and_test()
