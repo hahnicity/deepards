@@ -39,13 +39,13 @@ class CamExtractor():
         """
             Does a full forward pass on the model
         """
-        print(x.shape)
+        #print(x.shape)
         # Forward pass on the convolutions
         conv_output, x = self.forward_pass_on_convolutions(x)
-        print(conv_output.shape)
+        #print(conv_output.shape)
         #print(x.shape)
         x = self.model.module.breath_block.avgpool(x)
-        print(x.shape)
+        #print(x.shape)
         x = x.view(-1)  # Flatten
         # Forward pass on the classifier
         x = self.model.module.linear_final(x).unsqueeze(0)
@@ -68,7 +68,7 @@ class GradCam():
         # conv_output is the output of convolutions at specified layer
         # model_output is the final output of the model (1, 1000)
         conv_output, model_output = self.extractor.forward_pass(input_image)
-        print(model_output)
+        #print(model_output)
         if target_class is None:
             target_class = np.argmax(model_output.cpu().data.numpy())
         # Target for backprop
@@ -123,20 +123,20 @@ class GradCam():
         return cam
 
 
-def get_sequence(filename):
+def get_sequence(filename, ards, c):
     data = pickle.load( open( pickle_file_name, "rb" ) )
     #print(len(data))
     first_seq = None
     count = 0
     for i, d in enumerate(data):
-        if d[2][1] == 1:
-            if count == 2:
+        if d[2][1] == ards:
+            if count == c:
                 first_seq = d
                 break
             count = count + 1
             continue 
     #first_seq = data[1]
-    print(first_seq[2])
+    #print(first_seq[2])
     br = first_seq[1]
     #br = np.expand_dims(br, 0)
     #br = torch.from_numpy(br)
@@ -159,11 +159,28 @@ if __name__ == '__main__':
     #target_example = 0  # Snake
     target_class = None
     file_name_to_export = 'gradcam_output.png'
-    breath_sequence = get_sequence(pickle_file_name)
+
+    for i in range(2):
+        cam_outputs = np.empty((0,7))
+        for j in range(100):
+            breath_sequence = get_sequence(pickle_file_name, i , j)
+            grad_cam = GradCam(pretrained_model)
+            cam = grad_cam.generate_cam(breath_sequence, target_class)
+            #print(cam)
+            cam = np.expand_dims(cam, axis = 0)
+            cam_outputs = np.append(cam_outputs, cam, axis = 0)
+        cam_outputs = np.mean(cam_outputs, axis = 0)
+        if i == 0:
+            print("Gradcam output for others : {}".format(cam_outputs))
+        else:
+            print("Gradcam output for ARDS: {}".format(cam_outputs))
+
+
+    #breath_sequence = get_sequence(pickle_file_name)
     # Grad cam
-    grad_cam = GradCam(pretrained_model)
+    #grad_cam = GradCam(pretrained_model)
     # Generate cam mask
-    cam = grad_cam.generate_cam(breath_sequence, target_class)
+    #cam = grad_cam.generate_cam(breath_sequence, target_class)
     # Save mask
     #save_class_activation_images(breath_sequence, cam, file_name_to_export)
     print('Grad cam completed')
