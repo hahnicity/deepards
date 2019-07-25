@@ -28,6 +28,8 @@ from deepards.models.torch_metadata_only_network import MetadataOnlyNetwork
 from deepards.models.unet import UNet
 from deepards.models.vgg import vgg11_bn, vgg13_bn
 
+torch.set_default_tensor_type('torch.FloatTensor')
+
 
 class BaseTraining(object):
     base_networks = {
@@ -257,6 +259,7 @@ class BaseTraining(object):
                     continue
                 inputs = self.cuda_wrapper(Variable(seq.float()))
                 metadata = self.cuda_wrapper(Variable(metadata.float()))
+                target = self.cuda_wrapper(target.float())
                 outputs = model(inputs, metadata)
                 loss = self.calc_loss(outputs, target, inputs)
                 self.results.update_meter('test_loss', fold_num, loss.data)
@@ -526,6 +529,7 @@ class CNNLSTMModel(WithTimeLayerClassifierMixin, BaseTraining, PatientClassifier
                     continue
                 inputs = self.cuda_wrapper(Variable(seq.float()))
                 metadata = self.cuda_wrapper(Variable(metadata.float()))
+                target = self.cuda_wrapper(target.float())
                 if not self.args.unshuffled:
                     outputs, _ = model(inputs, metadata, None)
                 else:
