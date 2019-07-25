@@ -258,6 +258,9 @@ class BaseTraining(object):
                 inputs = self.cuda_wrapper(Variable(seq.float()))
                 metadata = self.cuda_wrapper(Variable(metadata.float()))
                 outputs = model(inputs, metadata)
+                loss = self.calc_loss(outputs, target, inputs)
+                self.results.update_meter('test_loss', fold_num, loss.data)
+                self.results.update_epoch_meter('test_loss', epoch_num, loss.data)
                 batch_preds = self._process_test_batch_results(outputs, target, inputs, fold_num)
                 self.pred_idx.extend(self.transform_obs_idx(obs_idx, outputs).cpu().tolist())
                 self.preds.extend(batch_preds)
@@ -408,6 +411,8 @@ class SiameseMixin(object):
                 outputs_pos = model(seq, pos_compr)
                 outputs_neg = model(seq, neg_compr)
                 loss = self.calc_loss(outputs_pos, outputs_neg)
+                self.results.update_meter('test_loss', fold_num, loss.data)
+                self.results.update_epoch_meter('test_loss', epoch_num, loss.data)
                 batch_preds, batch_target = self._process_test_batch_results(outputs_pos, outputs_neg)
                 self.record_testing_results(batch_preds, batch_target, epoch_num, fold_num)
             self.results.print_meter_results('accuracy', fold_num)
@@ -539,6 +544,9 @@ class CNNLSTMModel(BaseTraining, PatientClassifierMixin):
                         hx_cx = None
                     outputs, hx_cx = model(inputs, metadata, hx_cx)
                     last_pt = cur_pt
+                loss = self.calc_loss(outputs, target, inputs)
+                self.results.update_meter('test_loss', fold_num, loss.data)
+                self.results.update_epoch_meter('test_loss', epoch_num, loss.data)
                 batch_preds = self._process_test_batch_results(outputs, target, inputs, fold_num)
                 self.pred_idx.extend(self.transform_obs_idx(obs_idx, outputs).cpu().tolist())
                 self.preds.extend(batch_preds)
