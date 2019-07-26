@@ -21,7 +21,7 @@ from deepards.models.densenet import densenet18, densenet121, densenet161, dense
 from deepards.models.resnet import resnet18, resnet50, resnet101, resnet152
 from deepards.models.senet import senet18, senet154, se_resnet18, se_resnet50, se_resnet101, se_resnet152, se_resnext50_32x4d, se_resnext101_32x4d
 from deepards.models.siamese import SiameseARDSClassifier, SiameseCNNLSTMNetwork, SiameseCNNTransformerNetwork
-from deepards.models.torch_cnn_lstm_combo import CNNLSTMNetwork
+from deepards.models.torch_cnn_lstm_combo import CNNLSTMDoubleLinearNetwork, CNNLSTMNetwork
 from deepards.models.torch_cnn_bm_regressor import CNNRegressor
 from deepards.models.torch_cnn_linear_network import CNNLinearNetwork
 from deepards.models.torch_metadata_only_network import MetadataOnlyNetwork
@@ -154,6 +154,7 @@ class BaseTraining(object):
             unpadded_downsample_factor=self.args.downsample_factor,
             drop_frame_if_frac_missing=self.args.no_drop_frames,
         )
+        self.n_sub_batches = train_dataset[0][1].shape[0]
         # for holdout
         if self.args.test_from_pickle and self.args.kfolds is None:
             test_sequences = pd.read_pickle(self.args.test_from_pickle)
@@ -548,6 +549,26 @@ class CNNLSTMModel(WithTimeLayerClassifierMixin, BaseTraining, PatientClassifier
         self.record_final_epoch_testing_results(fold_num, epoch_num, test_dataset)
 
 
+class CNNLSTMDoubleLinearModel(BaseTraining, PatientClassifierMixin):
+    def __init__(self, args):
+        super(CNNLSTMDoubleLinearModel, self).__init__(args)
+
+    def get_network(self, base_network):
+        return CNNLSTMDoubleLinearNetwork(base_network, self.n_metadata_inputs, self.args.bm_to_linear, self.args.time_series_hidden_units, self.n_sub_batches)
+
+    def calc_loss(self, outputs, target, inputs):
+        return self.criterion(outputs, target)
+
+    def _process_test_batch_results(self, outputs, target, inputs, fold_num):
+        batch_preds = outputs.argmax(dim=-1).cpu().view(-1)
+        target = target.argmax(dim=1).cpu().reshape((outputs.shape[0], 1)).view(-1)
+        self.record_testing_results(target, batch_preds, fold_num)
+        return batch_preds.tolist()
+
+    def transform_obs_idx(self, obs_idx, outputs):
+        return obs_idx.reshape((outputs.shape[0], 1)).view(-1)
+
+
 class CNNLinearModel(BaseTraining, PatientClassifierMixin):
     def __init__(self, args):
         super(CNNLinearModel, self).__init__(args)
@@ -662,6 +683,7 @@ def main():
         'siamese_cnn_lstm',
         'siamese_cnn_transformer',
         'siamese_pretrained',
+        'cnn_lstm_double_linear',
     ], default='cnn_lstm')
     parser.add_argument('-e', '--epochs', type=int, default=5)
     parser.add_argument('-p', '--train-from-pickle')
@@ -731,6 +753,7 @@ def main():
         'siamese_cnn_lstm': SiameseCNNLSTMModel,
         'siamese_cnn_transformer': SiameseCNNTransformerModel,
         'siamese_pretrained': SiamesePretrainedModel,
+        'cnn_lstm_double_linear': CNNLSTMDoubleLinearModel,
     }
     cls = network_map[args.network](args)
     cls.train_and_test()

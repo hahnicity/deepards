@@ -48,3 +48,14 @@ class CNNLSTMNetwork(nn.Module):
             x = torch.cat([x, metadata], dim=-1)
         x = self.linear_final(x)
         return x, (hx, cx)
+
+
+class CNNLSTMDoubleLinearNetwork(CNNLSTMNetwork):
+    def __init__(self, breath_block, metadata_features, bm_to_linear, lstm_hidden_units, n_sub_batches):
+        super(CNNLSTMDoubleLinearNetwork, self).__init__(breath_block, metadata_features, bm_to_linear, lstm_hidden_units)
+        self.window_classifier = nn.Linear(2 * n_sub_batches, 2)
+
+    def forward(self, x, metadata):
+        out, _ = super(CNNLSTMDoubleLinearNetwork, self).forward(x, metadata, None)
+        out = out.view((out.shape[0], -1))
+        return self.window_classifier(out)
