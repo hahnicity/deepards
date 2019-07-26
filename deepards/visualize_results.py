@@ -19,7 +19,21 @@ def visualize_results_for_start_time(start_time):
 
     for i, f in enumerate(sorted(results_files)):
         vals = torch.load(f).values.numpy()
-        ma = get_moving_average(vals, 1000)
+        ma = get_moving_average(vals, 100)
+        plt.plot(ma, label='Loss Fold {}'.format(i+1))
+    plt.legend()
+    plt.grid()
+    plt.ylabel('loss')
+    plt.show()
+
+    glob_search = 'results/test_loss_fold*_{}*'.format(start_time)
+    results_files = glob(glob_search)
+    if len(results_files) == 0:
+        raise Exception('No loss results files found')
+
+    for i, f in enumerate(sorted(results_files)):
+        vals = torch.load(f).values.numpy()
+        ma = get_moving_average(vals, 100)
         plt.plot(ma, label='Loss Fold {}'.format(i+1))
     plt.legend()
     plt.grid()
@@ -92,13 +106,20 @@ def visualize_results_for_start_time(start_time):
     plt.show()
 
 
-def visualize_results_for_experiment(experiment_name):
+def visualize_results_for_experiment(experiment_name, filter_by_base_network):
     experiment_files = glob('results/{}_1*.pth'.format(experiment_name))
     experiment_data = [torch.load(f) for f in experiment_files]
     for i, exp_data in enumerate(experiment_data):
         if 'n_sub_batches' not in exp_data:
             exp_data['n_sub_batches'] = np.nan
+
     experiment_data = sorted(experiment_data, key=lambda x: (x['start_time']))
+    if filter_by_base_network:
+        tmp = []
+        for exp_data in experiment_data:
+            if filter_by_base_network == exp_data['base_network']:
+                tmp.append(exp_data)
+        experiment_data = tmp
 
     if len(experiment_data) == 0:
         raise Exception('no experiments found with name: {}'.format(experiment_name))
@@ -137,12 +158,13 @@ def main():
     mutex = parser.add_mutually_exclusive_group(required=True)
     mutex.add_argument('-st', '--start-time')
     mutex.add_argument('-exp', '--experiment-name')
+    parser.add_argument('--filter-by-base-net', help='filter all results by a base netwwork')
     args = parser.parse_args()
 
     if args.start_time:
         visualize_results_for_start_time(args.start_time)
     elif args.experiment_name:
-        visualize_results_for_experiment(args.experiment_name)
+        visualize_results_for_experiment(args.experiment_name, args.filter_by_base_net)
 
 
 if __name__ == "__main__":

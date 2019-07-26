@@ -30,5 +30,5 @@ class ConfidencePenaltyLoss(nn.Module):
 
     def forward(self, pred, target):
         bce_loss = self.bce(pred, target)
-        confidence_loss = -(self.beta * (F.softmax(pred, dim=2) * F.log_softmax(pred, dim=2))).mean()
+        confidence_loss = -(self.beta * (F.softmax(pred, dim=-1) * F.log_softmax(pred, dim=-1))).mean()
         return (bce_loss - confidence_loss)
