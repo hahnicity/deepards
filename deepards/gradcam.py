@@ -8,7 +8,7 @@ import argparse
 import pickle
 import cv2
 
-from breath_visualize import visualize_sequence
+#from breath_visualize import visualize_sequence
 
 class CamExtractor():
     """
@@ -183,7 +183,7 @@ if __name__ == '__main__':
             outfile = open('ARDS_gradcam.pkl','wb')
             #print("Gradcam output for ARDS: {}".format(cam_outputs))
         pickle.dump(cam_outputs, outfile)
-        visualize_sequence(cam_outputs)
+        #visualize_sequence(cam_outputs)
 
     #breath_sequence = get_sequence(pickle_file_name)
     # Grad cam
