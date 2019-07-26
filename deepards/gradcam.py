@@ -6,6 +6,9 @@ import numpy as np
 import torch
 import argparse
 import pickle
+import cv2
+
+from breath_visualize import visualize_sequence
 
 class CamExtractor():
     """
@@ -124,7 +127,7 @@ class GradCam():
 
 
 def get_sequence(filename, ards, c):
-    data = pickle.load( open( pickle_file_name, "rb" ) )
+    data = pickle.load( open( filename, "rb" ) )
     #print(len(data))
     first_seq = None
     count = 0
@@ -169,12 +172,18 @@ if __name__ == '__main__':
             #print(cam)
             cam = np.expand_dims(cam, axis = 0)
             cam_outputs = np.append(cam_outputs, cam, axis = 0)
-        cam_outputs = np.mean(cam_outputs, axis = 0)
+        cam_outputs = np.mean(cam_outputs, axis = 0)   
+        cam_outputs = cv2.resize(cam_outputs,(1,224))
+        #print(cam_outputs.shape)
+        outfile = None
         if i == 0:
-            print("Gradcam output for others : {}".format(cam_outputs))
+            outfile = open('others_gradcam.pkl','wb')
+            #print("Gradcam output for others : {}".format(cam_outputs))
         else:
-            print("Gradcam output for ARDS: {}".format(cam_outputs))
-
+            outfile = open('ARDS_gradcam.pkl','wb')
+            #print("Gradcam output for ARDS: {}".format(cam_outputs))
+        pickle.dump(cam_outputs, outfile)
+        visualize_sequence(cam_outputs)
 
     #breath_sequence = get_sequence(pickle_file_name)
     # Grad cam
