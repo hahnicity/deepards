@@ -69,11 +69,7 @@ class ARDSRawDataset(Dataset):
         # So I calculated out the stats on the training set. Our breaths are a mean of 140.5
         flow_sum = 0
         n_obs = 0
-        # XXX there is a problem with this and we are not respecting train sets versus
-        # testing sets. Everything is just scaled to the same factor. I think that we
-        # should change this but for now I'm going to let it ride for a bit.
-
-        # use precomputed scaling factors. These may change so we may need to compute them again
+        # XXX for kfold need to redefine std and mu
         #
         # I recalculated this and factors changed after addition of 0723. I wonder if
         # standard scaling is the right way to do this, especially because there are
@@ -91,8 +87,6 @@ class ARDSRawDataset(Dataset):
             'dyn_compliance',
             'tve:tvi ratio',
         ]
-        # XXX this is kinda hard coded to 9 features even though in the future the #
-        # features will probably change.
         self.flow_time_bm_mu = [
             -1.12003803e+01,  2.27065158e+01,  5.41515510e+01,  2.68864330e+01,
             8.81662707e-01,  1.98707801e+00,  5.14447986e-01,  3.08663952e-02,
@@ -155,6 +149,7 @@ class ARDSRawDataset(Dataset):
             patient_row = self.cohort[self.cohort['Patient Unique Identifier'] == patient_id]
             patient_row = patient_row.iloc[0]
             patho = 1 if patient_row['Pathophysiology'] == 'ARDS' else 0
+            start_time = self._get_patient_start_time(patient_id)
 
             matching_meta = os.path.join(self.meta_dir, patient_id, 'breath_meta_' + os.path.basename(filename).replace('.raw.npy', '.csv'))
             has_preprocessed_meta = False
@@ -170,6 +165,12 @@ class ARDSRawDataset(Dataset):
                 # will ever learn anything useful from them. 21 is chosen because the mean
                 # number of unpadded obs we have in our train set is 138.78 and the std
                 # is 38.23. So 21 is < mu - 3*std and is divisible with 7.
+                try:
+                    breath_time = pd.to_datetime(breath['abs_bs'], format='%Y-%m-%d %H-%M-%S.%f')
+                except:
+                    breath_time = pd.to_datetime(breath['abs_bs'], format='%Y-%m-%d %H:%M:%S.%f')
+                if breath_time < start_time or breath_time > start_time + pd.Timedelta(hours=24):
+                    continue
                 if len(breath['flow']) < 21:
                     continue
                 if has_preprocessed_meta:
@@ -238,7 +239,6 @@ class ARDSRawDataset(Dataset):
                 # is 38.23. So 21 is < mu - 3*std and is divisible with 7.
                 if len(breath['flow']) < 21:
                     continue
-                # XXX I should abstract this whole section where we extract a row of metadata
                 if has_preprocessed_meta:
                     try:
                         meta = processed_meta[bidx]
@@ -280,14 +280,20 @@ class ARDSRawDataset(Dataset):
                 seq_vent_bns = []
             last_patient = patient_id
             target = target_func(patient_id)
+            start_time = self._get_patient_start_time(patient_id)
 
-            # XXX need to eventually add cutoffs based on vent time or Berlin time
             for bidx, breath in enumerate(gen):
                 # cutoff breaths if they have too few points. It is unlikely ML
                 # will ever learn anything useful from them. 21 is chosen because the mean
                 # number of unpadded obs we have in our train set is 138.78 and the std
                 # is 38.23. So 21 is < mu - 3*std and is divisible with 7.
                 if len(breath['flow']) < 21:
+                    continue
+                try:
+                    breath_time = pd.to_datetime(breath['abs_bs'], format='%Y-%m-%d %H-%M-%S.%f')
+                except:
+                    breath_time = pd.to_datetime(breath['abs_bs'], format='%Y-%m-%d %H:%M:%S.%f')
+                if breath_time < start_time or breath_time > start_time + pd.Timedelta(hours=24):
                     continue
                 flow = (np.array(breath['flow']) - self.mu) / self.std
                 b_seq = process_breath_func(flow)
@@ -313,6 +319,19 @@ class ARDSRawDataset(Dataset):
         target = np.zeros(2)
         target[patho] = 1
         return target
+
+    def _get_patient_start_time(self, patient_id):
+        patient_row = self.cohort[self.cohort['Patient Unique Identifier'] == patient_id]
+        patient_row = patient_row.iloc[0]
+        patho = 1 if patient_row['Pathophysiology'] == 'ARDS' else 0
+        if patho == 1:
+            start_time = pd.to_datetime(patient_row['Date when Berlin criteria first met (m/dd/yyy)'])
+        else:
+            start_time = pd.to_datetime(patient_row['vent_start_time'])
+
+        if start_time is pd.NaT:
+            raise Exception('Could not find valid start time for {}'.format(patient_id))
+        return start_time
 
     def _pad_breath(self, flow):
         if self.seq_len - len(flow) >= 0:
@@ -352,14 +371,20 @@ class ARDSRawDataset(Dataset):
                 seq_vent_bns = []
             last_patient = patient_id
             target = target_func(patient_id)
+            start_time = self._get_patient_start_time(patient_id)
 
-            # XXX need to eventually add cutoffs based on vent time or Berlin time
             for bidx, breath in enumerate(gen):
                 # cutoff breaths if they have too few points. It is unlikely ML
                 # will ever learn anything useful from them. 21 is chosen because the mean
                 # number of unpadded obs we have in our train set is 138.78 and the std
                 # is 38.23. So 21 is < mu - 3*std and is divisible with 7.
                 if len(breath['flow']) < 21:
+                    continue
+                try:
+                    breath_time = pd.to_datetime(breath['abs_bs'], format='%Y-%m-%d %H-%M-%S.%f')
+                except:
+                    breath_time = pd.to_datetime(breath['abs_bs'], format='%Y-%m-%d %H:%M:%S.%f')
+                if breath_time < start_time or breath_time > start_time + pd.Timedelta(hours=24):
                     continue
                 seq_vent_bns.append(breath['vent_bn'])
                 batch_arr, breath_arr = processing_func(breath['flow'], breath_arr, batch_arr)
