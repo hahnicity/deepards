@@ -128,59 +128,43 @@ class BaseTraining(object):
             print("batch num: {}/{}, avg loss: {}\r".format(batch_idx, total_batches, self.results.get_meter('loss', fold_num), end=""))
 
     def get_base_datasets(self):
-        # We are doing things this way by loading sequence information here so that
-        # train and test datasets can access the same reference to the sequence array
-        # stored in memory if we are using kfold. It is a bit awkward on the coding
-        # side but it saves us memory.
+        kfold_num = None if self.args.kfolds is None else 0
 
         # for holdout and kfold
-        if self.args.train_from_pickle:
-            train_sequences = pd.read_pickle(self.args.train_from_pickle)
-        # no pickle
+        if not self.args.train_from_pickle:
+            train_dataset = ARDSRawDataset(
+                self.args.data_path,
+                self.args.experiment_num,
+                self.args.cohort_file,
+                self.args.n_sub_batches,
+                dataset_type=self.args.dataset_type,
+                to_pickle=self.args.train_to_pickle,
+                kfold_num=kfold_num,
+                total_kfolds=self.args.kfolds,
+                unpadded_downsample_factor=self.args.downsample_factor,
+                drop_frame_if_frac_missing=self.args.no_drop_frames,
+            )
         else:
-            train_sequences = []
+            train_dataset = ARDSRawDataset.from_pickle(self.args.train_from_pickle)
 
-        kfold_num = None if self.args.kfolds is None else 0
-        train_dataset = ARDSRawDataset(
-            self.args.data_path,
-            self.args.experiment_num,
-            self.args.cohort_file,
-            self.args.n_sub_batches,
-            dataset_type=self.args.dataset_type,
-            all_sequences=train_sequences,
-            to_pickle=self.args.train_to_pickle,
-            kfold_num=kfold_num,
-            total_kfolds=self.args.kfolds,
-            unpadded_downsample_factor=self.args.downsample_factor,
-            drop_frame_if_frac_missing=self.args.no_drop_frames,
-        )
-        self.n_sub_batches = train_dataset[0][1].shape[0]
-        # for holdout
-        if self.args.test_from_pickle and self.args.kfolds is None:
-            test_sequences = pd.read_pickle(self.args.test_from_pickle)
-        # for kfold
-        elif self.args.kfolds is not None:
-            test_sequences = train_dataset.all_sequences
-        # holdout, no pickle, no kfolds
-        else:
-            test_sequences = []
+        self.n_sub_batches = train_dataset.n_sub_batches
+        if not self.args.test_from_pickle and self.args.kfolds is not None:
+            test_dataset = ARDSRawDataset.make_test_dataset_if_kfold(train_dataset)
+        elif self.args.test_from_pickle:
+            test_dataset = ARDSRawDataset.from_pickle(self.args.test_from_pickle)
+        else:  # holdout, no pickle, no kfold
+            test_dataset = ARDSRawDataset(
+                self.args.data_path,
+                self.args.experiment_num,
+                self.args.cohort_file,
+                self.args.n_sub_batches,
+                dataset_type=self.args.dataset_type,
+                to_pickle=self.args.test_to_pickle,
+                train=False,
+                unpadded_downsample_factor=self.args.downsample_factor,
+                drop_frame_if_frac_missing=self.args.no_drop_frames,
+            )
 
-        # I can't easily use the train dataset as the test set because doing so would
-        # involve changing internal propeties on the train set
-        test_dataset = ARDSRawDataset(
-            self.args.data_path,
-            self.args.experiment_num,
-            self.args.cohort_file,
-            self.args.n_sub_batches,
-            dataset_type=self.args.dataset_type,
-            all_sequences=test_sequences,
-            to_pickle=self.args.test_to_pickle,
-            train=False,
-            kfold_num=kfold_num,
-            total_kfolds=self.args.kfolds,
-            unpadded_downsample_factor=self.args.downsample_factor,
-            drop_frame_if_frac_missing=self.args.no_drop_frames,
-        )
         return train_dataset, test_dataset
 
     def get_splits(self):
@@ -188,8 +172,8 @@ class BaseTraining(object):
         for i in range(self.n_runs):
             if self.args.kfolds is not None:
                 print('--- Run Fold {} ---'.format(i+1))
-                train_dataset.get_kfold_indexes_for_fold(i)
-                test_dataset.get_kfold_indexes_for_fold(i)
+                train_dataset.set_kfold_indexes_for_fold(i)
+                test_dataset.set_kfold_indexes_for_fold(i)
             train_loader = DataLoader(
                 train_dataset,
                 batch_size=self.args.batch_size,
@@ -360,37 +344,29 @@ class SiameseMixin(object):
     def get_base_datasets(self):
         # for holdout and kfold
         if self.args.train_from_pickle:
-            train_sequences = pd.read_pickle(self.args.train_from_pickle)
-        # no pickle
+            train_dataset = SiameseNetworkDataset.from_pickle(self.args.train_from_pickle)
         else:
-            train_sequences = []
-
-        train_dataset = SiameseNetworkDataset(
-            self.args.data_path,
-            self.args.experiment_num,
-            self.args.n_sub_batches,
-            dataset_type=self.args.dataset_type,
-            all_sequences=train_sequences,
-            to_pickle=self.args.train_to_pickle,
-            train=True,
-        )
+            train_dataset = SiameseNetworkDataset(
+                self.args.data_path,
+                self.args.experiment_num,
+                self.args.n_sub_batches,
+                dataset_type=self.args.dataset_type,
+                to_pickle=self.args.train_to_pickle,
+                train=True,
+            )
         self.n_sub_batches = train_dataset.n_sub_batches
         # for holdout
         if self.args.test_from_pickle:
-            test_sequences = pd.read_pickle(self.args.test_from_pickle)
-        # holdout, no pickle, no kfolds
-        else:
-            test_sequences = []
-
-        test_dataset = SiameseNetworkDataset(
-            self.args.data_path,
-            self.args.experiment_num,
-            self.args.n_sub_batches,
-            dataset_type=self.args.dataset_type,
-            all_sequences=test_sequences,
-            to_pickle=self.args.test_to_pickle,
-            train=False,
-        )
+            test_dataset = SiameseNetworkDataset.from_pickle(self.args.test_from_pickle)
+        else:  # holdout, no pickle, no kfold
+            test_dataset = SiameseNetworkDataset(
+                self.args.data_path,
+                self.args.experiment_num,
+                self.args.n_sub_batches,
+                dataset_type=self.args.dataset_type,
+                to_pickle=self.args.test_to_pickle,
+                train=False,
+            )
         return train_dataset, test_dataset
 
     def run_train_epoch(self, model, train_loader, optimizer, epoch_num, fold_num):

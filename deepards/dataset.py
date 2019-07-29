@@ -16,8 +16,6 @@ from algorithms.constants import EXPERIMENTAL_META_HEADER
 
 
 class ARDSRawDataset(Dataset):
-    mu = -0.16998896167389502
-    std = 25.332015720945343
     # 224 seems reasonable because it would fit well with existing img systems.
     seq_len = 224
 
@@ -40,15 +38,17 @@ class ARDSRawDataset(Dataset):
         self.all_sequences = all_sequences
         self.train = train
         self.kfold_num = kfold_num
+        self.dataset_type = dataset_type
         self.total_kfolds = total_kfolds
         self.vent_bn_frac_missing = .5
         self.frames_dropped = dict()
         self.n_sub_batches = n_sub_batches if all_sequences == [] else all_sequences[0][1].shape[0]
         self.unpadded_downsample_factor = unpadded_downsample_factor
         self.drop_frame_if_frac_missing = drop_frame_if_frac_missing
+        self.cohort_file = cohort_file
 
         if len(all_sequences) > 0 and kfold_num is not None:
-            self.get_kfold_indexes()
+            self.set_kfold_indexes_for_fold(kfold_num)
             return
         elif len(all_sequences) > 0:
             return
@@ -66,16 +66,6 @@ class ARDSRawDataset(Dataset):
         self.processed_files = sorted(glob(os.path.join(raw_dir, '*/*.processed.npy')))
         self.meta_files = sorted(glob(os.path.join(self.meta_dir, '*/*.csv')))
 
-        # So I calculated out the stats on the training set. Our breaths are a mean of 140.5
-        flow_sum = 0
-        n_obs = 0
-        # XXX for kfold need to redefine std and mu
-        #
-        # I recalculated this and factors changed after addition of 0723. I wonder if
-        # standard scaling is the right way to do this, especially because there are
-        # so many outliers.
-        # new mu: -0.23932047816188615
-        # new std: 25.40184587980919
         flow_time_features = [
             'mean_flow_from_pef',
             'inst_RR',
@@ -124,11 +114,104 @@ class ARDSRawDataset(Dataset):
         else:
             raise Exception('Unknown dataset type: {}'.format(dataset_type))
 
+        self.derive_scaling_factors()
         if to_pickle:
-            pd.to_pickle(self.all_sequences, to_pickle)
+            pd.to_pickle(self, to_pickle)
 
         if kfold_num is not None:
-            self.get_kfold_indexes()
+            self.set_kfold_indexes_for_fold(kfold_num)
+
+    def derive_scaling_factors(self):
+        is_kfolds = self.total_kfolds is not None
+        if is_kfolds:
+            indices = [self.get_kfold_indexes_for_fold(kfold_num) for kfold_num in range(self.total_kfolds)]
+        else:
+            indices = [range(len(self.all_sequences))]
+
+        if 'padded_breath_by_breath' in self.dataset_type:
+            self.scaling_factors = {
+                kfold_num if is_kfolds else None: self._get_scaling_factors_for_indices(idxs, True)
+                for kfold_num, idxs in enumerate(indices)
+            }
+
+        elif 'unpadded' in self.dataset_type:
+            self.scaling_factors = {
+                kfold_num if is_kfolds else None: self._get_scaling_factors_for_indices(idxs, True)
+                for kfold_num, idxs in enumerate(indices)
+            }
+
+        else:
+            raise Exception('unsupported dataset type {} for scaling'.format(self.dataset_type))
+
+    @classmethod
+    def make_test_dataset_if_kfold(self, train_dataset):
+        test_dataset = ARDSRawDataset(
+            None,
+            None,
+            train_dataset.cohort_file,
+            train_dataset.n_sub_batches,
+            train_dataset.dataset_type,
+            all_sequences=train_dataset.all_sequences,
+            train=False,
+            kfold_num=train_dataset.kfold_num,
+            total_kfolds=train_dataset.total_kfolds,
+        )
+        test_dataset.scaling_factors = train_dataset.scaling_factors
+        return test_dataset
+
+    @classmethod
+    def from_pickle(self, data_path):
+        dataset = pd.read_pickle(data_path)
+        if not isinstance(dataset, ARDSRawDataset):
+            raise ValueError('The pickle file you have specified is out-of-date. Please re-process your dataset and save the new pickled dataset.')
+        return dataset
+
+    def set_kfold_indexes_for_fold(self, kfold_num):
+        self.kfold_num = kfold_num
+        self.kfold_indexes = self.get_kfold_indexes_for_fold(kfold_num)
+
+    def get_kfold_indexes_for_fold(self, kfold_num):
+        ground_truth = self._get_all_sequence_ground_truth()
+        other_patients = ground_truth[ground_truth.y == 0].patient.unique()
+        ards_patients = ground_truth[ground_truth.y == 1].patient.unique()
+        all_patients = np.append(other_patients, ards_patients)
+        patho = [0] * len(other_patients) + [1] * len(ards_patients)
+        kfolds = StratifiedKFold(n_splits=self.total_kfolds)
+        for split_num, (train_pt_idx, test_pt_idx) in enumerate(kfolds.split(all_patients, patho)):
+            train_pts = all_patients[train_pt_idx]
+            test_pts = all_patients[test_pt_idx]
+            if split_num == kfold_num and self.train:
+                return ground_truth[ground_truth.patient.isin(train_pts)].index
+            elif split_num == kfold_num and not self.train:
+                return ground_truth[ground_truth.patient.isin(test_pts)].index
+
+    def _get_scaling_factors_for_indices(self, indices, is_padded):
+        """
+        Get mu and std for a specific set of indices
+        """
+        std_sum = 0
+        mean_sum = 0
+        obs_count = 0
+        for idx in indices:
+            obs = self.all_sequences[idx][1]
+            if is_padded:  # clear off 0's used for padding
+                obs = obs.ravel()
+                obs = obs[obs != 0]
+                obs_count += len(obs)
+            else:
+                obs_count += np.prod(obs.shape)
+            mean_sum += obs.sum()
+        mu = mean_sum / obs_count
+
+        # calculate std
+        for idx in indices:
+            obs = self.all_sequences[idx][1]
+            if is_padded:  # clear off 0's used for padding
+                obs = obs.ravel()
+                obs = obs[obs != 0]
+            std_sum += ((obs - mu) ** 2).sum()
+        std = np.sqrt(std_sum / obs_count)
+        return mu, std
 
     def _get_breath_by_breath_with_flow_time_features(self, process_breath_func, bm_features):
         last_patient = None
@@ -194,7 +277,7 @@ class ARDSRawDataset(Dataset):
                     continue
 
                 meta = (meta - self.flow_time_bm_mu) / self.flow_time_bm_std
-                flow = (np.array(breath['flow']) - self.mu) / self.std
+                flow = np.array(breath['flow'])
                 b_seq = process_breath_func(flow)
                 batch_arr.append(b_seq)
                 seq_vent_bns.append(breath['vent_bn'])
@@ -259,7 +342,7 @@ class ARDSRawDataset(Dataset):
                 if np.any(np.abs(meta[ratio_indices]) > 100):
                     continue
 
-                flow = (np.array(breath['flow']) - self.mu) / self.std
+                flow = np.array(breath['flow'])
                 b_seq = process_breath_func(flow)
                 # no scaling of the breath meta is required here because we are just doing
                 # regression
@@ -295,7 +378,7 @@ class ARDSRawDataset(Dataset):
                     breath_time = pd.to_datetime(breath['abs_bs'], format='%Y-%m-%d %H:%M:%S.%f')
                 if breath_time < start_time or breath_time > start_time + pd.Timedelta(hours=24):
                     continue
-                flow = (np.array(breath['flow']) - self.mu) / self.std
+                flow = np.array(breath['flow'])
                 b_seq = process_breath_func(flow)
                 batch_arr.append(b_seq)
                 seq_vent_bns.append(breath['vent_bn'])
@@ -406,7 +489,7 @@ class ARDSRawDataset(Dataset):
         else:
             remaining = self.seq_len - len(breath_arr)
             breath_arr.extend(flow[:remaining])
-            batch_arr.append((np.array(breath_arr) - self.mu) / self.std)
+            batch_arr.append(np.array(breath_arr))
             if len(flow[remaining:]) > self.seq_len:
                 breath_arr = flow[remaining:remaining+self.seq_len]
             else:
@@ -424,7 +507,7 @@ class ARDSRawDataset(Dataset):
         else:
             remaining = self.seq_len - len(breath_arr)
             breath_arr.extend(flow[:remaining])
-            batch_arr.append((np.array(breath_arr) - self.mu) / self.std)
+            batch_arr.append(np.array(breath_arr))
             breath_arr = []
         return batch_arr, breath_arr
 
@@ -472,6 +555,18 @@ class ARDSRawDataset(Dataset):
             meta = np.nan
         elif len(seq) == 4:
             _, data, meta, target = seq
+
+        try:
+            mu, std = self.scaling_factors[self.kfold_num]
+        except AttributeError:
+            raise AttributeError('Scaling factors not found for dataset. You must derive them using the `derive_scaling_factors` function.')
+        if 'padded_breath_by_breath' in self.dataset_type:
+            padding_mask = np.zeros(data.shape)
+            np.put(padding_mask, np.where(data.ravel() != 0)[0], v=mu)
+            data = (data - padding_mask) / std
+        else:
+            data = (data - mu) / std
+
         return index, data, meta, target
 
     def __len__(self):
@@ -507,27 +602,6 @@ class ARDSRawDataset(Dataset):
             rows.append([patient, np.argmax(target, axis=0)])
         return pd.DataFrame(rows, columns=['patient', 'y'], index=self.kfold_indexes)
 
-    def get_kfold_indexes_for_fold(self, fold_num):
-        self.kfold_num = fold_num
-        self.get_kfold_indexes()
-
-    def get_kfold_indexes(self):
-        ground_truth = self._get_all_sequence_ground_truth()
-        other_patients = ground_truth[ground_truth.y == 0].patient.unique()
-        ards_patients = ground_truth[ground_truth.y == 1].patient.unique()
-        all_patients = np.append(other_patients, ards_patients)
-        patho = [0] * len(other_patients) + [1] * len(ards_patients)
-        kfolds = StratifiedKFold(n_splits=self.total_kfolds)
-        for split_num, (train_pt_idx, test_pt_idx) in enumerate(kfolds.split(all_patients, patho)):
-            train_pts = all_patients[train_pt_idx]
-            test_pts = all_patients[test_pt_idx]
-            if split_num == self.kfold_num and self.train:
-                self.kfold_indexes = ground_truth[ground_truth.patient.isin(train_pts)].index
-                break
-            elif split_num == self.kfold_num and not self.train:
-                self.kfold_indexes = ground_truth[ground_truth.patient.isin(test_pts)].index
-                break
-
 
 class SiameseNetworkDataset(ARDSRawDataset):
     def __init__(self,
@@ -543,17 +617,19 @@ class SiameseNetworkDataset(ARDSRawDataset):
         self.n_sub_batches = n_sub_batches if all_sequences == [] else all_sequences[0][1].shape[0]
         data_subdir = 'prototrain' if train else 'prototest'
         raw_dir = os.path.join(data_path, 'experiment{}'.format(experiment_num), data_subdir, 'raw')
+        self.dataset_type = dataset_type
 
         if not os.path.exists(raw_dir):
             raise Exception('No directory {} exists!'.format(raw_dir))
         self.raw_files = sorted(glob(os.path.join(raw_dir, '*/*.raw.npy')))
         self.processed_files = sorted(glob(os.path.join(raw_dir, '*/*.processed.npy')))
 
+        # XXX need to do unpadded datasets
         if self.all_sequences == [] and dataset_type == 'padded_breath_by_breath':
             self._process_padded_breath_by_breath_sequences(self._pad_breath)
 
         if to_pickle:
-            pd.to_pickle(self.all_sequences, to_pickle)
+            pd.to_pickle(self, to_pickle)
 
         # remove any patients who only have 1 observation because we cannot find a
         # positive example to compare for them
@@ -577,6 +653,7 @@ class SiameseNetworkDataset(ARDSRawDataset):
                 self.patient_mapping[patient_id] = [idx]
             else:
                 self.patient_mapping[patient_id].append(idx)
+        self.derive_scaling_factors()
         self.available_neg_idxs = range(len(self.all_sequences))
 
     def _process_padded_breath_by_breath_sequences(self, process_breath_func):
@@ -596,7 +673,7 @@ class SiameseNetworkDataset(ARDSRawDataset):
                 elif breath['vent_bn'] - 50 > last_vent_bn:
                     batch_arr = []
 
-                flow = (np.array(breath['flow']) - self.mu) / self.std
+                flow = np.array(breath['flow'])
                 b_seq = process_breath_func(flow)
                 batch_arr.append(b_seq)
                 if len(batch_arr) == self.n_sub_batches:
@@ -627,7 +704,20 @@ class SiameseNetworkDataset(ARDSRawDataset):
         # get negative examples so that we can choose without replacement
         neg_idx = np.random.choice(pt_available_neg)
         neg_compr = self.all_sequences[neg_idx][1]
-        return seq, pos_compr, neg_compr
+        mu, std = self.scaling_factors[None]  # this dataset is not meant to be run with kfold
+        # XXX need to accomodate unpadded dataset types
+        padding_mask = np.zeros(data.shape)
+        np.put(padding_mask, np.where(data.ravel() != 0)[0], v=mu)
+        data = (data - padding_mask) / std
+
+        return (seq - padding_mask) / std, (pos_compr - padding_mask) / std, (neg_compr - padding_mask) / std
 
     def __len__(self):
         return len(self.all_sequences)
+
+    @classmethod
+    def from_pickle(self, data_path):
+        dataset = pd.read_pickle(data_path)
+        if not isinstance(dataset, SiameseNetworkDataset):
+            raise ValueError('The pickle file you have specified is out-of-date. Please re-process your dataset and save the new pickled dataset.')
+        return dataset
