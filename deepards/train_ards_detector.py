@@ -23,7 +23,7 @@ from deepards.models.senet import senet18, senet154, se_resnet18, se_resnet50, s
 from deepards.models.siamese import SiameseARDSClassifier, SiameseCNNLSTMNetwork, SiameseCNNTransformerNetwork
 from deepards.models.torch_cnn_lstm_combo import CNNLSTMDoubleLinearNetwork, CNNLSTMNetwork
 from deepards.models.torch_cnn_bm_regressor import CNNRegressor
-from deepards.models.torch_cnn_linear_network import CNNLinearNetwork
+from deepards.models.torch_cnn_linear_network import CNNDoubleLinearNetwork, CNNLinearNetwork
 from deepards.models.torch_metadata_only_network import MetadataOnlyNetwork
 from deepards.models.unet import UNet
 from deepards.models.vgg import vgg11_bn, vgg13_bn
@@ -562,6 +562,23 @@ class CNNLinearModel(BaseTraining, PatientClassifierMixin):
         return CNNLinearNetwork(base_network, self.args.n_sub_batches, self.n_metadata_inputs)
 
 
+class CNNDoubleLinearModel(BaseTraining, PatientClassifierMixin):
+    def __init__(self, args):
+        super(CNNDoubleLinearModel, self).__init__(args)
+
+    def calc_loss(self, outputs, target, inputs):
+        return self.criterion(outputs, target)
+
+    def _process_test_batch_results(self, outputs, target, inputs, fold_num):
+        batch_preds = outputs.argmax(dim=-1).cpu()
+        target = target.argmax(dim=1).cpu()
+        self.record_testing_results(target, batch_preds, fold_num)
+        return batch_preds.tolist()
+
+    def get_network(self, base_network):
+        return CNNDoubleLinearNetwork(base_network, self.args.n_sub_batches, self.n_metadata_inputs)
+
+
 class MetadataOnlyModel(BaseTraining, PatientClassifierMixin):
     def __init__(self, args):
         super(CNNMetadataModel, self).__init__(args)
@@ -660,6 +677,7 @@ def main():
         'siamese_cnn_transformer',
         'siamese_pretrained',
         'cnn_lstm_double_linear',
+        'cnn_double_linear',
     ], default='cnn_lstm')
     parser.add_argument('-e', '--epochs', type=int, default=5)
     parser.add_argument('-p', '--train-from-pickle')
@@ -730,6 +748,7 @@ def main():
         'siamese_cnn_transformer': SiameseCNNTransformerModel,
         'siamese_pretrained': SiamesePretrainedModel,
         'cnn_lstm_double_linear': CNNLSTMDoubleLinearModel,
+        'cnn_double_linear': CNNDoubleLinearModel,
     }
     cls = network_map[args.network](args)
     cls.train_and_test()
