@@ -106,6 +106,29 @@ def visualize_results_for_start_time(start_time):
     plt.show()
 
 
+def stats(metric, vals):
+    if len(vals) == 0:
+        return
+    stats_data = {}
+    print('---- Overall statistics for {} ----'.format(metric.upper()))
+    for run, averages in vals:
+        stats_data[run] = {
+            'max': np.max(averages).round(4),
+            'mean': np.mean(averages).round(4),
+            'var': np.var(averages).round(4),
+            'std': np.std(averages).round(4),
+            'epochs_before_max': np.argmax(averages)+1,
+            'min': np.min(averages).round(4),
+            'median': np.median(averages).round(4),
+        }
+    cols = list(stats_data[list(stats_data.keys())[0]].keys())
+    table = PrettyTable()
+    table.field_names = ['run'] + cols
+    for run, data in stats_data.items():
+        table.add_row([run] + list(data.values()))
+    print(table)
+
+
 def visualize_results_for_experiment(experiment_name, filter_by_base_network):
     experiment_files = glob('results/{}_1*.pth'.format(experiment_name))
     experiment_data = [torch.load(f) for f in experiment_files]
@@ -133,6 +156,7 @@ def visualize_results_for_experiment(experiment_name, filter_by_base_network):
         print('Run {}. Params: {}'.format(i, exp_data))
 
     for metric in metrics:
+        metric_data = []
         for i, exp_data in enumerate(experiment_data):
             start_time = exp_data['start_time']
 
@@ -146,7 +170,9 @@ def visualize_results_for_experiment(experiment_name, filter_by_base_network):
                 else:
                     vals += torch.load(f).values.numpy()
             av = vals / len(metric_files)
+            metric_data.append((i, av))
             plt.plot(av, label='run {}'.format(i))
+        stats(metric, metric_data)
         plt.legend(loc='lower right', prop={'size': 8})
         plt.grid()
         plt.ylabel(metric.replace('_', ' '))
