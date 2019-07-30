@@ -216,7 +216,7 @@ class DeepARDSResults(object):
                 "{}_tns".format(patho), "{}_fns".format(patho),
                 "{}_votes".format(patho),
             ])
-        results_cols += ["prediction", 'pred_frac', 'epoch_num']
+        results_cols += ["prediction", 'pred_frac', 'epoch_num', 'fold_num']
         # self.results is meant to be a high level dataframe of aggregated statistics
         # from our model.
         self.results = pd.DataFrame([], columns=results_cols)
@@ -232,13 +232,45 @@ class DeepARDSResults(object):
         """
         Aggregate final results for all patients into a friendly data frame
         """
-        last_epoch = sorted(self.results.epoch_num.unique())[-1]
-        aggregate_stats = self._aggregate_specific_results(self.results[self.results.epoch_num == last_epoch])
+        aggregate_stats = None
+        for fold_num in self.results.fold_num.unique():
+            for epoch_num in self.results.epoch_num.unique():
+                if aggregate_stats is None:
+                    aggregate_stats = self._aggregate_specific_results(self.results[(self.results.epoch_num == epoch_num) & (self.results.fold_num == fold_num)], fold_num, epoch_num)
+                else:
+                    aggregate_stats = aggregate_stats.append(self._aggregate_specific_results(self.results[
+                        (self.results.epoch_num == epoch_num) &
+                        (self.results.fold_num == fold_num)
+                    ], fold_num, epoch_num))
+        aggregate_stats.index = range(len(aggregate_stats))
+
         self._print_specific_results_report(aggregate_stats)
         self.results.to_pickle('results/{}_patient_results.pkl'.format(self.start_time))
         aggregate_stats.to_pickle('results/{}_aggregate_results.pkl'.format(self.start_time))
+        self.save_maximals('results/{}_maximal_results.pkl'.format(self.start_time), aggregate_stats)
 
-    def _aggregate_specific_results(self, patient_results):
+    def save_maximals(self, output_filename, aggregate_stats):
+        maximals = None
+        table = PrettyTable()
+        table.field_names = ['Patho', 'Accuracy', 'Recall', 'Precision', 'AUC', 'F1', 'Fold', 'Epoch']
+
+        for fold_num in aggregate_stats.fold_num.unique():
+            fold_stats = aggregate_stats[aggregate_stats.fold_num == fold_num]
+            max_auc_idx = fold_stats.auc.idxmax()
+            epoch_max = aggregate_stats.loc[max_auc_idx].epoch_num
+            epoch_maxes = fold_stats[fold_stats.epoch_num == epoch_max]
+            if maximals is None:
+                maximals = epoch_maxes
+            else:
+                maximals = maximals.append(epoch_maxes)
+
+            for idx, row in epoch_maxes.iterrows():
+                table.add_row([row.patho, row.accuracy, row.sensitivity, row.precision, row.auc, row.f1, row.fold_num, row.epoch_num])
+        maximals.to_pickle(output_filename)
+        print('---- Max Stats ----')
+        print(table)
+
+    def _aggregate_specific_results(self, patient_results, fold_num, epoch_num):
         aggregate_stats = []
         for n, patho in self.pathos.items():
             tps = float(len(patient_results[(patient_results.patho == n) & (patient_results.prediction == n)]))
@@ -266,21 +298,19 @@ class DeepARDSResults(object):
                 f1 = round(2 * ((precision * sensitivity) / (precision + sensitivity)), 4)
             except ZeroDivisionError:
                 f1 = 0
-            aggregate_stats.append([patho, tps, tns, fps, fns, accuracy, sensitivity, specificity, precision, auc, f1])
+            aggregate_stats.append([patho, tps, tns, fps, fns, accuracy, sensitivity, specificity, precision, auc, f1, fold_num, epoch_num])
 
         return pd.DataFrame(
             aggregate_stats,
-            columns=['patho', 'tps', 'tns', 'fps', 'fns', 'accuracy', 'sensitivity', 'specificity', 'precision', 'auc', 'f1']
+            columns=['patho', 'tps', 'tns', 'fps', 'fns', 'accuracy', 'sensitivity', 'specificity', 'precision', 'auc', 'f1', 'fold_num', 'epoch_num']
         )
 
     def _print_specific_results_report(self, stats_frame):
         table = PrettyTable()
-        table.field_names = ['Patho', 'Accuracy', 'Recall', 'Precision', 'AUC', 'F1']
+        table.field_names = ['Patho', 'Accuracy', 'Recall', 'Precision', 'AUC', 'F1', 'Fold', 'Epoch']
         for idx, row in stats_frame.iterrows():
-            with open(filename, "a") as f:
-                f.write("{},{},{},{},{},{}\n".format(row.patho, row.accuracy, row.sensitivity, row.precision, row.auc, row.f1))
-            table.add_row([row.patho, row.accuracy, row.sensitivity, row.precision, row.auc, row.f1])
-        print('Patient-level stats')
+            table.add_row([row.patho, row.accuracy, row.sensitivity, row.precision, row.auc, row.f1, row.fold_num, row.epoch_num])
+        print('---- Patient-level stats ----')
         print(table)
 
     def update_loss(self, fold_num, loss):
@@ -341,16 +371,16 @@ class DeepARDSResults(object):
                 pt_results.extend([
                     get_tps(pt_actual, pt_pred, n), get_fps(pt_actual, pt_pred, n),
                     get_tns(pt_actual, pt_pred, n), get_fns(pt_actual, pt_pred, n),
-                    len(pt_pred[pt_pred == n]),
+                    len(pt_pred[pt_pred == n])
                 ])
 
             pred_frac = float(pt_results[6+5*1]) / sum([pt_results[6+5*j] for j in self.pathos.keys()])
             patho_pred = np.argmax([pt_results[6 + 5*k] for k in range(len(self.pathos))])
-            pt_results.extend([patho_pred, pred_frac, epoch_num])
+            pt_results.extend([patho_pred, pred_frac, epoch_num, fold_num])
             self.results.loc[len(self.results)] = pt_results
 
         chunked_results = self.results[(self.results.patient.isin(y_test.patient.unique())) & (self.results.epoch_num == epoch_num)]
-        stats = self._aggregate_specific_results(chunked_results)
+        stats = self._aggregate_specific_results(chunked_results, fold_num, epoch_num)
 
         self.update_meter('test_auc', fold_num, stats.iloc[0].auc)
         self.update_meter('test_prec_other', fold_num, stats[stats.patho == 'OTHER'].iloc[0].precision)
