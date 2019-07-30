@@ -29,7 +29,7 @@ def visualize_results_for_start_time(start_time):
     glob_search = 'results/test_loss_fold*_{}*'.format(start_time)
     results_files = glob(glob_search)
     if len(results_files) == 0:
-        raise Exception('No loss results files found')
+        results_files = []
 
     for i, f in enumerate(sorted(results_files)):
         vals = torch.load(f).values.numpy()
