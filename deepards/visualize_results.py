@@ -115,7 +115,6 @@ def stats(metric, vals):
         stats_data[run] = {
             'max': np.max(averages).round(4),
             'mean': np.mean(averages).round(4),
-            'var': np.var(averages).round(4),
             'std': np.std(averages).round(4),
             'epochs_before_max': np.argmax(averages)+1,
             'min': np.min(averages).round(4),

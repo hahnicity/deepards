@@ -325,7 +325,7 @@ class SENet(nn.Module):
     def forward(self, x):
         x = self.features(x)
         x = self.logits(x)
-        return x
+        return x.squeeze()
 
 
 def senet18():
