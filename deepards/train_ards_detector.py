@@ -143,9 +143,10 @@ class BaseTraining(object):
                 total_kfolds=self.args.kfolds,
                 unpadded_downsample_factor=self.args.downsample_factor,
                 drop_frame_if_frac_missing=self.args.no_drop_frames,
+                oversample_minority=self.args.oversample,
             )
         else:
-            train_dataset = ARDSRawDataset.from_pickle(self.args.train_from_pickle)
+            train_dataset = ARDSRawDataset.from_pickle(self.args.train_from_pickle, self.args.oversample)
 
         self.n_sub_batches = train_dataset.n_sub_batches
         if not self.args.test_from_pickle and self.args.kfolds is not None:
@@ -735,6 +736,7 @@ def main():
     parser.add_argument('--load-siamese', help='load a siamese network pretrained model')
     parser.add_argument('--fl-gamma', type=float, default=2.0)
     parser.add_argument('--fl-alpha', type=float, default=.9)
+    parser.add_argument('--oversample', action='store_true')
     args = parser.parse_args()
 
     # convenience code

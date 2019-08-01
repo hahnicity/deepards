@@ -3,6 +3,7 @@ import math
 import os
 import re
 
+from imblearn.over_sampling import RandomOverSampler
 import numpy as np
 import pandas as pd
 from scipy.signal import resample
@@ -30,6 +31,7 @@ class ARDSRawDataset(Dataset):
                  train=True,
                  kfold_num=None,
                  total_kfolds=None,
+                 oversample_minority=False,
                  unpadded_downsample_factor=4.0,
                  drop_frame_if_frac_missing=True):
         """
@@ -46,9 +48,11 @@ class ARDSRawDataset(Dataset):
         self.unpadded_downsample_factor = unpadded_downsample_factor
         self.drop_frame_if_frac_missing = drop_frame_if_frac_missing
         self.cohort_file = cohort_file
+        self.oversample = oversample_minority
 
         if len(all_sequences) > 0 and kfold_num is not None:
             self.set_kfold_indexes_for_fold(kfold_num)
+            # XXX should we derive scaling factors if they dont exist?
             return
         elif len(all_sequences) > 0:
             return
@@ -121,6 +125,23 @@ class ARDSRawDataset(Dataset):
         if kfold_num is not None:
             self.set_kfold_indexes_for_fold(kfold_num)
 
+    def set_oversampling_indices(self):
+        # Cannot oversample with testing set
+        if not self.train:
+            return
+
+        if not self.oversample:
+            return
+
+        if self.total_kfolds:
+            x = list(self.kfold_indexes)
+            y = [self.all_sequences[idx][-1].argmax() for idx in x]
+            ros = RandomOverSampler()
+            x_resampled, y_resampled = ros.fit_resample(np.array(x).reshape(-1, 1), y)
+            self.kfold_indexes = x_resampled.ravel()
+        else:
+            raise NotImplementedError('We havent implemented oversampling for holdout sets yet')
+
     def derive_scaling_factors(self):
         is_kfolds = self.total_kfolds is not None
         if is_kfolds:
@@ -160,15 +181,17 @@ class ARDSRawDataset(Dataset):
         return test_dataset
 
     @classmethod
-    def from_pickle(self, data_path):
+    def from_pickle(self, data_path, oversample_minority=False):
         dataset = pd.read_pickle(data_path)
         if not isinstance(dataset, ARDSRawDataset):
             raise ValueError('The pickle file you have specified is out-of-date. Please re-process your dataset and save the new pickled dataset.')
+        self.oversample = oversample_minority
         return dataset
 
     def set_kfold_indexes_for_fold(self, kfold_num):
         self.kfold_num = kfold_num
         self.kfold_indexes = self.get_kfold_indexes_for_fold(kfold_num)
+        self.set_oversampling_indices()
 
     def get_kfold_indexes_for_fold(self, kfold_num):
         ground_truth = self._get_all_sequence_ground_truth()
