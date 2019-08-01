@@ -197,6 +197,9 @@ class BaseTraining(object):
             optimizer = self.get_optimizer(model)
             for epoch_num in range(self.args.epochs):
                 self.run_train_epoch(model, train_loader, optimizer, epoch_num+1, fold_num)
+                if self.args.reshuffle_oversample_per_epoch:
+                    train_loader.dataset.set_oversampling_indices()
+
                 if not self.args.no_test_after_epochs or epoch_num == self.args.epochs - 1:
                     self.run_test_epoch(epoch_num, model, test_dataset, test_loader, fold_num)
 
@@ -737,6 +740,7 @@ def main():
     parser.add_argument('--fl-gamma', type=float, default=2.0)
     parser.add_argument('--fl-alpha', type=float, default=.9)
     parser.add_argument('--oversample', action='store_true')
+    parser.add_argument('--reshuffle-oversample-per-epoch', action='store_true')
     args = parser.parse_args()
 
     # convenience code
