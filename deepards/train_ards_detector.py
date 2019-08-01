@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from deepards.dataset import ARDSRawDataset, SiameseNetworkDataset
-from deepards.loss import ConfidencePenaltyLoss, VacillatingLoss
+from deepards.loss import ConfidencePenaltyLoss, FocalLoss, VacillatingLoss
 from deepards.metrics import DeepARDSResults, Reporting
 from deepards.models.autoencoder_cnn import AutoencoderCNN
 from deepards.models.autoencoder_network import AutoencoderNetwork
@@ -295,6 +295,8 @@ class PatientClassifierMixin(object):
             self.criterion = torch.nn.BCEWithLogitsLoss()
         elif self.args.loss_func == 'confidence':
             self.criterion = ConfidencePenaltyLoss(self.args.conf_beta)
+        elif self.args.loss_func == 'focal':
+            self.criterion = FocalLoss(gamma=self.args.fl_gamma, alpha=self.args.fl_alpha)
 
     def perform_post_modeling_actions(self):
         self.results.aggregate_classification_results()
@@ -724,18 +726,23 @@ def main():
     parser.add_argument('--downsample-factor', type=float, default=4.0)
     parser.add_argument('--no-drop-frames', action='store_false')
     parser.add_argument('-wd', '--weight-decay', type=float, default=.0001)
-    parser.add_argument('-loss', '--loss-func', choices=['bce', 'vacillating', 'confidence'], default='bce', help='This option only works for classification. Choose the loss function you want to use for classification purposes: BCE or vacillating loss.')
+    parser.add_argument('-loss', '--loss-func', choices=['bce', 'vacillating', 'confidence', 'focal'], default='bce', help='This option only works for classification. Choose the loss function you want to use for classification purposes: BCE or vacillating loss.')
     parser.add_argument('--valpha', type=float, default=float('Inf'), help='alpha value to use for vacillating loss. Lower alpha values mean vacillating loss will contribute less to overall loss of the system. Default value is inf')
     parser.add_argument('--conf-beta', type=float, default=1.0, help='Modifier to the intensity of the confidence penalty')
     parser.add_argument('--time-series-hidden-units', type=int, default=512)
-    parser.add_argument('--transformer-blocks', type=int, default=10)
+    parser.add_argument('--transformer-blocks', type=int, default=2)
     parser.add_argument('--unshuffled', action='store_true', help='dont shuffle data for lstm processing')
     parser.add_argument('--load-siamese', help='load a siamese network pretrained model')
+    parser.add_argument('--fl-gamma', type=float, default=2.0)
+    parser.add_argument('--fl-alpha', type=float, default=.9)
     args = parser.parse_args()
 
     # convenience code
     if args.load_siamese:
         args.network = 'siamese_pretrained'
+
+    if args.fl_alpha > 1 or args.fl_alpha < 0:
+        raise Exception('Focal loss alpha must be between 0 and 1')
 
     network_map = {
         'cnn_lstm': CNNLSTMModel,
