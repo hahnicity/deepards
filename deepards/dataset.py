@@ -1,3 +1,4 @@
+from copy import copy
 from glob import glob
 import math
 import os
@@ -134,11 +135,7 @@ class ARDSRawDataset(Dataset):
             return
 
         if self.total_kfolds:
-            try:
-                x = list(self.non_oversampled_kfold_indexes)
-            except AttributeError:
-                x = list(self.kfold_indexes)
-                self.non_oversampled_kfold_indexes = self.kfold_indexes
+            x = self.non_oversampled_kfold_indexes
             y = [self.all_sequences[idx][-1].argmax() for idx in x]
             ros = RandomOverSampler()
             x_resampled, y_resampled = ros.fit_resample(np.array(x).reshape(-1, 1), y)
@@ -195,6 +192,7 @@ class ARDSRawDataset(Dataset):
     def set_kfold_indexes_for_fold(self, kfold_num):
         self.kfold_num = kfold_num
         self.kfold_indexes = self.get_kfold_indexes_for_fold(kfold_num)
+        self.non_oversampled_kfold_indexes = copy(list(self.kfold_indexes))
         self.set_oversampling_indices()
 
     def get_kfold_indexes_for_fold(self, kfold_num):
