@@ -1,10 +1,10 @@
 import subprocess
 
 
-bs = 16
-epochs = 10
-weight_decay = 0.0001
-kfolds = 5
+bs = str(16)
+epochs = str(10)
+weight_decay = str(0.0001)
+kfolds = str(5)
 n_times_each_experiment = 3
 
 for dataset_type, dataset_path in [('padded_breath_by_breath', '/fastdata/deepards/padded_breath_by_breath-nb100-kfold.pkl'),
