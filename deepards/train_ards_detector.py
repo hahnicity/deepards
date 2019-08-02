@@ -658,6 +658,14 @@ class SiameseCNNTransformerModel(SiameseMixin, BaseTraining):
         return SiameseCNNTransformerNetwork(base_network, self.args.time_series_hidden_units, self.n_sub_batches)
 
 
+class SiameseCNNLinearModel(SiameseMixin, BaseTraining):
+    def __init__(self, args):
+        super(SiameseCNNLinearModel, self).__init__(args)
+
+    def get_network(self, base_network):
+        return SiameseCNNLinearNetwork(base_network, self.n_sub_batches)
+
+
 class SiamesePretrainedModel(WithTimeLayerClassifierMixin, BaseTraining, PatientClassifierMixin):
     def __init__(self, args):
         super(SiamesePretrainedModel, self).__init__(args)
@@ -681,6 +689,7 @@ def main():
         'metadata_only',
         'autoencoder',
         'cnn_transformer',
+        'siamese_cnn_linear',
         'siamese_cnn_lstm',
         'siamese_cnn_transformer',
         'siamese_pretrained',
@@ -759,6 +768,7 @@ def main():
         'metadata_only': MetadataOnlyModel,
         'autoencoder': AutoencoderModel,
         'cnn_transformer': CNNTransformerModel,
+        'siamese_cnn_linear': SiameseCNNLinearModel,
         'siamese_cnn_lstm': SiameseCNNLSTMModel,
         'siamese_cnn_transformer': SiameseCNNTransformerModel,
         'siamese_pretrained': SiamesePretrainedModel,
