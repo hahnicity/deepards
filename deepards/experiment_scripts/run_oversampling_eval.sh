@@ -3,7 +3,7 @@
 
 for base_network in 'resnet18' 'densenet18'
 do
-    for network in 'cnn_linear' 'cnn_lstm'
+    for network in 'cnn_linear' 'cnn_transformer'
     do
         for bs in 16
         do

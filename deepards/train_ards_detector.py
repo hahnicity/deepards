@@ -97,6 +97,7 @@ class BaseTraining(object):
             weight_decay=self.args.weight_decay,
             valpha=self.args.valpha,
             confidence_beta=self.args.conf_beta,
+            dataset_type=self.args.dataset_type,
         )
         print('Run start time: {}'.format(self.start_time))
 
