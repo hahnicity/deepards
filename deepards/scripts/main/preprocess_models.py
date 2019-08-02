@@ -6,6 +6,12 @@ try:
 except OSError:
     pass
 
+# bs of 32 takes up about 8400Mb with resnet18. Likely will be worse with bigger models
+#
+# I've also been seeing that larger batch sizes dont seem to be as problematic as they
+# initially seemed upon initial evaluation. I'm not sure why I had so much trouble
+# with them. It may because I was using improper learning rates and I thought lower
+# learning rates wouldnt be able to train.
 bs = str(4)
 epochs = str(10)
 weight_decay = str(0.0001)
@@ -22,8 +28,10 @@ for dataset_type, train_dataset_path, test_dataset_path in [
         for network in 'siamese_cnn_linear' 'siamese_cnn_lstm' 'siamese_cnn_transformer'
             model_path = 'pretrained_models/{}_{}_{}.pth'.format(dataset_type, network, base_network)
             proc = subprocess.Popen([
-                'ts', 'python', 'train_ards_detector.py', '--train-from-pickle', dataset_path,
+                'ts', 'python', 'train_ards_detector.py', '--train-from-pickle', train_dataset_path,
                 '-n', network, '--cuda', '-b', bs, '-e', epochs, '--no-print-progress',
-                '--base-network', base_network, '-wd', weight_decay, '--save-model', model_path
+                '--base-network', base_network, '-wd', weight_decay, '--save-model', model_path,
+                '-dt', dataset_type, '--test-from-pickle', test_dataset_path,
+
             ]) #??--reshuffle-oversample-per-epoch
             proc.communicate()
