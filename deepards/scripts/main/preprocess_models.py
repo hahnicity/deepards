@@ -23,9 +23,9 @@ for dataset_type, train_dataset_path, test_dataset_path in [
     ('unpadded_centered_sequences', '~/workspace/datasets/deepards/unpadded_centered_sequences-continuous-nb50-train.pkl', '~/workspace/datasets/deepards/unpadded_centered_sequences-continuous-nb50-test.pkl')
 ]:
 
-    for base_network in 'resnet18' 'densenet18' 'se_resnet18' 'vgg11'
+    for base_network in ['resnet18', 'densenet18', 'se_resnet18', 'vgg11']:
         # XXX add connections for siamese cnn linear
-        for network in 'siamese_cnn_linear' 'siamese_cnn_lstm' 'siamese_cnn_transformer'
+        for network in ['siamese_cnn_linear', 'siamese_cnn_lstm', 'siamese_cnn_transformer']:
             model_path = 'pretrained_models/{}_{}_{}.pth'.format(dataset_type, network, base_network)
             proc = subprocess.Popen([
                 'ts', 'python', 'train_ards_detector.py', '--train-from-pickle', train_dataset_path,
