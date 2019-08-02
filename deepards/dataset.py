@@ -586,13 +586,17 @@ class ARDSRawDataset(Dataset):
         except AttributeError:
             raise AttributeError('Scaling factors not found for dataset. You must derive them using the `derive_scaling_factors` function.')
         if 'padded_breath_by_breath' in self.dataset_type:
-            padding_mask = np.zeros(data.shape)
-            np.put(padding_mask, np.where(data.ravel() != 0)[0], v=mu)
+            padding_mask = self._get_padding_mask(data, mu)
             data = (data - padding_mask) / std
         else:
             data = (data - mu) / std
 
         return index, data, meta, target
+
+    def _get_padding_mask(self, data, mu):
+        padding_mask = np.zeros(data.shape)
+        np.put(padding_mask, np.where(data.ravel() != 0)[0], v=mu)
+        return padding_mask
 
     def __len__(self):
         if self.kfold_num is None:
@@ -638,6 +642,7 @@ class SiameseNetworkDataset(ARDSRawDataset):
                  to_pickle=None,
                  train=True):
 
+        self.total_kfolds = None
         self.all_sequences = all_sequences
         self.n_sub_batches = n_sub_batches if all_sequences == [] else all_sequences[0][1].shape[0]
         data_subdir = 'prototrain' if train else 'prototest'
@@ -649,12 +654,12 @@ class SiameseNetworkDataset(ARDSRawDataset):
         self.raw_files = sorted(glob(os.path.join(raw_dir, '*/*.raw.npy')))
         self.processed_files = sorted(glob(os.path.join(raw_dir, '*/*.processed.npy')))
 
-        # XXX need to do unpadded datasets
         if self.all_sequences == [] and dataset_type == 'padded_breath_by_breath':
             self._process_padded_breath_by_breath_sequences(self._pad_breath)
-
-        if to_pickle:
-            pd.to_pickle(self, to_pickle)
+        elif self.all_sequences == [] and dataset_type == 'unpadded_sequences':
+            self.get_unpadded_sequences_dataset(self._regular_unpadded_processing, self._pathophysiology_target)
+        elif self.all_sequences == [] and dataset_type == 'unpadded_centered_sequences':
+            self.get_unpadded_sequences_dataset(self._unpadded_centered_processing, self._pathophysiology_target)
 
         # remove any patients who only have 1 observation because we cannot find a
         # positive example to compare for them
@@ -681,6 +686,9 @@ class SiameseNetworkDataset(ARDSRawDataset):
         self.derive_scaling_factors()
         self.available_neg_idxs = range(len(self.all_sequences))
 
+        if to_pickle:
+            pd.to_pickle(self, to_pickle)
+
     def _process_padded_breath_by_breath_sequences(self, process_breath_func):
         last_patient = None
 
@@ -688,6 +696,7 @@ class SiameseNetworkDataset(ARDSRawDataset):
             gen = read_processed_file(filename, self.processed_files[fidx])
             patient_id = self._get_patient_id_from_file(filename)
             if patient_id != last_patient:
+                last_patient = patient_id
                 batch_arr = []
                 last_vent_bn = None
 
@@ -707,7 +716,36 @@ class SiameseNetworkDataset(ARDSRawDataset):
                         np.array(batch_arr).reshape((self.n_sub_batches, 1, self.seq_len))
                     ])
                     batch_arr = []
-                    last_vent_bn = None
+                last_vent_bn = breath['vent_bn']
+
+    def get_unpadded_sequences_dataset(self, processing_func, target_func):
+        last_patient = None
+
+        for fidx, filename in enumerate(self.raw_files):
+            gen = read_processed_file(filename, self.processed_files[fidx])
+            patient_id = self._get_patient_id_from_file(filename)
+            if patient_id != last_patient:
+                last_patient = patient_id
+                batch_arr = []
+                breath_arr = []
+                last_vent_bn = None
+
+            for bidx, breath in enumerate(gen):
+                ## determine if we should drop the cluster
+                if last_vent_bn is None:
+                    last_vent_bn = breath['vent_bn']
+                elif breath['vent_bn'] - 50 > last_vent_bn:
+                    batch_arr = []
+                    breath_arr = []
+
+                batch_arr, breath_arr = processing_func(breath['flow'], breath_arr, batch_arr)
+
+                if len(batch_arr) == self.n_sub_batches:
+                    self.all_sequences.append([
+                        patient_id,
+                        np.array(batch_arr).reshape((self.n_sub_batches, 1, self.seq_len))
+                    ])
+                    batch_arr = []
                 last_vent_bn = breath['vent_bn']
 
     def __getitem__(self, index):
@@ -731,11 +769,19 @@ class SiameseNetworkDataset(ARDSRawDataset):
         neg_compr = self.all_sequences[neg_idx][1]
         mu, std = self.scaling_factors[None]  # this dataset is not meant to be run with kfold
         # XXX need to accomodate unpadded dataset types
-        padding_mask = np.zeros(data.shape)
-        np.put(padding_mask, np.where(data.ravel() != 0)[0], v=mu)
-        data = (data - padding_mask) / std
+        if 'padded_breath_by_breath' in self.dataset_type:
+            seq_padding_mask = self._get_padding_mask(seq, mu)
+            pos_compr_padding_mask = self._get_padding_mask(pos_compr, mu)
+            neg_compr_padding_mask = self._get_padding_mask(neg_compr, mu)
+            seq = (seq - seq_padding_mask) / std
+            pos_compr = (pos_compr - pos_compr_padding_mask) / std
+            neg_compr = (neg_compr - neg_compr_padding_mask) / std
+        else:
+            seq = (seq - mu) / std
+            pos_compr = (pos_compr - mu) / std
+            neg_compr = (neg_compr - mu) / std
 
-        return (seq - padding_mask) / std, (pos_compr - padding_mask) / std, (neg_compr - padding_mask) / std
+        return seq, pos_compr, neg_compr
 
     def __len__(self):
         return len(self.all_sequences)

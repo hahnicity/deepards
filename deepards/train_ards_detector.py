@@ -97,6 +97,7 @@ class BaseTraining(object):
             weight_decay=self.args.weight_decay,
             valpha=self.args.valpha,
             confidence_beta=self.args.conf_beta,
+            dataset_type=self.args.dataset_type,
         )
         print('Run start time: {}'.format(self.start_time))
 
@@ -348,10 +349,10 @@ class SiameseMixin(object):
         self.results.save_all()
 
     def get_base_datasets(self):
-        # for holdout and kfold
+        # for holdout and pickle
         if self.args.train_from_pickle:
             train_dataset = SiameseNetworkDataset.from_pickle(self.args.train_from_pickle)
-        else:
+        else:  # for holdout, no pickle
             train_dataset = SiameseNetworkDataset(
                 self.args.data_path,
                 self.args.experiment_num,
@@ -361,10 +362,10 @@ class SiameseMixin(object):
                 train=True,
             )
         self.n_sub_batches = train_dataset.n_sub_batches
-        # for holdout
+        # for holdout and pickle
         if self.args.test_from_pickle:
             test_dataset = SiameseNetworkDataset.from_pickle(self.args.test_from_pickle)
-        else:  # holdout, no pickle, no kfold
+        else:  # holdout, no pickle
             test_dataset = SiameseNetworkDataset(
                 self.args.data_path,
                 self.args.experiment_num,
@@ -373,6 +374,7 @@ class SiameseMixin(object):
                 to_pickle=self.args.test_to_pickle,
                 train=False,
             )
+        test_dataset.scaling_factors = train_dataset.scaling_factors
         return train_dataset, test_dataset
 
     def run_train_epoch(self, model, train_loader, optimizer, epoch_num, fold_num):
