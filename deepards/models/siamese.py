@@ -2,6 +2,8 @@ import torch
 from torch.autograd import Variable
 import torch.nn as nn
 
+from deepards.models.transformer import Transformer
+
 
 class Identity(nn.Module):
     def __init__(self):
