@@ -80,7 +80,7 @@ class SiameseCNNTransformerNetwork(nn.Module):
         num_blocks = 2
         self.time_layer_hidden_units = hidden_units
         self.transformer = Transformer(breath_block.n_out_filters, hidden_units, num_blocks, 4)
-        self.linear_intermediate = nn.Linear(hidden_units, 2)
+        self.linear_intermediate = nn.Linear(breath_block.n_out_filters, 2)
         self.linear_final = nn.Linear(2 * sub_batch_size, 2)
 
     def _run_through_model(self, inputs):
