@@ -23,7 +23,7 @@ from deepards.models.senet import senet18, senet154, se_resnet18, se_resnet50, s
 from deepards.models.siamese import SiameseARDSClassifier, SiameseCNNLinearNetwork, SiameseCNNLSTMNetwork, SiameseCNNTransformerNetwork
 from deepards.models.torch_cnn_lstm_combo import CNNLSTMDoubleLinearNetwork, CNNLSTMNetwork
 from deepards.models.torch_cnn_bm_regressor import CNNRegressor
-from deepards.models.torch_cnn_linear_network import CNNDoubleLinearNetwork, CNNLinearNetwork
+from deepards.models.torch_cnn_linear_network import CNNDoubleLinearNetwork, CNNLinearNetwork, CNNSingleBreathLinearNetwork
 from deepards.models.torch_metadata_only_network import MetadataOnlyNetwork
 from deepards.models.unet import UNet
 from deepards.models.vgg import vgg11_bn, vgg13_bn
@@ -587,6 +587,14 @@ class CNNDoubleLinearModel(BaseTraining, PatientClassifierMixin):
         return CNNDoubleLinearNetwork(base_network, self.args.n_sub_batches, self.n_metadata_inputs)
 
 
+class CNNSingleBreathLinearModel(WithTimeLayerClassifierMixin, BaseTraining, PatientClassifierMixin):
+    def __init__(self, args):
+        super(CNNSingleBreathLinearModel, self).__init__(args)
+
+    def get_network(self, base_network):
+        return CNNSingleBreathLinearNetwork(base_network)
+
+
 class MetadataOnlyModel(BaseTraining, PatientClassifierMixin):
     def __init__(self, args):
         super(CNNMetadataModel, self).__init__(args)
@@ -695,6 +703,7 @@ def main():
         'siamese_pretrained',
         'cnn_lstm_double_linear',
         'cnn_double_linear',
+        'cnn_single_breath_linear',
     ], default='cnn_lstm')
     parser.add_argument('-e', '--epochs', type=int, default=5)
     parser.add_argument('-p', '--train-from-pickle')
@@ -774,6 +783,7 @@ def main():
         'siamese_pretrained': SiamesePretrainedModel,
         'cnn_lstm_double_linear': CNNLSTMDoubleLinearModel,
         'cnn_double_linear': CNNDoubleLinearModel,
+        'cnn_single_breath_linear': CNNSingleBreathLinearModel,
     }
     cls = network_map[args.network](args)
     cls.train_and_test()
