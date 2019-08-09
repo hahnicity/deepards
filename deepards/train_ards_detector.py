@@ -18,6 +18,7 @@ from deepards.models.autoencoder_cnn import AutoencoderCNN
 from deepards.models.autoencoder_network import AutoencoderNetwork
 from deepards.models.cnn_transformer import CNNTransformerNetwork
 from deepards.models.densenet import densenet18, densenet121, densenet161, densenet169, densenet201
+from deepards.models.lstm_only import LSTMOnlyNetwork
 from deepards.models.resnet import resnet18, resnet50, resnet101, resnet152
 from deepards.models.senet import senet18, senet154, se_resnet18, se_resnet50, se_resnet101, se_resnet152, se_resnext50_32x4d, se_resnext101_32x4d
 from deepards.models.siamese import SiameseARDSClassifier, SiameseCNNLinearNetwork, SiameseCNNLSTMNetwork, SiameseCNNTransformerNetwork
@@ -612,6 +613,14 @@ class MetadataOnlyModel(BaseTraining, PatientClassifierMixin):
         return MetadataOnlyNetwork()
 
 
+class LSTMOnlyModel(WithTimeLayerClassifierMixin, BaseTraining, PatientClassifierMixin):
+    def __init__(self, args):
+        super(LSTMOnlyModel, self).__init__(args)
+
+    def get_network(self, _):
+        return LSTMOnlyNetwork(self.args.time_series_hidden_units)
+
+
 class CNNRegressorModel(BaseTraining, RegressorMixin):
     def __init__(self, args):
         super(CNNRegressorModel, self).__init__(args)
@@ -704,6 +713,7 @@ def main():
         'cnn_lstm_double_linear',
         'cnn_double_linear',
         'cnn_single_breath_linear',
+        'lstm_only',
     ], default='cnn_lstm')
     parser.add_argument('-e', '--epochs', type=int, default=5)
     parser.add_argument('-p', '--train-from-pickle')
@@ -784,6 +794,7 @@ def main():
         'cnn_lstm_double_linear': CNNLSTMDoubleLinearModel,
         'cnn_double_linear': CNNDoubleLinearModel,
         'cnn_single_breath_linear': CNNSingleBreathLinearModel,
+        'lstm_only': LSTMOnlyModel,
     }
     cls = network_map[args.network](args)
     cls.train_and_test()
