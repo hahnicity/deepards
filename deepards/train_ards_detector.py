@@ -10,7 +10,6 @@ from torch.autograd import Variable
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from torch.optim.lr_scheduler import StepLR
 
 from deepards.dataset import ARDSRawDataset, SiameseNetworkDataset
 from deepards.loss import ConfidencePenaltyLoss, FocalLoss, VacillatingLoss
@@ -101,7 +100,7 @@ class BaseTraining(object):
         )
         print('Run start time: {}'.format(self.start_time))
 
-    def run_train_epoch(self, model, train_loader, optimizer, scheduler, epoch_num, fold_num):
+    def run_train_epoch(self, model, train_loader, optimizer, epoch_num, fold_num):
         with torch.enable_grad():
             print("\nrun epoch {}\n".format(epoch_num))
             for idx, (obs_idx, seq, metadata, target) in enumerate(train_loader):
@@ -113,22 +112,20 @@ class BaseTraining(object):
                 inputs = self.cuda_wrapper(Variable(seq.float()))
                 metadata = self.cuda_wrapper(Variable(metadata.float()))
                 outputs = model(inputs, metadata)
-                self.handle_train_optimization(optimizer, scheduler, outputs, target, inputs, fold_num, len(train_loader), idx, epoch_num)
+                self.handle_train_optimization(optimizer, outputs, target, inputs, fold_num, len(train_loader), idx)
                 if self.args.debug:
                     break
-            scheduler.step()
 
-    def handle_train_optimization(self, optimizer, scheduler, outputs, target, inputs, fold_num, total_batches, batch_idx, last_epoch):
+    def handle_train_optimization(self, optimizer, outputs, target, inputs, fold_num, total_batches, batch_idx):
         loss = self.calc_loss(outputs, target, inputs)
         loss.backward()
         optimizer.step()
-        #scheduler.step(last_epoch)
         optimizer.zero_grad()
         self.results.update_loss(fold_num, loss.data)
 
         # print individual loss and total loss
         if not self.args.no_print_progress:
-            print("batch num: {}/{}, avg loss: {}, lr: {}\r".format(batch_idx, total_batches, self.results.get_meter('loss', fold_num), scheduler.get_lr()), end = "")
+            print("batch num: {}/{}, avg loss: {}\r".format(batch_idx, total_batches, self.results.get_meter('loss', fold_num), end=""))
 
     def get_base_datasets(self):
         kfold_num = None if self.args.kfolds is None else 0
@@ -198,9 +195,8 @@ class BaseTraining(object):
         for fold_num, (train_dataset, train_loader, test_dataset, test_loader) in enumerate(self.get_splits()):
             model = self.get_model()
             optimizer = self.get_optimizer(model)
-            scheduler = self.get_scheduler(optimizer)
             for epoch_num in range(self.args.epochs):
-                self.run_train_epoch(model, train_loader, optimizer, scheduler, epoch_num+1, fold_num)
+                self.run_train_epoch(model, train_loader, optimizer, epoch_num+1, fold_num)
                 if self.args.reshuffle_oversample_per_epoch:
                     train_loader.dataset.set_oversampling_indices()
 
@@ -241,10 +237,6 @@ class BaseTraining(object):
         elif self.args.optimizer == 'sgd':
             optimizer = torch.optim.SGD(model.parameters(), lr=self.args.learning_rate, momentum=0.9, weight_decay=self.args.weight_decay, nesterov=True)
         return optimizer
-
-    def get_scheduler(self, optimizer):
-        scheduler = StepLR(optimizer, step_size = 1, gamma = 0.3)
-        return scheduler
 
     def run_test_epoch(self, epoch_num, model, test_dataset, test_loader, fold_num):
         self.preds = []
@@ -386,8 +378,6 @@ class SiameseMixin(object):
     def run_train_epoch(self, model, train_loader, optimizer, epoch_num, fold_num):
         with torch.enable_grad():
             print("\nrun epoch {}\n".format(epoch_num))
-            last_epoch = epoch_num - 1
-            #scheduler = StepLR(optimizer, step_size = 1, gamma = 0.3, last_epoch = last_epoch)
             for batch_idx, (seq, pos_compr, neg_compr) in enumerate(train_loader):
                 model.zero_grad()
                 # XXX do we need this?
@@ -402,7 +392,6 @@ class SiameseMixin(object):
                 loss = self.calc_loss(outputs_pos, outputs_neg)
                 loss.backward()
                 optimizer.step()
-                #scheduler.step()
                 optimizer.zero_grad()
                 self.results.update_loss(fold_num, loss.data)
 
