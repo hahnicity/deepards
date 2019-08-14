@@ -1,5 +1,9 @@
+from glob import glob
+import os
+
 import pandas as pd
 from sklearn.metrics import confusion_matrix, roc_auc_score, f1_score
+
 
 def computeMetricsFromPatientResults(df, df_stats):
     epochs = df.epoch_num.unique()
@@ -41,7 +45,7 @@ def computeMetricsFromPatientResults(df, df_stats):
 def getMeanMetrics(start_times):
     df_patient_results_list = []
     for time in start_times:
-        df = pd.read_pickle("{}_patient_results.pkl".format(time))
+        df = pd.read_pickle("results/{}_patient_results.pkl".format(time))
         df_patient_results_list.append(df)
     df_stats = pd.DataFrame(columns = ['fold','epoch','AUC', 'Accuracy', 'sensitivity', 'specificity', 'precision', 'f1'])
     for df in df_patient_results_list:
@@ -55,9 +59,40 @@ def getMeanMetrics(start_times):
     mean_df_stats.rename(columns = {'epoch' : 'max_epoch'}, inplace = True)
     return mean_df_stats
 
+
 if __name__ == "__main__":
+    exp_results = []
+    datasets = ['unpadded_centered_sequences', 'unpadded_sequences', 'padded_breath_by_breath', 'unpadded_downsampled_sequences']
+    networks = ['cnn_lstm', 'cnn_single_breath_linear', 'cnn_transformer', 'lstm_only']
+    base_networks = ['se_resnet18', 'resnet18', 'densenet18', 'vgg11']
 
-    start_times = ['1565056824', '1565056824', '1565090993']
+    main_experiments = glob('results/main_experiment*')
+    unique_experiments = set(['_'.join(exp.split('_')[:-1]) for exp in main_experiments])
+    for exp in sorted(unique_experiments):
+        if 'cnn_linear' in exp:
+            continue
+        start_times = list(set([os.path.splitext(file_.split('_')[-1])[0] for file_ in glob(exp + '*')]))
+        mean_df_stats = getMeanMetrics(start_times)
 
-    mean_df_stats = getMeanMetrics(start_times)
-    print(mean_df_stats)
+        for dt in datasets:
+            if dt in exp:
+                dataset_type = dt
+                break
+        else:
+            raise Exception('dataset not found for experiment: ' + exp)
+
+        for net in networks:
+            if net in exp:
+                network_type = net
+                break
+        else:
+            raise Exception('network not found for experiment: ' + exp)
+
+        for base in base_networks:
+            if base in exp:
+                base_net = base
+                break
+
+        exp_results.append([dt, net, base, mean_df_stats.AUC.mean()])
+    exp_results = pd.DataFrame(exp_results, columns=['dataset_type', 'network', 'base_cnn', 'auc'])
+    import IPython; IPython.embed()
