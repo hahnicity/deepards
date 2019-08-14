@@ -23,6 +23,18 @@ class SiameseARDSClassifier(nn.Module):
         except AttributeError:
             self.pretrained_network.linear_final = nn.Linear(self.pretrained_network.breath_block.n_out_filters * sub_batch_size, 2)
 
+        try:
+            getattr(self.pretrained_network, 'lstm')
+            self.has_lstm = True
+        except AttributeError:
+            self.has_lstm = False
+
+        try:
+            getattr(self.pretrained_network, 'transformer')
+            self.has_transformer = True
+        except AttributeError:
+            self.has_transformer = False
+
     def forward(self, x, _):
         # input should be in shape: (batches, breaths in seq, chans, 224)
         batches = x.shape[0]
@@ -34,9 +46,9 @@ class SiameseARDSClassifier(nn.Module):
             block_out = block_out.unsqueeze(dim=0)
             outputs = torch.cat([outputs, block_out], dim=0)
 
-        try:
+        if self.has_lstm:
             x = self.pretrained_network.lstm(outputs)[0]
-        except NameError:
+        elif self.has_transformer:
             x = self.pretrained_network.transformer(outputs)
         return self.pretrained_network.linear_final(x)
 
