@@ -9,8 +9,8 @@ n_times_each_experiment = 3
 
 
 def run_experiment(dataset_path, network, bs, epochs, kfolds, base_network, weight_decay, dataset_type):
-    experiment_name = "main_experiment_preprocessed_models_{}_{}_{}".format(dataset_type, network, base_network)
-    siamese_pretrained_model = '{}_siamese_{}_{}.pth'.format(dataset_type, network if network != 'cnn_single_breath_linear' else 'cnn_linear', base_network)
+    experiment_name = "main_experiment_siamese_preprocessed_models_{}_{}_{}".format(dataset_type, network, base_network)
+    siamese_pretrained_model = 'pretrained_models/{}_siamese_{}_{}.pth'.format(dataset_type, network if network != 'cnn_single_breath_linear' else 'cnn_linear', base_network)
     for i in range(n_times_each_experiment):
         proc = subprocess.Popen([
             'ts', 'python', 'train_ards_detector.py', '--train-from-pickle', dataset_path,
