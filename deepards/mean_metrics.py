@@ -11,7 +11,7 @@ def computeMetricsFromPatientResults(df, df_stats):
             y_pred = sub_df.prediction.tolist()
             y_true = sub_df.patho.tolist()
             y_scores = sub_df.pred_frac.tolist()
-            tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+            tn, fp, fn, tp = map(float, confusion_matrix(y_true, y_pred).ravel())
             auc = roc_auc_score(y_true, y_scores)
             try:
                 accuracy = round(((tp + tn)/(tp + tn + fp + fn)),4)
