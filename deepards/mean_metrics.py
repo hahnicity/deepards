@@ -14,28 +14,28 @@ def computeMetricsFromPatientResults(df, df_stats):
             tn, fp, fn, tp = map(float, confusion_matrix(y_true, y_pred).ravel())
             auc = roc_auc_score(y_true, y_scores)
             try:
-                accuracy = round(((tp + tn)/(tp + tn + fp + fn)),4)
+                accuracy = round(((tp + tn)/float(tp + tn + fp + fn)),4)
             except ZeroDivisionError:
                 accuracy = 0
             try:
-                sensitivity = round((tp/(tp + fn)),4)
+                sensitivity = round((tp/float(tp + fn)),4)
             except ZeroDivisionError:
                 sensitivity = 0
             try:
-                specificity = round((tn/(tn + fp)),4)
+                specificity = round((tn/float(tn + fp)),4)
             except ZeroDivisionError:
                 specificity = 0
             try:
-                precision = round((tp/(tp + fp)),4)
+                precision = round((tp/float(tp + fp)),4)
             except ZeroDivisionError:
                 precision = 0
             try:
-                f1 = f1 = round(2 *((precision * sensitivity) / (precision + sensitivity)), 4)
+                f1 = f1 = round(2 *((precision * sensitivity) / float(precision + sensitivity)), 4)
             except ZeroDivisionError:
                 f1 = 0
             row = {'fold': fold,'epoch': epoch,'AUC': auc, 'Accuracy': accuracy, 'sensitivity': sensitivity, 'specificity': specificity, 'precision': precision, 'f1': f1}
             df_stats = df_stats.append(row, ignore_index = True)
-    
+
     return df_stats
 
 def getMeanMetrics(start_times):
@@ -58,10 +58,6 @@ def getMeanMetrics(start_times):
 if __name__ == "__main__":
 
     start_times = ['1565056824', '1565056824', '1565090993']
-    
+
     mean_df_stats = getMeanMetrics(start_times)
     print(mean_df_stats)
-
-
-
-    
