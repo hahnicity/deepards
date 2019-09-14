@@ -16,6 +16,7 @@ from deepards.loss import ConfidencePenaltyLoss, FocalLoss, VacillatingLoss
 from deepards.metrics import DeepARDSResults, Reporting
 from deepards.models.autoencoder_cnn import AutoencoderCNN
 from deepards.models.autoencoder_network import AutoencoderNetwork
+from deepards.models.cnn_to_nested_lstm import CNNToNestedLSTMNetwork
 from deepards.models.cnn_transformer import CNNTransformerNetwork
 from deepards.models.densenet import densenet18, densenet121, densenet161, densenet169, densenet201
 from deepards.models.lstm_only import LSTMOnlyNetwork
@@ -107,7 +108,8 @@ class BaseTraining(object):
             print("\nrun epoch {}\n".format(epoch_num))
             for idx, (obs_idx, seq, metadata, target) in enumerate(train_loader):
                 model.zero_grad()
-                obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)
+                if not self.args.batch_size == 1:
+                    obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)
                 if seq.shape[0] == 0:
                     continue
                 target = self.cuda_wrapper(target.float())
@@ -245,7 +247,8 @@ class BaseTraining(object):
         self.pred_idx = []
         with torch.no_grad():
             for idx, (obs_idx, seq, metadata, target) in enumerate(test_loader):
-                obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)
+                if not self.args.batch_size == 1:
+                    obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)
                 if seq.shape[0] == 0:
                     continue
                 inputs = self.cuda_wrapper(Variable(seq.float()))
@@ -451,6 +454,84 @@ class RegressorMixin(object):
 
     def perform_post_modeling_actions(self):
         self.results.save_all()
+
+
+class CNNToNestedLSTMModel(BaseTraining):
+    def __init__(self, args):
+        # ensure batch size is 1 for now
+        args.batch_size = 1
+        super(CNNToNestedLSTMModel, self).__init__(args)
+
+    def set_loss_criterion(self):
+        self.criterion = torch.nn.BCEWithLogitsLoss()
+
+    def _process_test_batch_results(self, outputs, target, inputs, fold_num):
+        batch_preds = outputs.argmax(dim=-1).cpu().view(-1)
+        target = target.argmax(dim=1).cpu().reshape((outputs.shape[0], 1)).repeat((1, outputs.shape[1])).view(-1)
+        # XXX find a way to make this function work later
+        #self.record_testing_results(target, batch_preds, fold_num)
+        return batch_preds.tolist()
+
+    def get_base_datasets(self):
+        kfold_num = None if self.args.kfolds is None else 0
+
+        # for holdout and kfold
+        if not self.args.train_from_pickle:
+            train_dataset = ARDSRawDataset(
+                self.args.data_path,
+                self.args.experiment_num,
+                self.args.cohort_file,
+                self.args.n_sub_batches,
+                dataset_type=self.args.dataset_type,
+                to_pickle=self.args.train_to_pickle,
+                kfold_num=kfold_num,
+                total_kfolds=self.args.kfolds,
+                unpadded_downsample_factor=self.args.downsample_factor,
+                drop_frame_if_frac_missing=self.args.no_drop_frames,
+                whole_patient_super_batch=True,
+            )
+        else:
+            train_dataset = ARDSRawDataset.from_pickle(self.args.train_from_pickle, self.args.oversample)
+
+        self.n_sub_batches = train_dataset.n_sub_batches
+        if not self.args.test_from_pickle and self.args.kfolds is not None:
+            test_dataset = ARDSRawDataset.make_test_dataset_if_kfold(train_dataset)
+        elif self.args.test_from_pickle:
+            test_dataset = ARDSRawDataset.from_pickle(self.args.test_from_pickle)
+        else:  # holdout, no pickle, no kfold
+            test_dataset = ARDSRawDataset(
+                self.args.data_path,
+                self.args.experiment_num,
+                self.args.cohort_file,
+                self.args.n_sub_batches,
+                dataset_type=self.args.dataset_type,
+                to_pickle=self.args.test_to_pickle,
+                train=False,
+                unpadded_downsample_factor=self.args.downsample_factor,
+                drop_frame_if_frac_missing=self.args.no_drop_frames,
+                whole_patient_super_batch=True,
+            )
+
+        return train_dataset, test_dataset
+
+    def calc_loss(self, outputs, target, inputs):
+        # XXX all_breaths / last_breath
+        return self.criterion(outputs[0][-1], target[0])
+
+#    def run_train_epoch(self, model, train_loader, optimizer, epoch_num, fold_num):
+#        pass
+#
+#    def run_test_epoch(self, model, test_loader, optimizer, epoch_num, fold_num):
+#        pass
+#
+    def get_network(self, base_network):
+        return CNNToNestedLSTMNetwork(base_network, self.args.n_sub_batches, self.args.cuda)
+
+    def record_final_epoch_testing_results(self, fold_num, epoch_num, test_dataset):
+        self.preds = pd.Series(self.preds, index=self.pred_idx)
+        self.preds = self.preds.sort_index()
+        y_test = test_dataset.get_ground_truth_df()
+        self.results.perform_patient_predictions(y_test, self.preds, fold_num, epoch_num)
 
 
 class CNNTransformerModel(WithTimeLayerClassifierMixin, BaseTraining, PatientClassifierMixin):
@@ -714,6 +795,7 @@ def main():
         'cnn_double_linear',
         'cnn_single_breath_linear',
         'lstm_only',
+        'cnn_to_nested_lstm',
     ], default='cnn_lstm')
     parser.add_argument('-e', '--epochs', type=int, default=5)
     parser.add_argument('-p', '--train-from-pickle')
@@ -795,6 +877,7 @@ def main():
         'cnn_double_linear': CNNDoubleLinearModel,
         'cnn_single_breath_linear': CNNSingleBreathLinearModel,
         'lstm_only': LSTMOnlyModel,
+        'cnn_to_nested_lstm': CNNToNestedLSTMModel,
     }
     cls = network_map[args.network](args)
     cls.train_and_test()
