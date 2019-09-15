@@ -116,20 +116,21 @@ class BaseTraining(object):
                 inputs = self.cuda_wrapper(Variable(seq.float()))
                 metadata = self.cuda_wrapper(Variable(metadata.float()))
                 outputs = model(inputs, metadata)
-                self.handle_train_optimization(optimizer, outputs, target, inputs, fold_num, len(train_loader), idx)
+                self.handle_train_optimization(optimizer, outputs, target, inputs, fold_num, len(train_loader), idx, epoch_num)
                 if self.args.debug:
                     break
 
-    def handle_train_optimization(self, optimizer, outputs, target, inputs, fold_num, total_batches, batch_idx):
+    def handle_train_optimization(self, optimizer, outputs, target, inputs, fold_num, total_batches, batch_idx, epoch_num):
         loss = self.calc_loss(outputs, target, inputs)
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
+        self.results.update_meter('loss_epoch_{}'.format(epoch_num), fold_num, loss)
         self.results.update_loss(fold_num, loss.data)
 
         # print individual loss and total loss
         if not self.args.no_print_progress:
-            print("batch num: {}/{}, avg loss: {}\r".format(batch_idx, total_batches, self.results.get_meter('loss', fold_num), end=""))
+            print("batch num: {}/{}, avg loss: {}\r".format(batch_idx, total_batches, self.results.get_meter('loss_epoch_{}'.format(epoch_num), fold_num), end=""))
 
     def get_base_datasets(self):
         kfold_num = None if self.args.kfolds is None else 0
@@ -265,8 +266,11 @@ class BaseTraining(object):
         self.record_final_epoch_testing_results(fold_num, epoch_num, test_dataset)
 
     def get_model(self):
-        base_network = self.get_base_network()
-        return self.model_cuda_wrapper(self.get_network(base_network))
+        if self.args.load_checkpoint:
+            return torch.load(self.args.load_checkpoint)
+        else:
+            base_network = self.get_base_network()
+            return self.model_cuda_wrapper(self.get_network(base_network))
 
     def transform_obs_idx(self, obs_idx, outputs):
         return obs_idx
@@ -579,7 +583,7 @@ class CNNLSTMModel(WithTimeLayerClassifierMixin, BaseTraining, PatientClassifier
                     outputs, hx_cx = model(inputs, metadata, hx_cx)
                     hx_cx = (hx_cx[0].detach(), hx_cx[1].detach())
                     last_pt = cur_pt
-                self.handle_train_optimization(optimizer, outputs, target, inputs, fold_num, len(train_loader), idx)
+                self.handle_train_optimization(optimizer, outputs, target, inputs, fold_num, len(train_loader), idx, epoch_num)
 
                 if self.args.debug:
                     break
@@ -853,6 +857,7 @@ def main():
     parser.add_argument('--fl-alpha', type=float, default=.9)
     parser.add_argument('--oversample', action='store_true')
     parser.add_argument('--reshuffle-oversample-per-epoch', action='store_true')
+    parser.add_argument('--load-checkpoint')
     args = parser.parse_args()
 
     # convenience code
