@@ -16,7 +16,7 @@ from deepards.loss import ConfidencePenaltyLoss, FocalLoss, VacillatingLoss
 from deepards.metrics import DeepARDSResults, Reporting
 from deepards.models.autoencoder_cnn import AutoencoderCNN
 from deepards.models.autoencoder_network import AutoencoderNetwork
-from deepards.models.cnn_to_nested_lstm import CNNToNestedLSTMNetwork
+from deepards.models.cnn_to_nested_layer import CNNToNestedLSTMNetwork, CNNToNestedTransformerNetwork
 from deepards.models.cnn_transformer import CNNTransformerNetwork
 from deepards.models.densenet import densenet18, densenet121, densenet161, densenet169, densenet201
 from deepards.models.lstm_only import LSTMOnlyNetwork
@@ -460,12 +460,7 @@ class RegressorMixin(object):
         self.results.save_all()
 
 
-class CNNToNestedLSTMModel(BaseTraining):
-    def __init__(self, args):
-        # ensure batch size is 1 for now
-        args.batch_size = 1
-        super(CNNToNestedLSTMModel, self).__init__(args)
-
+class NestedMixin(object):
     def set_loss_criterion(self):
         self.criterion = torch.nn.BCEWithLogitsLoss()
 
@@ -519,23 +514,42 @@ class CNNToNestedLSTMModel(BaseTraining):
         return train_dataset, test_dataset
 
     def calc_loss(self, outputs, target, inputs):
-        # XXX all_breaths / last_breath
-        return self.criterion(outputs[0][-1], target[0])
-
-#    def run_train_epoch(self, model, train_loader, optimizer, epoch_num, fold_num):
-#        pass
-#
-#    def run_test_epoch(self, model, test_loader, optimizer, epoch_num, fold_num):
-#        pass
-#
-    def get_network(self, base_network):
-        return CNNToNestedLSTMNetwork(base_network, self.args.n_sub_batches, self.args.cuda)
+        # instead of all_breaths / last_breath this is more like all_windows/last_window
+        if self.args.loss_calc == 'all_breaths':
+            return self.criterion(outputs, target.repeat((1, outputs.shape[1], 1)))
+        elif self.args.loss_calc == 'last_breath':
+            return self.criterion(outputs[:, -1], target)
 
     def record_final_epoch_testing_results(self, fold_num, epoch_num, test_dataset):
+        # XXX add last_breath / all_breaths split
         self.preds = pd.Series(self.preds, index=self.pred_idx)
         self.preds = self.preds.sort_index()
         y_test = test_dataset.get_ground_truth_df()
         self.results.perform_patient_predictions(y_test, self.preds, fold_num, epoch_num)
+
+    def transform_obs_idx(self, obs_idx, outputs):
+        # XXX add last_breath / all_breaths split
+        return obs_idx.reshape((outputs.shape[0], 1)).repeat((1, outputs.shape[1])).view(-1)
+
+
+class CNNToNestedLSTMModel(NestedMixin, BaseTraining):
+    def __init__(self, args):
+        # ensure batch size is 1 for now
+        args.batch_size = 1
+        super(CNNToNestedLSTMModel, self).__init__(args)
+
+    def get_network(self, base_network):
+        return CNNToNestedLSTMNetwork(base_network, self.args.n_sub_batches, self.args.cuda)
+
+
+class CNNToNestedTransformerModel(NestedMixin, BaseTraining):
+    def __init__(self, args):
+        # ensure batch size is 1 for now
+        args.batch_size = 1
+        super(CNNToNestedTransformerModel, self).__init__(args)
+
+    def get_network(self, base_network):
+        return CNNToNestedTransformerNetwork(base_network, self.args.n_sub_batches, self.args.cuda, self.args.transformer_blocks)
 
 
 class CNNTransformerModel(WithTimeLayerClassifierMixin, BaseTraining, PatientClassifierMixin):
@@ -800,6 +814,7 @@ def main():
         'cnn_single_breath_linear',
         'lstm_only',
         'cnn_to_nested_lstm',
+        'cnn_to_nested_transformer',
     ], default='cnn_lstm')
     parser.add_argument('-e', '--epochs', type=int, default=5)
     parser.add_argument('-p', '--train-from-pickle')
@@ -883,6 +898,7 @@ def main():
         'cnn_single_breath_linear': CNNSingleBreathLinearModel,
         'lstm_only': LSTMOnlyModel,
         'cnn_to_nested_lstm': CNNToNestedLSTMModel,
+        'cnn_to_nested_transformer': CNNToNestedTransformerModel,
     }
     cls = network_map[args.network](args)
     cls.train_and_test()
