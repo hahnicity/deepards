@@ -47,9 +47,10 @@ class CNNToNestedTransformerNetwork(nn.Module):
         super(CNNToNestedTransformerNetwork, self).__init__()
 
         self.breath_block = breath_block
-        self.window_linear = nn.Linear(self.breath_block.n_out_filters * window_sequence_size, 512)
-        self.transformer = Transformer(512, 512, transformer_blocks, 4)
-        self.linear_final = nn.Linear(512, 2)
+        intermediate_units = 128
+        self.window_linear = nn.Linear(self.breath_block.n_out_filters * window_sequence_size, intermediate_units)
+        self.transformer = Transformer(intermediate_units, intermediate_units, transformer_blocks, 4)
+        self.linear_final = nn.Linear(intermediate_units, 2)
         self.is_cuda = is_cuda
 
     def forward(self, x, metadata):
@@ -73,7 +74,12 @@ class CNNToNestedTransformerNetwork(nn.Module):
         for i in range(x.shape[-4]):
             outputs[i] = self.breath_block(x[i])
 
-        outputs = self.window_linear(outputs.flatten(1)).unsqueeze(0)
+        # try with linear layer compression of all windows
+        #outputs = self.window_linear(outputs.flatten(1)).unsqueeze(0)
+        # try with mean compression of all windows
+        #outputs = outputs.mean(dim=1).unsqueeze(0)
+        # try with median compression of all windows
+        outputs = outputs.median(dim=1)[0].unsqueeze(0)
         outputs = self.transformer(outputs)
         outputs = self.linear_final(outputs)
         return outputs

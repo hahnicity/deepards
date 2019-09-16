@@ -218,8 +218,8 @@ class BaseTraining(object):
     def get_base_network(self):
         base_network = self.base_networks[self.args.base_network]
 
-        if self.args.load_pretrained:
-            saved_model = torch.load(self.args.load_pretrained)
+        if self.args.load_base_network:
+            saved_model = torch.load(self.args.load_base_network)
             if isinstance(saved_model, torch.nn.DataParallel):
                 saved_model = saved_model.module
             base_network = saved_model.breath_block
@@ -234,13 +234,18 @@ class BaseTraining(object):
             base_network = base_network(1)
         else:
             base_network = base_network()
+
+        if self.args.freeze_base_network:
+            for param in base_network.parameters():
+                param.requires_grad = False
         return base_network
 
     def get_optimizer(self, model):
+        parameters = filter(lambda p: p.requires_grad, model.parameters())
         if self.args.optimizer == 'adam':
-            optimizer = torch.optim.Adam(model.parameters(), lr=self.args.learning_rate)
+            optimizer = torch.optim.Adam(parameters, lr=self.args.learning_rate)
         elif self.args.optimizer == 'sgd':
-            optimizer = torch.optim.SGD(model.parameters(), lr=self.args.learning_rate, momentum=0.9, weight_decay=self.args.weight_decay, nesterov=True)
+            optimizer = torch.optim.SGD(parameters, lr=self.args.learning_rate, momentum=0.9, weight_decay=self.args.weight_decay, nesterov=True)
         return optimizer
 
     def run_test_epoch(self, epoch_num, model, test_dataset, test_loader, fold_num):
@@ -530,6 +535,10 @@ class NestedMixin(object):
     def transform_obs_idx(self, obs_idx, outputs):
         # XXX add last_breath / all_breaths split
         return obs_idx.reshape((outputs.shape[0], 1)).repeat((1, outputs.shape[1])).view(-1)
+
+    def perform_post_modeling_actions(self):
+        self.results.aggregate_classification_results()
+        self.results.save_all()
 
 
 class CNNToNestedLSTMModel(NestedMixin, BaseTraining):
@@ -854,7 +863,7 @@ def main():
     parser.add_argument('-lr', '--learning-rate', default=0.001, type=float)
     parser.add_argument('--loader-threads', type=int, default=0, help='specify how many threads we should use to load data. Sometimes the threads fail to shutdown correctly though and this can cause memory errors. If this happens a restart works well')
     parser.add_argument('--save-model', help='save the model to a specific file')
-    parser.add_argument('--load-pretrained', help='load breath block from a saved model')
+    parser.add_argument('--load-base-network', help='load base network only from a saved model')
     parser.add_argument('-rdc','--resnet-double-conv', action='store_true')
     parser.add_argument('--bm-to-linear', action='store_true')
     parser.add_argument('-exp', '--experiment-name')
@@ -873,6 +882,7 @@ def main():
     parser.add_argument('--oversample', action='store_true')
     parser.add_argument('--reshuffle-oversample-per-epoch', action='store_true')
     parser.add_argument('--load-checkpoint')
+    parser.add_argument('--freeze-base-network', action='store_true')
     args = parser.parse_args()
 
     # convenience code
