@@ -97,6 +97,9 @@ class Meter(object):
         self._last_value = torch.zeros(len(self.name))
         self._count = 0.0
 
+    def peek(self):
+        return self.values[-1]
+
     def update(self, data, n=1):
         self._count = self._count + n
         if isinstance(data, torch.autograd.Variable):

@@ -16,7 +16,7 @@ from deepards.loss import ConfidencePenaltyLoss, FocalLoss, VacillatingLoss
 from deepards.metrics import DeepARDSResults, Reporting
 from deepards.models.autoencoder_cnn import AutoencoderCNN
 from deepards.models.autoencoder_network import AutoencoderNetwork
-from deepards.models.cnn_to_nested_layer import CNNToNestedLSTMNetwork, CNNToNestedTransformerNetwork
+from deepards.models.cnn_to_nested_layer import CNNToNestedLSTMNetwork, CNNToNestedRNNNetwork, CNNToNestedTransformerNetwork
 from deepards.models.cnn_transformer import CNNTransformerNetwork
 from deepards.models.densenet import densenet18, densenet121, densenet161, densenet169, densenet201
 from deepards.models.lstm_only import LSTMOnlyNetwork
@@ -117,6 +117,9 @@ class BaseTraining(object):
                 metadata = self.cuda_wrapper(Variable(metadata.float()))
                 outputs = model(inputs, metadata)
                 self.handle_train_optimization(optimizer, outputs, target, inputs, fold_num, len(train_loader), idx, epoch_num)
+                if self.args.stop_on_loss and self.results.get_meter('loss', fold_num).peek() > self.args.stop_thresh and epoch_num > self.args.stop_after_epoch:
+                    print('stop on loss')
+                    import IPython; IPython.embed()
                 if self.args.debug:
                     break
 
@@ -541,6 +544,16 @@ class NestedMixin(object):
         self.results.save_all()
 
 
+class CNNToNestedRNNModel(NestedMixin, BaseTraining):
+    def __init__(self, args):
+        # ensure batch size is 1 for now
+        args.batch_size = 1
+        super(CNNToNestedRNNModel, self).__init__(args)
+
+    def get_network(self, base_network):
+        return CNNToNestedRNNNetwork(base_network, self.args.n_sub_batches, self.args.cuda, self.args.clip_grad, self.args.clip_val)
+
+
 class CNNToNestedLSTMModel(NestedMixin, BaseTraining):
     def __init__(self, args):
         # ensure batch size is 1 for now
@@ -548,7 +561,7 @@ class CNNToNestedLSTMModel(NestedMixin, BaseTraining):
         super(CNNToNestedLSTMModel, self).__init__(args)
 
     def get_network(self, base_network):
-        return CNNToNestedLSTMNetwork(base_network, self.args.n_sub_batches, self.args.cuda)
+        return CNNToNestedLSTMNetwork(base_network, self.args.n_sub_batches, self.args.cuda, self.args.clip_grad, self.args.clip_val)
 
 
 class CNNToNestedTransformerModel(NestedMixin, BaseTraining):
@@ -558,7 +571,7 @@ class CNNToNestedTransformerModel(NestedMixin, BaseTraining):
         super(CNNToNestedTransformerModel, self).__init__(args)
 
     def get_network(self, base_network):
-        return CNNToNestedTransformerNetwork(base_network, self.args.n_sub_batches, self.args.cuda, self.args.transformer_blocks)
+        return CNNToNestedTransformerNetwork(base_network, self.args.n_sub_batches, self.args.cuda, self.args.transformer_blocks, self.args.clip_grad, self.args.clip_val)
 
 
 class CNNTransformerModel(WithTimeLayerClassifierMixin, BaseTraining, PatientClassifierMixin):
@@ -824,6 +837,7 @@ def main():
         'lstm_only',
         'cnn_to_nested_lstm',
         'cnn_to_nested_transformer',
+        'cnn_to_nested_rnn',
     ], default='cnn_lstm')
     parser.add_argument('-e', '--epochs', type=int, default=5)
     parser.add_argument('-p', '--train-from-pickle')
@@ -883,6 +897,11 @@ def main():
     parser.add_argument('--reshuffle-oversample-per-epoch', action='store_true')
     parser.add_argument('--load-checkpoint')
     parser.add_argument('--freeze-base-network', action='store_true')
+    parser.add_argument('--stop-on-loss', action='store_true')
+    parser.add_argument('--stop-thresh', type=float, default=1.5)
+    parser.add_argument('--stop-after-epoch', type=int, default=1)
+    parser.add_argument('--clip-grad', action='store_true')
+    parser.add_argument('--clip-val', type=float, default=5)
     args = parser.parse_args()
 
     # convenience code
@@ -907,6 +926,7 @@ def main():
         'cnn_double_linear': CNNDoubleLinearModel,
         'cnn_single_breath_linear': CNNSingleBreathLinearModel,
         'lstm_only': LSTMOnlyModel,
+        'cnn_to_nested_rnn': CNNToNestedRNNModel,
         'cnn_to_nested_lstm': CNNToNestedLSTMModel,
         'cnn_to_nested_transformer': CNNToNestedTransformerModel,
     }
