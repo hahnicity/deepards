@@ -6,7 +6,7 @@ from deepards.models.transformer import Transformer
 
 
 class CNNToNestedRNNNetwork(nn.Module):
-    def __init__(self, breath_block, window_sequence_size, is_cuda, clip_grad, clip_val):
+    def __init__(self, breath_block, window_sequence_size, is_cuda):
         super(CNNToNestedRNNNetwork, self).__init__()
 
         self.breath_block = breath_block
@@ -15,8 +15,6 @@ class CNNToNestedRNNNetwork(nn.Module):
         self.rnn = nn.RNN(intermediate_units, intermediate_units, batch_first=True)
         self.linear_final = nn.Linear(intermediate_units, 2)
         self.is_cuda = is_cuda
-        self.clip_grad = clip_grad
-        self.clip_val = clip_val
 
     def forward(self, x, metadata):
         # input should be in shape: (n_windows, n_breaths in window, chans, 224)
@@ -43,8 +41,6 @@ class CNNToNestedRNNNetwork(nn.Module):
         outputs = outputs.median(dim=1)[0].unsqueeze(0)
         outputs = self.rnn(outputs)[0]
         outputs = self.linear_final(outputs)
-        if self.clip_grad and outputs.requires_grad:
-            outputs.register_hook(lambda x: x.clamp(min=-1*self.clip_val, max=self.clip_val))
         return outputs
 
 
@@ -58,8 +54,6 @@ class CNNToNestedLSTMNetwork(nn.Module):
         self.lstm = nn.LSTM(intermediate_units, intermediate_units, batch_first=True)
         self.linear_final = nn.Linear(intermediate_units, 2)
         self.is_cuda = is_cuda
-        self.clip_grad = clip_grad
-        self.clip_val = clip_val
 
     def forward(self, x, metadata):
         # input should be in shape: (n_windows, n_breaths in window, chans, 224)
@@ -86,13 +80,11 @@ class CNNToNestedLSTMNetwork(nn.Module):
         outputs = outputs.median(dim=1)[0].unsqueeze(0)
         outputs = self.lstm(outputs)[0]
         outputs = self.linear_final(outputs)
-        if self.clip_grad and outputs.requires_grad:
-            outputs.register_hook(lambda x: x.clamp(min=-1*self.clip_val, max=self.clip_val))
         return outputs
 
 
 class CNNToNestedTransformerNetwork(nn.Module):
-    def __init__(self, breath_block, window_sequence_size, is_cuda, transformer_blocks, clip_grad, clip_val):
+    def __init__(self, breath_block, window_sequence_size, is_cuda, transformer_blocks):
         super(CNNToNestedTransformerNetwork, self).__init__()
 
         self.breath_block = breath_block
@@ -101,8 +93,6 @@ class CNNToNestedTransformerNetwork(nn.Module):
         self.transformer = Transformer(intermediate_units, intermediate_units, transformer_blocks, 4)
         self.linear_final = nn.Linear(intermediate_units, 2)
         self.is_cuda = is_cuda
-        self.clip_grad = clip_grad
-        self.clip_val = clip_val
 
     def forward(self, x, metadata):
         # input should be in shape: (n_windows, n_breaths in window, chans, 224)
@@ -133,6 +123,4 @@ class CNNToNestedTransformerNetwork(nn.Module):
         outputs = outputs.median(dim=1)[0].unsqueeze(0)
         outputs = self.transformer(outputs)
         outputs = self.linear_final(outputs)
-        if self.clip_grad and outputs.requires_grad:
-            outputs.register_hook(lambda x: x.clamp(min=-1*self.clip_val, max=self.clip_val))
         return outputs

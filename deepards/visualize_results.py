@@ -1,5 +1,6 @@
 import argparse
 from glob import glob
+from warnings import warn
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -12,7 +13,7 @@ get_moving_average = lambda x, N: np.convolve(x, np.ones((N,))/N, mode='valid')
 
 
 def visualize_results_for_start_time(start_time):
-    glob_search = 'results/loss*_{}*'.format(start_time)
+    glob_search = 'results/loss_fold_*_{}*'.format(start_time)
     results_files = glob(glob_search)
     if len(results_files) == 0:
         raise Exception('No loss results files found')
@@ -24,6 +25,20 @@ def visualize_results_for_start_time(start_time):
     plt.legend()
     plt.grid()
     plt.ylabel('loss')
+    plt.show()
+
+    glob_search = 'results/loss_epoch_*_fold_*_{}*'.format(start_time)
+    results_files = glob(glob_search)
+    if len(results_files) == 0:
+        raise Exception('No epoch loss results files found')
+
+    for i, f in enumerate(sorted(results_files)):
+        vals = torch.load(f).values.numpy()
+        ma = get_moving_average(vals, 1)
+        plt.plot(ma, label='Loss Fold {}'.format(i+1))
+    plt.legend()
+    plt.grid()
+    plt.ylabel('epoch loss')
     plt.show()
 
     glob_search = 'results/test_loss_fold*_{}*'.format(start_time)
@@ -68,7 +83,7 @@ def visualize_results_for_start_time(start_time):
     glob_search = 'results/test_accuracy*_{}*'.format(start_time)
     results_files = glob(glob_search)
     if len(results_files) == 0:
-        raise Exception('No accuracy results files found')
+        warn('No accuracy results files found')
 
     for i, f in enumerate(sorted(results_files)):
         vals = torch.load(f).values.numpy()

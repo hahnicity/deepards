@@ -116,16 +116,18 @@ class BaseTraining(object):
                 inputs = self.cuda_wrapper(Variable(seq.float()))
                 metadata = self.cuda_wrapper(Variable(metadata.float()))
                 outputs = model(inputs, metadata)
-                self.handle_train_optimization(optimizer, outputs, target, inputs, fold_num, len(train_loader), idx, epoch_num)
+                self.handle_train_optimization(optimizer, outputs, target, inputs, fold_num, len(train_loader), idx, epoch_num, model)
                 if self.args.stop_on_loss and self.results.get_meter('loss', fold_num).peek() > self.args.stop_thresh and epoch_num > self.args.stop_after_epoch:
                     print('stop on loss')
                     import IPython; IPython.embed()
                 if self.args.debug:
                     break
 
-    def handle_train_optimization(self, optimizer, outputs, target, inputs, fold_num, total_batches, batch_idx, epoch_num):
+    def handle_train_optimization(self, optimizer, outputs, target, inputs, fold_num, total_batches, batch_idx, epoch_num, model):
         loss = self.calc_loss(outputs, target, inputs)
         loss.backward()
+        # Can also put grad clip here if you wanted too. Example:
+        # https://stackoverflow.com/questions/54716377/how-to-do-gradient-clipping-in-pytorch
         optimizer.step()
         optimizer.zero_grad()
         self.results.update_meter('loss_epoch_{}'.format(epoch_num), fold_num, loss)
@@ -275,10 +277,15 @@ class BaseTraining(object):
 
     def get_model(self):
         if self.args.load_checkpoint:
-            return torch.load(self.args.load_checkpoint)
+            model = torch.load(self.args.load_checkpoint)
         else:
             base_network = self.get_base_network()
-            return self.model_cuda_wrapper(self.get_network(base_network))
+            model = self.model_cuda_wrapper(self.get_network(base_network))
+
+        for p in model.parameters():
+            if p.requires_grad and self.args.clip_grad:
+                p.register_hook(lambda x: torch.clamp(x, -self.args.clip_val, self.args.clip_val))
+        return model
 
     def transform_obs_idx(self, obs_idx, outputs):
         return obs_idx
@@ -546,32 +553,26 @@ class NestedMixin(object):
 
 class CNNToNestedRNNModel(NestedMixin, BaseTraining):
     def __init__(self, args):
-        # ensure batch size is 1 for now
-        args.batch_size = 1
         super(CNNToNestedRNNModel, self).__init__(args)
 
     def get_network(self, base_network):
-        return CNNToNestedRNNNetwork(base_network, self.args.n_sub_batches, self.args.cuda, self.args.clip_grad, self.args.clip_val)
+        return CNNToNestedRNNNetwork(base_network, self.args.n_sub_batches, self.args.cuda)
 
 
 class CNNToNestedLSTMModel(NestedMixin, BaseTraining):
     def __init__(self, args):
-        # ensure batch size is 1 for now
-        args.batch_size = 1
         super(CNNToNestedLSTMModel, self).__init__(args)
 
     def get_network(self, base_network):
-        return CNNToNestedLSTMNetwork(base_network, self.args.n_sub_batches, self.args.cuda, self.args.clip_grad, self.args.clip_val)
+        return CNNToNestedLSTMNetwork(base_network, self.args.n_sub_batches, self.args.cuda)
 
 
 class CNNToNestedTransformerModel(NestedMixin, BaseTraining):
     def __init__(self, args):
-        # ensure batch size is 1 for now
-        args.batch_size = 1
         super(CNNToNestedTransformerModel, self).__init__(args)
 
     def get_network(self, base_network):
-        return CNNToNestedTransformerNetwork(base_network, self.args.n_sub_batches, self.args.cuda, self.args.transformer_blocks, self.args.clip_grad, self.args.clip_val)
+        return CNNToNestedTransformerNetwork(base_network, self.args.n_sub_batches, self.args.cuda, self.args.transformer_blocks)
 
 
 class CNNTransformerModel(WithTimeLayerClassifierMixin, BaseTraining, PatientClassifierMixin):
