@@ -25,7 +25,7 @@ from deepards.models.senet import senet18, senet154, se_resnet18, se_resnet50, s
 from deepards.models.siamese import SiameseARDSClassifier, SiameseCNNLinearNetwork, SiameseCNNLSTMNetwork, SiameseCNNTransformerNetwork
 from deepards.models.torch_cnn_lstm_combo import CNNLSTMDoubleLinearNetwork, CNNLSTMNetwork
 from deepards.models.torch_cnn_bm_regressor import CNNRegressor
-from deepards.models.torch_cnn_linear_network import CNNDoubleLinearNetwork, CNNLinearNetwork, CNNSingleBreathLinearNetwork
+from deepards.models.torch_cnn_linear_network import CNNDoubleLinearNetwork, CNNLinearComprToRF, CNNLinearNetwork, CNNSingleBreathLinearNetwork
 from deepards.models.torch_metadata_only_network import MetadataOnlyNetwork
 from deepards.models.unet import UNet
 from deepards.models.vgg import vgg11_bn, vgg13_bn
@@ -100,6 +100,7 @@ class BaseTraining(object):
             valpha=self.args.valpha,
             confidence_beta=self.args.conf_beta,
             dataset_type=self.args.dataset_type,
+            grad_clip_val=self.args.clip_val,
         )
         print('Run start time: {}'.format(self.start_time))
 
@@ -553,6 +554,7 @@ class NestedMixin(object):
 
 class CNNToNestedRNNModel(NestedMixin, BaseTraining):
     def __init__(self, args):
+        args.batch_size = 1
         super(CNNToNestedRNNModel, self).__init__(args)
 
     def get_network(self, base_network):
@@ -561,6 +563,7 @@ class CNNToNestedRNNModel(NestedMixin, BaseTraining):
 
 class CNNToNestedLSTMModel(NestedMixin, BaseTraining):
     def __init__(self, args):
+        args.batch_size = 1
         super(CNNToNestedLSTMModel, self).__init__(args)
 
     def get_network(self, base_network):
@@ -569,6 +572,7 @@ class CNNToNestedLSTMModel(NestedMixin, BaseTraining):
 
 class CNNToNestedTransformerModel(NestedMixin, BaseTraining):
     def __init__(self, args):
+        args.batch_size = 1
         super(CNNToNestedTransformerModel, self).__init__(args)
 
     def get_network(self, base_network):
@@ -718,6 +722,26 @@ class CNNSingleBreathLinearModel(WithTimeLayerClassifierMixin, BaseTraining, Pat
         return CNNSingleBreathLinearNetwork(base_network)
 
 
+class CNNLinearComprToRFModel(WithTimeLayerClassifierMixin, BaseTraining, PatientClassifierMixin):
+    def __init__(self, args):
+        super(CNNLinearComprToRFModel, self).__init__(args)
+
+    def calc_loss(self, outputs, target, inputs):
+        return self.criterion(outputs, target)
+
+    def _process_test_batch_results(self, outputs, target, inputs, fold_num):
+        batch_preds = outputs.argmax(dim=-1).cpu().view(-1)
+        target = target.argmax(dim=1).cpu().reshape((outputs.shape[0], 1)).view(-1)
+        self.record_testing_results(target, batch_preds, fold_num)
+        return batch_preds.tolist()
+
+    def transform_obs_idx(self, obs_idx, outputs):
+        return obs_idx
+
+    def get_network(self, base_network):
+        return CNNLinearComprToRF(base_network)
+
+
 class MetadataOnlyModel(BaseTraining, PatientClassifierMixin):
     def __init__(self, args):
         super(CNNMetadataModel, self).__init__(args)
@@ -817,29 +841,32 @@ class SiamesePretrainedModel(WithTimeLayerClassifierMixin, BaseTraining, Patient
 
 
 def main():
+    network_map = {
+        'cnn_lstm': CNNLSTMModel,
+        'cnn_linear': CNNLinearModel,
+        'cnn_regressor': CNNRegressorModel,
+        'metadata_only': MetadataOnlyModel,
+        'autoencoder': AutoencoderModel,
+        'cnn_transformer': CNNTransformerModel,
+        'siamese_cnn_linear': SiameseCNNLinearModel,
+        'siamese_cnn_lstm': SiameseCNNLSTMModel,
+        'siamese_cnn_transformer': SiameseCNNTransformerModel,
+        'siamese_pretrained': SiamesePretrainedModel,
+        'cnn_lstm_double_linear': CNNLSTMDoubleLinearModel,
+        'cnn_double_linear': CNNDoubleLinearModel,
+        'cnn_single_breath_linear': CNNSingleBreathLinearModel,
+        'lstm_only': LSTMOnlyModel,
+        'cnn_to_nested_rnn': CNNToNestedRNNModel,
+        'cnn_to_nested_lstm': CNNToNestedLSTMModel,
+        'cnn_to_nested_transformer': CNNToNestedTransformerModel,
+        'cnn_linear_compr_to_rf': CNNLinearComprToRFModel,
+    }
+
     parser = argparse.ArgumentParser()
     parser.add_argument('-dp', '--data-path', default='/fastdata/ardsdetection', help='Path to ARDS detection dataset')
     parser.add_argument('-en', '--experiment-num', type=int, default=1)
     parser.add_argument('-c', '--cohort-file', default='cohort-description.csv')
-    parser.add_argument('-n', '--network', choices=[
-        'cnn_lstm',
-        'cnn_linear',
-        'cnn_regressor',
-        'metadata_only',
-        'autoencoder',
-        'cnn_transformer',
-        'siamese_cnn_linear',
-        'siamese_cnn_lstm',
-        'siamese_cnn_transformer',
-        'siamese_pretrained',
-        'cnn_lstm_double_linear',
-        'cnn_double_linear',
-        'cnn_single_breath_linear',
-        'lstm_only',
-        'cnn_to_nested_lstm',
-        'cnn_to_nested_transformer',
-        'cnn_to_nested_rnn',
-    ], default='cnn_lstm')
+    parser.add_argument('-n', '--network', choices=list(network_map.keys()), default='cnn_lstm')
     parser.add_argument('-e', '--epochs', type=int, default=5)
     parser.add_argument('-p', '--train-from-pickle')
     parser.add_argument('--train-to-pickle')
@@ -911,26 +938,6 @@ def main():
 
     if args.fl_alpha > 1 or args.fl_alpha < 0:
         raise Exception('Focal loss alpha must be between 0 and 1')
-
-    network_map = {
-        'cnn_lstm': CNNLSTMModel,
-        'cnn_linear': CNNLinearModel,
-        'cnn_regressor': CNNRegressorModel,
-        'metadata_only': MetadataOnlyModel,
-        'autoencoder': AutoencoderModel,
-        'cnn_transformer': CNNTransformerModel,
-        'siamese_cnn_linear': SiameseCNNLinearModel,
-        'siamese_cnn_lstm': SiameseCNNLSTMModel,
-        'siamese_cnn_transformer': SiameseCNNTransformerModel,
-        'siamese_pretrained': SiamesePretrainedModel,
-        'cnn_lstm_double_linear': CNNLSTMDoubleLinearModel,
-        'cnn_double_linear': CNNDoubleLinearModel,
-        'cnn_single_breath_linear': CNNSingleBreathLinearModel,
-        'lstm_only': LSTMOnlyModel,
-        'cnn_to_nested_rnn': CNNToNestedRNNModel,
-        'cnn_to_nested_lstm': CNNToNestedLSTMModel,
-        'cnn_to_nested_transformer': CNNToNestedTransformerModel,
-    }
     cls = network_map[args.network](args)
     cls.train_and_test()
 
