@@ -624,7 +624,7 @@ class CNNLSTMModel(WithTimeLayerClassifierMixin, BaseTraining, PatientClassifier
                     outputs, hx_cx = model(inputs, metadata, hx_cx)
                     hx_cx = (hx_cx[0].detach(), hx_cx[1].detach())
                     last_pt = cur_pt
-                self.handle_train_optimization(optimizer, outputs, target, inputs, fold_num, len(train_loader), idx, epoch_num)
+                self.handle_train_optimization(optimizer, outputs, target, inputs, fold_num, len(train_loader), idx, epoch_num, model)
 
                 if self.args.debug:
                     break
