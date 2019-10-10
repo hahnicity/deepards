@@ -95,16 +95,15 @@ class CNNToNestedTransformerNetwork(nn.Module):
         self.is_cuda = is_cuda
 
     def forward(self, x, metadata):
-        # input should be in shape: (n_windows, n_breaths in window, chans, 224)
-        #
-        # For now only supports patient batch size of 1
-        n_patients = x.shape[0]
-        if n_patients > 1:
-            raise Exception('currently this network only supports patient batch sizes of 1')
+        if len(x.shape) == 5:
+            n_patients = x.shape[0]
+        elif len(x.shape) == 4:
+            n_patients = 1
+
+        if n_patients == 1 and len(x.shape) == 5:
+            x = x.squeeze(0)
 
         # squeeze patient batch dimension out
-        if len(x.shape) == 5:
-            x = x.squeeze(0)
         # allocate memory so we dont have to dynamically allocate with cat. However this bit
         # doesnt seem to be the root of our memory issues. Altho it does help make the code a
         # bit cleaner
@@ -120,7 +119,9 @@ class CNNToNestedTransformerNetwork(nn.Module):
         # try with mean compression of all windows
         #outputs = outputs.mean(dim=1).unsqueeze(0)
         # try with median compression of all windows
-        outputs = outputs.median(dim=1)[0].unsqueeze(0)
+        outputs = outputs.median(dim=1)[0]
+        if n_patients == 1:
+            outputs = outputs.unsqueeze(0)
         outputs = self.transformer(outputs)
         outputs = self.linear_final(outputs)
         return outputs
