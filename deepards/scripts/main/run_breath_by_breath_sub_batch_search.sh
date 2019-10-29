@@ -12,7 +12,7 @@ do
                 do
                     for nb in 50 100 150 200 300 400 500 600
                     do
-                        ts python train_ards_detector.py --train-to-pickle /fastdata/deepards/padded_breath_by_breath-nb${nb}-kfold.pkl -dt padded_breath_by_breath -n cnn_lstm -nb ${nb} --cuda -rip ${rip} -b ${bs} -e 15 --no-print-progress --kfolds 5 -dp /fastdata/ardsdetection --loader-threads 1 -exp breath_by_breath_sub_batch_search_main_experiment
+                        ts python train_ards_detector.py --train-from-pickle /fastdata/deepards/padded_breath_by_breath-nb${nb}-kfold.pkl -dt padded_breath_by_breath -n cnn_linear_compr_to_rf -nb ${nb} --cuda -rip ${rip} -b ${bs} -e 15 --no-print-progress --kfolds 5 -dp /fastdata/ardsdetection --loader-threads 1 -exp breath_by_breath_sub_batch_search_main_experiment
                     done
                 done
             done
