@@ -16,6 +16,7 @@ from deepards.loss import ConfidencePenaltyLoss, FocalLoss, VacillatingLoss
 from deepards.metrics import DeepARDSResults, Reporting
 from deepards.models.autoencoder_cnn import AutoencoderCNN
 from deepards.models.autoencoder_network import AutoencoderNetwork
+from deepards.models.cnn_to_nested_layer import CNNToNestedLSTMNetwork, CNNToNestedRNNNetwork, CNNToNestedTransformerNetwork
 from deepards.models.cnn_transformer import CNNTransformerNetwork
 from deepards.models.densenet import densenet18, densenet121, densenet161, densenet169, densenet201
 from deepards.models.lstm_only import LSTMOnlyNetwork
@@ -24,7 +25,7 @@ from deepards.models.senet import senet18, senet154, se_resnet18, se_resnet50, s
 from deepards.models.siamese import SiameseARDSClassifier, SiameseCNNLinearNetwork, SiameseCNNLSTMNetwork, SiameseCNNTransformerNetwork
 from deepards.models.torch_cnn_lstm_combo import CNNLSTMDoubleLinearNetwork, CNNLSTMNetwork
 from deepards.models.torch_cnn_bm_regressor import CNNRegressor
-from deepards.models.torch_cnn_linear_network import CNNDoubleLinearNetwork, CNNLinearNetwork, CNNSingleBreathLinearNetwork
+from deepards.models.torch_cnn_linear_network import CNNDoubleLinearNetwork, CNNLinearComprToRF, CNNLinearNetwork, CNNSingleBreathLinearNetwork
 from deepards.models.torch_metadata_only_network import MetadataOnlyNetwork
 from deepards.models.unet import UNet
 from deepards.models.vgg import vgg11_bn, vgg13_bn
@@ -99,6 +100,7 @@ class BaseTraining(object):
             valpha=self.args.valpha,
             confidence_beta=self.args.conf_beta,
             dataset_type=self.args.dataset_type,
+            grad_clip_val=self.args.clip_val,
         )
         print('Run start time: {}'.format(self.start_time))
 
@@ -107,27 +109,34 @@ class BaseTraining(object):
             print("\nrun epoch {}\n".format(epoch_num))
             for idx, (obs_idx, seq, metadata, target) in enumerate(train_loader):
                 model.zero_grad()
-                obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)
+                if not self.args.batch_size == 1:
+                    obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)
                 if seq.shape[0] == 0:
                     continue
                 target = self.cuda_wrapper(target.float())
                 inputs = self.cuda_wrapper(Variable(seq.float()))
                 metadata = self.cuda_wrapper(Variable(metadata.float()))
                 outputs = model(inputs, metadata)
-                self.handle_train_optimization(optimizer, outputs, target, inputs, fold_num, len(train_loader), idx)
+                self.handle_train_optimization(optimizer, outputs, target, inputs, fold_num, len(train_loader), idx, epoch_num, model)
+                if self.args.stop_on_loss and self.results.get_meter('loss', fold_num).peek() > self.args.stop_thresh and epoch_num > self.args.stop_after_epoch:
+                    print('stop on loss')
+                    import IPython; IPython.embed()
                 if self.args.debug:
                     break
 
-    def handle_train_optimization(self, optimizer, outputs, target, inputs, fold_num, total_batches, batch_idx):
+    def handle_train_optimization(self, optimizer, outputs, target, inputs, fold_num, total_batches, batch_idx, epoch_num, model):
         loss = self.calc_loss(outputs, target, inputs)
         loss.backward()
+        # Can also put grad clip here if you wanted too. Example:
+        # https://stackoverflow.com/questions/54716377/how-to-do-gradient-clipping-in-pytorch
         optimizer.step()
         optimizer.zero_grad()
+        self.results.update_meter('loss_epoch_{}'.format(epoch_num), fold_num, loss)
         self.results.update_loss(fold_num, loss.data)
 
         # print individual loss and total loss
         if not self.args.no_print_progress:
-            print("batch num: {}/{}, avg loss: {}\r".format(batch_idx, total_batches, self.results.get_meter('loss', fold_num), end=""))
+            print("batch num: {}/{}, avg loss: {}\r".format(batch_idx, total_batches, self.results.get_meter('loss_epoch_{}'.format(epoch_num), fold_num), end=""))
 
     def get_base_datasets(self):
         kfold_num = None if self.args.kfolds is None else 0
@@ -215,8 +224,8 @@ class BaseTraining(object):
     def get_base_network(self):
         base_network = self.base_networks[self.args.base_network]
 
-        if self.args.load_pretrained:
-            saved_model = torch.load(self.args.load_pretrained)
+        if self.args.load_base_network:
+            saved_model = torch.load(self.args.load_base_network)
             if isinstance(saved_model, torch.nn.DataParallel):
                 saved_model = saved_model.module
             base_network = saved_model.breath_block
@@ -231,13 +240,18 @@ class BaseTraining(object):
             base_network = base_network(1)
         else:
             base_network = base_network()
+
+        if self.args.freeze_base_network:
+            for param in base_network.parameters():
+                param.requires_grad = False
         return base_network
 
     def get_optimizer(self, model):
+        parameters = filter(lambda p: p.requires_grad, model.parameters())
         if self.args.optimizer == 'adam':
-            optimizer = torch.optim.Adam(model.parameters(), lr=self.args.learning_rate)
+            optimizer = torch.optim.Adam(parameters, lr=self.args.learning_rate)
         elif self.args.optimizer == 'sgd':
-            optimizer = torch.optim.SGD(model.parameters(), lr=self.args.learning_rate, momentum=0.9, weight_decay=self.args.weight_decay, nesterov=True)
+            optimizer = torch.optim.SGD(parameters, lr=self.args.learning_rate, momentum=0.9, weight_decay=self.args.weight_decay, nesterov=True)
         return optimizer
 
     def run_test_epoch(self, epoch_num, model, test_dataset, test_loader, fold_num):
@@ -245,7 +259,8 @@ class BaseTraining(object):
         self.pred_idx = []
         with torch.no_grad():
             for idx, (obs_idx, seq, metadata, target) in enumerate(test_loader):
-                obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)
+                if not self.args.batch_size == 1:
+                    obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)
                 if seq.shape[0] == 0:
                     continue
                 inputs = self.cuda_wrapper(Variable(seq.float()))
@@ -262,8 +277,16 @@ class BaseTraining(object):
         self.record_final_epoch_testing_results(fold_num, epoch_num, test_dataset)
 
     def get_model(self):
-        base_network = self.get_base_network()
-        return self.model_cuda_wrapper(self.get_network(base_network))
+        if self.args.load_checkpoint:
+            model = torch.load(self.args.load_checkpoint)
+        else:
+            base_network = self.get_base_network()
+            model = self.model_cuda_wrapper(self.get_network(base_network))
+
+        for p in model.parameters():
+            if p.requires_grad and self.args.clip_grad:
+                p.register_hook(lambda x: torch.clamp(x, -self.args.clip_val, self.args.clip_val))
+        return model
 
     def transform_obs_idx(self, obs_idx, outputs):
         return obs_idx
@@ -453,6 +476,109 @@ class RegressorMixin(object):
         self.results.save_all()
 
 
+class NestedMixin(object):
+    def set_loss_criterion(self):
+        self.criterion = torch.nn.BCEWithLogitsLoss()
+
+    def _process_test_batch_results(self, outputs, target, inputs, fold_num):
+        batch_preds = outputs.argmax(dim=-1).cpu().view(-1)
+        target = target.argmax(dim=1).cpu().reshape((outputs.shape[0], 1)).repeat((1, outputs.shape[1])).view(-1)
+        # XXX find a way to make this function work later
+        #self.record_testing_results(target, batch_preds, fold_num)
+        return batch_preds.tolist()
+
+    def get_base_datasets(self):
+        kfold_num = None if self.args.kfolds is None else 0
+
+        # for holdout and kfold
+        if not self.args.train_from_pickle:
+            train_dataset = ARDSRawDataset(
+                self.args.data_path,
+                self.args.experiment_num,
+                self.args.cohort_file,
+                self.args.n_sub_batches,
+                dataset_type=self.args.dataset_type,
+                to_pickle=self.args.train_to_pickle,
+                kfold_num=kfold_num,
+                total_kfolds=self.args.kfolds,
+                unpadded_downsample_factor=self.args.downsample_factor,
+                drop_frame_if_frac_missing=self.args.no_drop_frames,
+                whole_patient_super_batch=True,
+            )
+        else:
+            train_dataset = ARDSRawDataset.from_pickle(self.args.train_from_pickle, self.args.oversample)
+
+        self.n_sub_batches = train_dataset.n_sub_batches
+        if not self.args.test_from_pickle and self.args.kfolds is not None:
+            test_dataset = ARDSRawDataset.make_test_dataset_if_kfold(train_dataset)
+        elif self.args.test_from_pickle:
+            test_dataset = ARDSRawDataset.from_pickle(self.args.test_from_pickle)
+        else:  # holdout, no pickle, no kfold
+            test_dataset = ARDSRawDataset(
+                self.args.data_path,
+                self.args.experiment_num,
+                self.args.cohort_file,
+                self.args.n_sub_batches,
+                dataset_type=self.args.dataset_type,
+                to_pickle=self.args.test_to_pickle,
+                train=False,
+                unpadded_downsample_factor=self.args.downsample_factor,
+                drop_frame_if_frac_missing=self.args.no_drop_frames,
+                whole_patient_super_batch=True,
+            )
+
+        return train_dataset, test_dataset
+
+    def calc_loss(self, outputs, target, inputs):
+        # instead of all_breaths / last_breath this is more like all_windows/last_window
+        if self.args.loss_calc == 'all_breaths':
+            return self.criterion(outputs, target.repeat((1, outputs.shape[1], 1)))
+        elif self.args.loss_calc == 'last_breath':
+            return self.criterion(outputs[:, -1], target)
+
+    def record_final_epoch_testing_results(self, fold_num, epoch_num, test_dataset):
+        # XXX add last_breath / all_breaths split
+        self.preds = pd.Series(self.preds, index=self.pred_idx)
+        self.preds = self.preds.sort_index()
+        y_test = test_dataset.get_ground_truth_df()
+        self.results.perform_patient_predictions(y_test, self.preds, fold_num, epoch_num)
+
+    def transform_obs_idx(self, obs_idx, outputs):
+        # XXX add last_breath / all_breaths split
+        return obs_idx.reshape((outputs.shape[0], 1)).repeat((1, outputs.shape[1])).view(-1)
+
+    def perform_post_modeling_actions(self):
+        self.results.aggregate_classification_results()
+        self.results.save_all()
+
+
+class CNNToNestedRNNModel(NestedMixin, BaseTraining):
+    def __init__(self, args):
+        args.batch_size = 1
+        super(CNNToNestedRNNModel, self).__init__(args)
+
+    def get_network(self, base_network):
+        return CNNToNestedRNNNetwork(base_network, self.args.n_sub_batches, self.args.cuda)
+
+
+class CNNToNestedLSTMModel(NestedMixin, BaseTraining):
+    def __init__(self, args):
+        args.batch_size = 1
+        super(CNNToNestedLSTMModel, self).__init__(args)
+
+    def get_network(self, base_network):
+        return CNNToNestedLSTMNetwork(base_network, self.args.n_sub_batches, self.args.cuda)
+
+
+class CNNToNestedTransformerModel(NestedMixin, BaseTraining):
+    def __init__(self, args):
+        args.batch_size = 1
+        super(CNNToNestedTransformerModel, self).__init__(args)
+
+    def get_network(self, base_network):
+        return CNNToNestedTransformerNetwork(base_network, self.args.n_sub_batches, self.args.cuda, self.args.transformer_blocks)
+
+
 class CNNTransformerModel(WithTimeLayerClassifierMixin, BaseTraining, PatientClassifierMixin):
     def __init__(self, args):
         super(CNNTransformerModel, self).__init__(args)
@@ -498,7 +624,7 @@ class CNNLSTMModel(WithTimeLayerClassifierMixin, BaseTraining, PatientClassifier
                     outputs, hx_cx = model(inputs, metadata, hx_cx)
                     hx_cx = (hx_cx[0].detach(), hx_cx[1].detach())
                     last_pt = cur_pt
-                self.handle_train_optimization(optimizer, outputs, target, inputs, fold_num, len(train_loader), idx)
+                self.handle_train_optimization(optimizer, outputs, target, inputs, fold_num, len(train_loader), idx, epoch_num, model)
 
                 if self.args.debug:
                     break
@@ -594,6 +720,26 @@ class CNNSingleBreathLinearModel(WithTimeLayerClassifierMixin, BaseTraining, Pat
 
     def get_network(self, base_network):
         return CNNSingleBreathLinearNetwork(base_network)
+
+
+class CNNLinearComprToRFModel(WithTimeLayerClassifierMixin, BaseTraining, PatientClassifierMixin):
+    def __init__(self, args):
+        super(CNNLinearComprToRFModel, self).__init__(args)
+
+    def calc_loss(self, outputs, target, inputs):
+        return self.criterion(outputs, target)
+
+    def _process_test_batch_results(self, outputs, target, inputs, fold_num):
+        batch_preds = outputs.argmax(dim=-1).cpu().view(-1)
+        target = target.argmax(dim=1).cpu().reshape((outputs.shape[0], 1)).view(-1)
+        self.record_testing_results(target, batch_preds, fold_num)
+        return batch_preds.tolist()
+
+    def transform_obs_idx(self, obs_idx, outputs):
+        return obs_idx
+
+    def get_network(self, base_network):
+        return CNNLinearComprToRF(base_network)
 
 
 class MetadataOnlyModel(BaseTraining, PatientClassifierMixin):
@@ -695,26 +841,32 @@ class SiamesePretrainedModel(WithTimeLayerClassifierMixin, BaseTraining, Patient
 
 
 def main():
+    network_map = {
+        'cnn_lstm': CNNLSTMModel,
+        'cnn_linear': CNNLinearModel,
+        'cnn_regressor': CNNRegressorModel,
+        'metadata_only': MetadataOnlyModel,
+        'autoencoder': AutoencoderModel,
+        'cnn_transformer': CNNTransformerModel,
+        'siamese_cnn_linear': SiameseCNNLinearModel,
+        'siamese_cnn_lstm': SiameseCNNLSTMModel,
+        'siamese_cnn_transformer': SiameseCNNTransformerModel,
+        'siamese_pretrained': SiamesePretrainedModel,
+        'cnn_lstm_double_linear': CNNLSTMDoubleLinearModel,
+        'cnn_double_linear': CNNDoubleLinearModel,
+        'cnn_single_breath_linear': CNNSingleBreathLinearModel,
+        'lstm_only': LSTMOnlyModel,
+        'cnn_to_nested_rnn': CNNToNestedRNNModel,
+        'cnn_to_nested_lstm': CNNToNestedLSTMModel,
+        'cnn_to_nested_transformer': CNNToNestedTransformerModel,
+        'cnn_linear_compr_to_rf': CNNLinearComprToRFModel,
+    }
+
     parser = argparse.ArgumentParser()
     parser.add_argument('-dp', '--data-path', default='/fastdata/ardsdetection', help='Path to ARDS detection dataset')
     parser.add_argument('-en', '--experiment-num', type=int, default=1)
     parser.add_argument('-c', '--cohort-file', default='cohort-description.csv')
-    parser.add_argument('-n', '--network', choices=[
-        'cnn_lstm',
-        'cnn_linear',
-        'cnn_regressor',
-        'metadata_only',
-        'autoencoder',
-        'cnn_transformer',
-        'siamese_cnn_linear',
-        'siamese_cnn_lstm',
-        'siamese_cnn_transformer',
-        'siamese_pretrained',
-        'cnn_lstm_double_linear',
-        'cnn_double_linear',
-        'cnn_single_breath_linear',
-        'lstm_only',
-    ], default='cnn_lstm')
+    parser.add_argument('-n', '--network', choices=list(network_map.keys()), default='cnn_lstm')
     parser.add_argument('-e', '--epochs', type=int, default=5)
     parser.add_argument('-p', '--train-from-pickle')
     parser.add_argument('--train-to-pickle')
@@ -753,7 +905,7 @@ def main():
     parser.add_argument('-lr', '--learning-rate', default=0.001, type=float)
     parser.add_argument('--loader-threads', type=int, default=0, help='specify how many threads we should use to load data. Sometimes the threads fail to shutdown correctly though and this can cause memory errors. If this happens a restart works well')
     parser.add_argument('--save-model', help='save the model to a specific file')
-    parser.add_argument('--load-pretrained', help='load breath block from a saved model')
+    parser.add_argument('--load-base-network', help='load base network only from a saved model')
     parser.add_argument('-rdc','--resnet-double-conv', action='store_true')
     parser.add_argument('--bm-to-linear', action='store_true')
     parser.add_argument('-exp', '--experiment-name')
@@ -771,6 +923,13 @@ def main():
     parser.add_argument('--fl-alpha', type=float, default=.9)
     parser.add_argument('--oversample', action='store_true')
     parser.add_argument('--reshuffle-oversample-per-epoch', action='store_true')
+    parser.add_argument('--load-checkpoint')
+    parser.add_argument('--freeze-base-network', action='store_true')
+    parser.add_argument('--stop-on-loss', action='store_true')
+    parser.add_argument('--stop-thresh', type=float, default=1.5)
+    parser.add_argument('--stop-after-epoch', type=int, default=1)
+    parser.add_argument('--clip-grad', action='store_true')
+    parser.add_argument('--clip-val', type=float, default=5)
     args = parser.parse_args()
 
     # convenience code
@@ -779,23 +938,6 @@ def main():
 
     if args.fl_alpha > 1 or args.fl_alpha < 0:
         raise Exception('Focal loss alpha must be between 0 and 1')
-
-    network_map = {
-        'cnn_lstm': CNNLSTMModel,
-        'cnn_linear': CNNLinearModel,
-        'cnn_regressor': CNNRegressorModel,
-        'metadata_only': MetadataOnlyModel,
-        'autoencoder': AutoencoderModel,
-        'cnn_transformer': CNNTransformerModel,
-        'siamese_cnn_linear': SiameseCNNLinearModel,
-        'siamese_cnn_lstm': SiameseCNNLSTMModel,
-        'siamese_cnn_transformer': SiameseCNNTransformerModel,
-        'siamese_pretrained': SiamesePretrainedModel,
-        'cnn_lstm_double_linear': CNNLSTMDoubleLinearModel,
-        'cnn_double_linear': CNNDoubleLinearModel,
-        'cnn_single_breath_linear': CNNSingleBreathLinearModel,
-        'lstm_only': LSTMOnlyModel,
-    }
     cls = network_map[args.network](args)
     cls.train_and_test()
 

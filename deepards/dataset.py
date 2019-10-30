@@ -34,7 +34,8 @@ class ARDSRawDataset(Dataset):
                  total_kfolds=None,
                  oversample_minority=False,
                  unpadded_downsample_factor=4.0,
-                 drop_frame_if_frac_missing=True):
+                 drop_frame_if_frac_missing=True,
+                 whole_patient_super_batch=False):
         """
         Dataset to generate sequences of data for ARDS Detection
         """
@@ -50,6 +51,9 @@ class ARDSRawDataset(Dataset):
         self.drop_frame_if_frac_missing = drop_frame_if_frac_missing
         self.cohort_file = cohort_file
         self.oversample = oversample_minority
+        self.whole_patient_super_batch = whole_patient_super_batch
+        if self.oversample and self.whole_patient_super_batch:
+            raise Exception('currently oversampling with whole patient super batch is not supported')
 
         if len(all_sequences) > 0 and kfold_num is not None:
             self.set_kfold_indexes_for_fold(kfold_num)
@@ -151,19 +155,16 @@ class ARDSRawDataset(Dataset):
             indices = [range(len(self.all_sequences))]
 
         if 'padded_breath_by_breath' in self.dataset_type:
-            self.scaling_factors = {
-                kfold_num if is_kfolds else None: self._get_scaling_factors_for_indices(idxs, True)
-                for kfold_num, idxs in enumerate(indices)
-            }
-
+            is_padded = True
         elif 'unpadded' in self.dataset_type:
-            self.scaling_factors = {
-                kfold_num if is_kfolds else None: self._get_scaling_factors_for_indices(idxs, True)
-                for kfold_num, idxs in enumerate(indices)
-            }
-
+            is_padded = False
         else:
             raise Exception('unsupported dataset type {} for scaling'.format(self.dataset_type))
+
+        self.scaling_factors = {
+            kfold_num if is_kfolds else None: self._get_scaling_factors_for_indices(idxs, is_padded)
+            for kfold_num, idxs in enumerate(indices)
+        }
 
     @classmethod
     def make_test_dataset_if_kfold(self, train_dataset):
@@ -217,6 +218,7 @@ class ARDSRawDataset(Dataset):
         std_sum = 0
         mean_sum = 0
         obs_count = 0
+
         for idx in indices:
             obs = self.all_sequences[idx][1]
             if is_padded:  # clear off 0's used for padding
@@ -380,12 +382,19 @@ class ARDSRawDataset(Dataset):
         breaths we want clustered together
         """
         last_patient = None
+        super_batch_tmp_arr = []
+
         for fidx, filename in enumerate(self.raw_files):
             gen = read_processed_file(filename, self.processed_files[fidx])
             patient_id = self._get_patient_id_from_file(filename)
+
             if patient_id != last_patient:
                 batch_arr = []
                 seq_vent_bns = []
+                if self.whole_patient_super_batch and super_batch_tmp_arr != []:
+                    self.all_sequences.append([last_patient, np.array(super_batch_tmp_arr), target])
+                    super_batch_tmp_arr = []
+
             last_patient = patient_id
             target = target_func(patient_id)
             start_time = self._get_patient_start_time(patient_id)
@@ -401,8 +410,12 @@ class ARDSRawDataset(Dataset):
                     breath_time = pd.to_datetime(breath['abs_bs'], format='%Y-%m-%d %H-%M-%S.%f')
                 except:
                     breath_time = pd.to_datetime(breath['abs_bs'], format='%Y-%m-%d %H:%M:%S.%f')
-                if breath_time < start_time or breath_time > start_time + pd.Timedelta(hours=24):
+
+                if breath_time < start_time:
                     continue
+                elif breath_time > start_time + pd.Timedelta(hours=24):
+                    break
+
                 flow = np.array(breath['flow'])
                 b_seq = process_breath_func(flow)
                 batch_arr.append(b_seq)
@@ -413,7 +426,65 @@ class ARDSRawDataset(Dataset):
                         batch_arr = []
                         seq_vent_bns = []
                         continue
-                    self.all_sequences.append([patient_id, np.array(batch_arr).reshape((self.n_sub_batches, 1, self.seq_len)), target])
+                    breath_window = np.array(batch_arr).reshape((self.n_sub_batches, 1, self.seq_len))
+                    if self.whole_patient_super_batch:
+                        super_batch_tmp_arr.append(breath_window)
+                    else:
+                        self.all_sequences.append([patient_id, breath_window, target])
+                    batch_arr = []
+                    seq_vent_bns = []
+
+    def get_unpadded_sequences_dataset(self, processing_func, target_func):
+        last_patient = None
+        super_batch_tmp_arr = []
+        for fidx, filename in enumerate(self.raw_files):
+            gen = read_processed_file(filename, self.processed_files[fidx])
+            patient_id = self._get_patient_id_from_file(filename)
+
+            if patient_id != last_patient:
+                batch_arr = []
+                breath_arr = []
+                seq_vent_bns = []
+                if self.whole_patient_super_batch and super_batch_tmp_arr != []:
+                    self.all_sequences.append([last_patient, np.array(super_batch_tmp_arr), target])
+                    super_batch_tmp_arr = []
+
+            last_patient = patient_id
+            target = target_func(patient_id)
+            start_time = self._get_patient_start_time(patient_id)
+
+            for bidx, breath in enumerate(gen):
+                # cutoff breaths if they have too few points. It is unlikely ML
+                # will ever learn anything useful from them. 21 is chosen because the mean
+                # number of unpadded obs we have in our train set is 138.78 and the std
+                # is 38.23. So 21 is < mu - 3*std and is divisible with 7.
+                if len(breath['flow']) < 21:
+                    continue
+                try:
+                    breath_time = pd.to_datetime(breath['abs_bs'], format='%Y-%m-%d %H-%M-%S.%f')
+                except:
+                    breath_time = pd.to_datetime(breath['abs_bs'], format='%Y-%m-%d %H:%M:%S.%f')
+
+                if breath_time < start_time:
+                    continue
+                elif breath_time > start_time + pd.Timedelta(hours=24):
+                    break
+
+                seq_vent_bns.append(breath['vent_bn'])
+                batch_arr, breath_arr = processing_func(breath['flow'], breath_arr, batch_arr)
+
+                if len(batch_arr) == self.n_sub_batches:
+                    if self._should_we_drop_frame(seq_vent_bns, patient_id):
+                        # drop breath arr to be safe
+                        breath_arr = []
+                        batch_arr = []
+                        seq_vent_bns = []
+                        continue
+                    breath_window = np.array(batch_arr).reshape((self.n_sub_batches, 1, self.seq_len))
+                    if self.whole_patient_super_batch:
+                        super_batch_tmp_arr.append(breath_window)
+                    else:
+                        self.all_sequences.append([patient_id, breath_window, target])
                     batch_arr = []
                     seq_vent_bns = []
 
@@ -467,46 +538,6 @@ class ARDSRawDataset(Dataset):
             return new_arr
         else:
             return flow[:self.seq_len]
-
-    def get_unpadded_sequences_dataset(self, processing_func, target_func):
-        last_patient = None
-        for fidx, filename in enumerate(self.raw_files):
-            gen = read_processed_file(filename, self.processed_files[fidx])
-            patient_id = self._get_patient_id_from_file(filename)
-            if patient_id != last_patient:
-                batch_arr = []
-                breath_arr = []
-                seq_vent_bns = []
-            last_patient = patient_id
-            target = target_func(patient_id)
-            start_time = self._get_patient_start_time(patient_id)
-
-            for bidx, breath in enumerate(gen):
-                # cutoff breaths if they have too few points. It is unlikely ML
-                # will ever learn anything useful from them. 21 is chosen because the mean
-                # number of unpadded obs we have in our train set is 138.78 and the std
-                # is 38.23. So 21 is < mu - 3*std and is divisible with 7.
-                if len(breath['flow']) < 21:
-                    continue
-                try:
-                    breath_time = pd.to_datetime(breath['abs_bs'], format='%Y-%m-%d %H-%M-%S.%f')
-                except:
-                    breath_time = pd.to_datetime(breath['abs_bs'], format='%Y-%m-%d %H:%M:%S.%f')
-                if breath_time < start_time or breath_time > start_time + pd.Timedelta(hours=24):
-                    continue
-                seq_vent_bns.append(breath['vent_bn'])
-                batch_arr, breath_arr = processing_func(breath['flow'], breath_arr, batch_arr)
-
-                if len(batch_arr) == self.n_sub_batches:
-                    if self._should_we_drop_frame(seq_vent_bns, patient_id):
-                        # drop breath arr to be safe
-                        breath_arr = []
-                        batch_arr = []
-                        seq_vent_bns = []
-                        continue
-                    self.all_sequences.append([patient_id, np.array(batch_arr).reshape((self.n_sub_batches, 1, self.seq_len)), target])
-                    batch_arr = []
-                    seq_vent_bns = []
 
     def _regular_unpadded_processing(self, flow, breath_arr, batch_arr):
         if (len(flow) + len(breath_arr)) < self.seq_len:
