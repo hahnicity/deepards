@@ -78,7 +78,10 @@ if __name__ == "__main__":
     for file_ in main_experiments:
         exp = torch.load(file_)
         start_time = file_.split('_')[-1][:-4]
-        val = exp[args.split_by]
+        try:
+            val = exp[args.split_by]
+        except KeyError:
+            raise KeyError('Unable to split by {}. Possible choices: {}'.format(args.split_by, list(exp.keys())))
         if val in split_dict:
             split_dict[val].append(start_time)
         else:
