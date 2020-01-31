@@ -96,11 +96,14 @@ can teach the network to recognize breaths before it is applied to the ARDS data
 
 ### Dataset
 First we need a dataset of breaths and corresponding breath metadata. We can set this up by using the `create_separate_breath_meta_dataset.py` script. We should ensure the
-script trains on a dataset of patients that do not have relation to the current ARDS
+script trains on a dataset of patients that **do not** have relation to the current ARDS
 cohort. Of course evaluating the performance of the regressor on ARDS dataset patients
 is OK though. This script operates by K-means clustering and then randomly picks a number
 of breaths from the cluster. This helps to ensure that we have a heterogeneous sampling
 of breaths to draw from so that we are not overtraining our regressor on a single breath type. The script will ensure that a given number of breaths are chosen from each cluster.
+
+First ensure the path to patient directories has no relation to the current ARDS dataset.
+
 You can create the dataset:
 
     python create_separate_breath_meta_dataset.py -dp /path/to/patient/dirs --clusters 75 -bp 100

@@ -179,6 +179,11 @@ class ARDSRawDataset(Dataset):
         if not isinstance(dataset, ARDSRawDataset):
             raise ValueError('The pickle file you have specified is out-of-date. Please re-process your dataset and save the new pickled dataset.')
         self.oversample = oversample_minority
+        # paranoia
+        try:
+            self.scaling_factors
+        except AttributeError:
+            self.derive_scaling_factors()
         return dataset
 
     def set_kfold_indexes_for_fold(self, kfold_num):
