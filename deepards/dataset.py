@@ -27,7 +27,6 @@ class ARDSRawDataset(Dataset):
                  cohort_file,
                  n_sub_batches,
                  dataset_type,
-                 all_sequences=[],
                  to_pickle=None,
                  train=True,
                  kfold_num=None,
@@ -39,14 +38,13 @@ class ARDSRawDataset(Dataset):
         """
         Dataset to generate sequences of data for ARDS Detection
         """
-        self.all_sequences = all_sequences
         self.train = train
         self.kfold_num = kfold_num
         self.dataset_type = dataset_type
         self.total_kfolds = total_kfolds
         self.vent_bn_frac_missing = .5
         self.frames_dropped = dict()
-        self.n_sub_batches = n_sub_batches if all_sequences == [] else all_sequences[0][1].shape[0]
+        self.n_sub_batches = n_sub_batches
         self.unpadded_downsample_factor = unpadded_downsample_factor
         self.drop_frame_if_frac_missing = drop_frame_if_frac_missing
         self.cohort_file = cohort_file
@@ -54,13 +52,6 @@ class ARDSRawDataset(Dataset):
         self.whole_patient_super_batch = whole_patient_super_batch
         if self.oversample and self.whole_patient_super_batch:
             raise Exception('currently oversampling with whole patient super batch is not supported')
-
-        if len(all_sequences) > 0 and kfold_num is not None:
-            self.set_kfold_indexes_for_fold(kfold_num)
-            # XXX should we derive scaling factors if they dont exist?
-            return
-        elif len(all_sequences) > 0:
-            return
 
         self.cohort = pd.read_csv(cohort_file)
         if kfold_num is None:
@@ -188,6 +179,11 @@ class ARDSRawDataset(Dataset):
         if not isinstance(dataset, ARDSRawDataset):
             raise ValueError('The pickle file you have specified is out-of-date. Please re-process your dataset and save the new pickled dataset.')
         self.oversample = oversample_minority
+        # paranoia
+        try:
+            self.scaling_factors
+        except AttributeError:
+            self.derive_scaling_factors()
         return dataset
 
     def set_kfold_indexes_for_fold(self, kfold_num):

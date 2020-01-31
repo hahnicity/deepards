@@ -6,7 +6,6 @@ from warnings import warn
 
 import numpy as np
 import pandas as pd
-from sklearn.cluster import KMeans
 from ventmap.breath_meta import get_file_breath_meta, get_production_breath_meta, META_HEADER, write_breath_meta
 from ventmap.raw_utils import process_breath_file, read_processed_file
 
