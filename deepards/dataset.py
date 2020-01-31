@@ -182,9 +182,9 @@ class ARDSRawDataset(Dataset):
         self.oversample = oversample_minority
         # paranoia
         try:
-            self.scaling_factors
+            dataset.scaling_factors
         except AttributeError:
-            self.derive_scaling_factors()
+            dataset.derive_scaling_factors()
         return dataset
 
     def set_kfold_indexes_for_fold(self, kfold_num):
