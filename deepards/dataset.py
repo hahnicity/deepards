@@ -40,6 +40,7 @@ class ARDSRawDataset(Dataset):
         """
         self.train = train
         self.kfold_num = kfold_num
+        self.all_sequences = []
         self.dataset_type = dataset_type
         self.total_kfolds = total_kfolds
         self.vent_bn_frac_missing = .5
