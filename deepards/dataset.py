@@ -27,6 +27,7 @@ class ARDSRawDataset(Dataset):
                  cohort_file,
                  n_sub_batches,
                  dataset_type,
+                 bm_features=None,
                  to_pickle=None,
                  train=True,
                  kfold_num=None,
@@ -112,6 +113,8 @@ class ARDSRawDataset(Dataset):
             self._get_breath_by_breath_with_flow_time_features(self._pad_breath, flow_time_features)
         elif dataset_type == 'padded_breath_by_breath_with_experimental_bm_target':
             self._get_breath_by_breath_with_breath_meta_target(self._pad_breath, ['iTime', 'eTime', 'inst_RR', 'mean_flow_from_pef', 'I:E ratio', 'tve:tvi ratio', 'dyn_compliance'])
+        elif dataset_type == 'padded_breath_by_breath_with_custom_bm_target':
+            self._get_breath_by_breath_with_breath_meta_target(self._pad_breath, bm_features)
         else:
             raise Exception('Unknown dataset type: {}'.format(dataset_type))
 
