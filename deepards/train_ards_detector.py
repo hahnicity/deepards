@@ -902,6 +902,7 @@ def main():
         'padded_breath_by_breath_with_flow_time_features',
         'unpadded_downsampled_autoencoder_sequences'
     ], default='padded_breath_by_breath')
+    parser.add_argument('--bm-features', nargs='*', default=['iTime', 'eTime', 'inst_RR', 'mean_flow_from_pef', 'I:E ratio', 'tve:tvi ratio'])
     parser.add_argument('-lr', '--learning-rate', default=0.001, type=float)
     parser.add_argument('--loader-threads', type=int, default=0, help='specify how many threads we should use to load data. Sometimes the threads fail to shutdown correctly though and this can cause memory errors. If this happens a restart works well')
     parser.add_argument('--save-model', help='save the model to a specific file')
