@@ -73,6 +73,8 @@ class BaseTraining(object):
             self.n_bm_features = 7
         elif self.args.dataset_type == 'padded_breath_by_breath_with_full_bm_target':
             self.n_bm_features = 9
+        elif self.args.dataset_type == 'padded_breath_by_breath_with_custom_bm_target':
+            self.n_bm_features = len(self.args.bm_features)
 
         if self.args.dataset_type == 'padded_breath_by_breath_with_flow_time_features':
             self.n_metadata_inputs = 9
@@ -149,6 +151,7 @@ class BaseTraining(object):
                 self.args.cohort_file,
                 self.args.n_sub_batches,
                 dataset_type=self.args.dataset_type,
+                bm_features=self.args.bm_features,
                 to_pickle=self.args.train_to_pickle,
                 kfold_num=kfold_num,
                 total_kfolds=self.args.kfolds,
@@ -171,6 +174,7 @@ class BaseTraining(object):
                 self.args.cohort_file,
                 self.args.n_sub_batches,
                 dataset_type=self.args.dataset_type,
+                bm_features=self.args.bm_features,
                 to_pickle=self.args.test_to_pickle,
                 train=False,
                 unpadded_downsample_factor=self.args.downsample_factor,
@@ -498,6 +502,7 @@ class NestedMixin(object):
                 self.args.cohort_file,
                 self.args.n_sub_batches,
                 dataset_type=self.args.dataset_type,
+                bm_features=self.args.bm_features,
                 to_pickle=self.args.train_to_pickle,
                 kfold_num=kfold_num,
                 total_kfolds=self.args.kfolds,
@@ -520,6 +525,7 @@ class NestedMixin(object):
                 self.args.cohort_file,
                 self.args.n_sub_batches,
                 dataset_type=self.args.dataset_type,
+                bm_features=self.args.bm_features,
                 to_pickle=self.args.test_to_pickle,
                 train=False,
                 unpadded_downsample_factor=self.args.downsample_factor,
