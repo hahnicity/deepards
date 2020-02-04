@@ -899,6 +899,7 @@ def main():
         'padded_breath_by_breath_with_full_bm_target',
         'padded_breath_by_breath_with_limited_bm_target',
         'padded_breath_by_breath_with_experimental_bm_target',
+        'padded_breath_by_breath_with_custom_bm_target',
         'padded_breath_by_breath_with_flow_time_features',
         'unpadded_downsampled_autoencoder_sequences'
     ], default='padded_breath_by_breath')
