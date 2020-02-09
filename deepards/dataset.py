@@ -55,6 +55,8 @@ class ARDSRawDataset(Dataset):
             raise Exception('currently oversampling with whole patient super batch is not supported')
 
         self.cohort = pd.read_csv(cohort_file)
+        self.cohort = self.cohort.rename(columns={'Patient Unique Identifier': 'patient_id'})
+        self.cohort['patient_id'] = self.cohort['patient_id'].astype(str)
         if kfold_num is None:
             data_subdir = 'prototrain' if train else 'prototest'
         else:
@@ -253,7 +255,7 @@ class ARDSRawDataset(Dataset):
                 seq_vent_bns = []
                 meta_arr = []
             last_patient = patient_id
-            patient_row = self.cohort[self.cohort['Patient Unique Identifier'] == patient_id]
+            patient_row = self.cohort[self.cohort['patient_id'] == patient_id]
             patient_row = patient_row.iloc[0]
             patho = 1 if patient_row['Pathophysiology'] == 'ARDS' else 0
             start_time = self._get_patient_start_time(patient_id)
@@ -489,15 +491,18 @@ class ARDSRawDataset(Dataset):
         return np.array([np.nan, np.nan])
 
     def _pathophysiology_target(self, patient_id):
-        patient_row = self.cohort[self.cohort['Patient Unique Identifier'] == patient_id]
-        patient_row = patient_row.iloc[0]
+        patient_row = self.cohort[self.cohort['patient_id'] == patient_id]
+        try:
+            patient_row = patient_row.iloc[0]
+        except:
+            raise ValueError('Could not find patient {} in cohort file'.format(patient_id))
         patho = 1 if patient_row['Pathophysiology'] == 'ARDS' else 0
         target = np.zeros(2)
         target[patho] = 1
         return target
 
     def _get_patient_start_time(self, patient_id):
-        patient_row = self.cohort[self.cohort['Patient Unique Identifier'] == patient_id]
+        patient_row = self.cohort[self.cohort['patient_id'] == patient_id]
         patient_row = patient_row.iloc[0]
         patho = 1 if patient_row['Pathophysiology'] == 'ARDS' else 0
         if patho == 1:
@@ -570,9 +575,15 @@ class ARDSRawDataset(Dataset):
         return self._unpadded_centered_processing(flow, breath_arr, batch_arr)
 
     def _get_patient_id_from_file(self, filename):
+        pt_id = filename.split('/')[-2]
+        # sanity check to see if patient
         match = re.search(r'(0\d{3}RPI\d{10})', filename)
-        try:
+        if match:
             return match.groups()[0]
+        try:
+            # id is from anonymous dataset
+            float(pt_id)
+            return pt_id
         except:
             raise ValueError('could not find patient id in file: {}'.format(filename))
 
