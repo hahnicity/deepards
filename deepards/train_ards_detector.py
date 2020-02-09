@@ -149,6 +149,7 @@ class BaseTraining(object):
                 self.args.cohort_file,
                 self.args.n_sub_batches,
                 dataset_type=self.args.dataset_type,
+                all_sequences=[],
                 to_pickle=self.args.train_to_pickle,
                 kfold_num=kfold_num,
                 total_kfolds=self.args.kfolds,
@@ -160,16 +161,21 @@ class BaseTraining(object):
             train_dataset = ARDSRawDataset.from_pickle(self.args.train_from_pickle, self.args.oversample)
 
         self.n_sub_batches = train_dataset.n_sub_batches
-        if not self.args.test_from_pickle and self.args.kfolds is not None:
+        if not self.args.test_from_pickle and (self.args.kfolds is not None):
             test_dataset = ARDSRawDataset.make_test_dataset_if_kfold(train_dataset)
         elif self.args.test_from_pickle:
             test_dataset = ARDSRawDataset.from_pickle(self.args.test_from_pickle)
         else:  # holdout, no pickle, no kfold
+            # there is a really bizarre bug where my default arg is being overwritten by
+            # the state of the train_dataset obj. I checked pointer references and there was
+            # nothing. I might be able to do a deepcopy, but it might be easier to just supply
+            # a blank list instead of relying on default
             test_dataset = ARDSRawDataset(
                 self.args.data_path,
                 self.args.experiment_num,
                 self.args.cohort_file,
                 self.args.n_sub_batches,
+                all_sequences=[],
                 dataset_type=self.args.dataset_type,
                 to_pickle=self.args.test_to_pickle,
                 train=False,
@@ -497,6 +503,7 @@ class NestedMixin(object):
                 self.args.experiment_num,
                 self.args.cohort_file,
                 self.args.n_sub_batches,
+                all_sequences=[],
                 dataset_type=self.args.dataset_type,
                 to_pickle=self.args.train_to_pickle,
                 kfold_num=kfold_num,
@@ -519,6 +526,7 @@ class NestedMixin(object):
                 self.args.experiment_num,
                 self.args.cohort_file,
                 self.args.n_sub_batches,
+                all_sequences=[],
                 dataset_type=self.args.dataset_type,
                 to_pickle=self.args.test_to_pickle,
                 train=False,

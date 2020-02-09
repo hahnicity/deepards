@@ -28,6 +28,7 @@ class ARDSRawDataset(Dataset):
                  n_sub_batches,
                  dataset_type,
                  to_pickle=None,
+                 all_sequences=[],
                  train=True,
                  kfold_num=None,
                  total_kfolds=None,
@@ -40,12 +41,12 @@ class ARDSRawDataset(Dataset):
         """
         self.train = train
         self.kfold_num = kfold_num
-        self.all_sequences = []
+        self.all_sequences = all_sequences
         self.dataset_type = dataset_type
         self.total_kfolds = total_kfolds
         self.vent_bn_frac_missing = .5
         self.frames_dropped = dict()
-        self.n_sub_batches = n_sub_batches
+        self.n_sub_batches = n_sub_batches if all_sequences == [] else all_sequences[0][1].shape[0]
         self.unpadded_downsample_factor = unpadded_downsample_factor
         self.drop_frame_if_frac_missing = drop_frame_if_frac_missing
         self.cohort_file = cohort_file
@@ -61,6 +62,21 @@ class ARDSRawDataset(Dataset):
             data_subdir = 'prototrain' if train else 'prototest'
         else:
             data_subdir = 'all_data'
+
+        self.flow_time_bm_mu = [
+            -1.12003803e+01,  2.27065158e+01,  5.41515510e+01,  2.68864330e+01,
+            8.81662707e-01,  1.98707801e+00,  5.14447986e-01,  3.08663952e-02,
+            1.03526574e+00
+        ]
+        self.flow_time_bm_std = [
+            4.96512973e+00, 6.28153415e+00, 9.68798546e+01, 2.14905835e+01,
+            1.57385909e-01, 8.65758973e-01, 4.93673691e-01, 5.38365875e-02,
+            5.44132642e-01
+        ]
+        if self.all_sequences != []:
+            self.finalize_dataset_create(to_pickle, kfold_num)
+            return
+
         raw_dir = os.path.join(data_path, 'experiment{}'.format(experiment_num), data_subdir, 'raw')
         self.meta_dir = os.path.join(data_path, 'experiment{}'.format(experiment_num), data_subdir, 'meta')
         if not os.path.exists(raw_dir):
@@ -80,16 +96,7 @@ class ARDSRawDataset(Dataset):
             'dyn_compliance',
             'tve:tvi ratio',
         ]
-        self.flow_time_bm_mu = [
-            -1.12003803e+01,  2.27065158e+01,  5.41515510e+01,  2.68864330e+01,
-            8.81662707e-01,  1.98707801e+00,  5.14447986e-01,  3.08663952e-02,
-            1.03526574e+00
-        ]
-        self.flow_time_bm_std = [
-            4.96512973e+00, 6.28153415e+00, 9.68798546e+01, 2.14905835e+01,
-            1.57385909e-01, 8.65758973e-01, 4.93673691e-01, 5.38365875e-02,
-            5.44132642e-01
-        ]
+
         if dataset_type == 'padded_breath_by_breath':
             self._get_breath_by_breath_dataset(self._pad_breath, self._pathophysiology_target)
         elif dataset_type == 'stretched_breath_by_breath':
@@ -116,7 +123,9 @@ class ARDSRawDataset(Dataset):
             self._get_breath_by_breath_with_breath_meta_target(self._pad_breath, ['iTime', 'eTime', 'inst_RR', 'mean_flow_from_pef', 'I:E ratio', 'tve:tvi ratio', 'dyn_compliance'])
         else:
             raise Exception('Unknown dataset type: {}'.format(dataset_type))
+        self.finalize_dataset_create(to_pickle, kfold_num)
 
+    def finalize_dataset_create(self, to_pickle, kfold_num):
         self.derive_scaling_factors()
         if to_pickle:
             pd.to_pickle(self, to_pickle)
@@ -173,7 +182,6 @@ class ARDSRawDataset(Dataset):
             kfold_num=train_dataset.kfold_num,
             total_kfolds=train_dataset.total_kfolds,
         )
-        test_dataset.scaling_factors = train_dataset.scaling_factors
         return test_dataset
 
     @classmethod
