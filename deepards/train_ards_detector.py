@@ -31,32 +31,32 @@ from deepards.models.unet import UNet
 from deepards.models.vgg import vgg11_bn, vgg13_bn
 
 torch.set_default_tensor_type('torch.FloatTensor')
+base_networks = {
+    'resnet18': resnet18,
+    'resnet50': resnet50,
+    'resnet101': resnet101,
+    'resnet152': resnet152,
+    'unet': UNet,
+    'densenet18': densenet18,
+    'densenet121': densenet121,
+    'densenet161': densenet161,
+    'densenet169': densenet169,
+    'densenet201': densenet201,
+    'basic_cnn_ae': AutoencoderCNN,
+    'senet18': senet18,
+    'senet154': senet154,
+    'se_resnet18': se_resnet18,
+    'se_resnet50': se_resnet50,
+    'se_resnet101': se_resnet101,
+    'se_resnet152': se_resnet152,
+    'se_resnext50_32x4d': se_resnext50_32x4d,
+    'se_resnext101_32x4d': se_resnext101_32x4d,
+    'vgg11': vgg11_bn,
+    'vgg13': vgg13_bn,
+}
 
 
 class BaseTraining(object):
-    base_networks = {
-        'resnet18': resnet18,
-        'resnet50': resnet50,
-        'resnet101': resnet101,
-        'resnet152': resnet152,
-        'unet': UNet,
-        'densenet18': densenet18,
-        'densenet121': densenet121,
-        'densenet161': densenet161,
-        'densenet169': densenet169,
-        'densenet201': densenet201,
-        'basic_cnn_ae': AutoencoderCNN,
-        'senet18': senet18,
-        'senet154': senet154,
-        'se_resnet18': se_resnet18,
-        'se_resnet50': se_resnet50,
-        'se_resnet101': se_resnet101,
-        'se_resnet152': se_resnet152,
-        'se_resnext50_32x4d': se_resnext50_32x4d,
-        'se_resnext101_32x4d': se_resnext101_32x4d,
-        'vgg11': vgg11_bn,
-        'vgg13': vgg13_bn,
-    }
 
     def __init__(self, args):
         self.args = args
@@ -222,7 +222,7 @@ class BaseTraining(object):
         print('Run start time: {}'.format(self.start_time))
 
     def get_base_network(self):
-        base_network = self.base_networks[self.args.base_network]
+        base_network = base_networks[self.args.base_network]
 
         if self.args.load_base_network:
             saved_model = torch.load(self.args.load_base_network)
@@ -840,28 +840,31 @@ class SiamesePretrainedModel(WithTimeLayerClassifierMixin, BaseTraining, Patient
         return SiameseARDSClassifier(network)
 
 
-def main():
-    network_map = {
-        'cnn_lstm': CNNLSTMModel,
-        'cnn_linear': CNNLinearModel,
-        'cnn_regressor': CNNRegressorModel,
-        'metadata_only': MetadataOnlyModel,
-        'autoencoder': AutoencoderModel,
-        'cnn_transformer': CNNTransformerModel,
-        'siamese_cnn_linear': SiameseCNNLinearModel,
-        'siamese_cnn_lstm': SiameseCNNLSTMModel,
-        'siamese_cnn_transformer': SiameseCNNTransformerModel,
-        'siamese_pretrained': SiamesePretrainedModel,
-        'cnn_lstm_double_linear': CNNLSTMDoubleLinearModel,
-        'cnn_double_linear': CNNDoubleLinearModel,
-        'cnn_single_breath_linear': CNNSingleBreathLinearModel,
-        'lstm_only': LSTMOnlyModel,
-        'cnn_to_nested_rnn': CNNToNestedRNNModel,
-        'cnn_to_nested_lstm': CNNToNestedLSTMModel,
-        'cnn_to_nested_transformer': CNNToNestedTransformerModel,
-        'cnn_linear_compr_to_rf': CNNLinearComprToRFModel,
-    }
+# Is putting a global in code like this a great idea? probably not, but saves some hassle
+# on outside scripting
+network_map = {
+    'cnn_lstm': CNNLSTMModel,
+    'cnn_linear': CNNLinearModel,
+    'cnn_regressor': CNNRegressorModel,
+    'metadata_only': MetadataOnlyModel,
+    'autoencoder': AutoencoderModel,
+    'cnn_transformer': CNNTransformerModel,
+    'siamese_cnn_linear': SiameseCNNLinearModel,
+    'siamese_cnn_lstm': SiameseCNNLSTMModel,
+    'siamese_cnn_transformer': SiameseCNNTransformerModel,
+    'siamese_pretrained': SiamesePretrainedModel,
+    'cnn_lstm_double_linear': CNNLSTMDoubleLinearModel,
+    'cnn_double_linear': CNNDoubleLinearModel,
+    'cnn_single_breath_linear': CNNSingleBreathLinearModel,
+    'lstm_only': LSTMOnlyModel,
+    'cnn_to_nested_rnn': CNNToNestedRNNModel,
+    'cnn_to_nested_lstm': CNNToNestedLSTMModel,
+    'cnn_to_nested_transformer': CNNToNestedTransformerModel,
+    'cnn_linear_compr_to_rf': CNNLinearComprToRFModel,
+}
 
+
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-dp', '--data-path', default='/fastdata/ardsdetection', help='Path to ARDS detection dataset')
     parser.add_argument('-en', '--experiment-num', type=int, default=1)
@@ -874,7 +877,7 @@ def main():
     parser.add_argument('--test-to-pickle')
     parser.add_argument('--cuda', action='store_true')
     parser.add_argument('-b', '--batch-size', type=int, default=16)
-    parser.add_argument('--base-network', choices=BaseTraining.base_networks, default='resnet18')
+    parser.add_argument('--base-network', choices=base_networks, default='resnet18')
     parser.add_argument('-lc', '--loss-calc', choices=['all_breaths', 'last_breath'], default='all_breaths')
     parser.add_argument('-nb', '--n-sub-batches', type=int, default=100, help=(
         "number of breath-subbatches for each breath frame. This has different "
