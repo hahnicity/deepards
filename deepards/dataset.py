@@ -35,7 +35,8 @@ class ARDSRawDataset(Dataset):
                  oversample_minority=False,
                  unpadded_downsample_factor=4.0,
                  drop_frame_if_frac_missing=True,
-                 whole_patient_super_batch=False):
+                 whole_patient_super_batch=False,
+                 holdout_set_type='main'):
         """
         Dataset to generate sequences of data for ARDS Detection
         """
@@ -58,8 +59,11 @@ class ARDSRawDataset(Dataset):
         self.cohort = pd.read_csv(cohort_file)
         self.cohort = self.cohort.rename(columns={'Patient Unique Identifier': 'patient_id'})
         self.cohort['patient_id'] = self.cohort['patient_id'].astype(str)
-        if kfold_num is None:
+
+        if kfold_num is None and holdout_set_type == 'proto':
             data_subdir = 'prototrain' if train else 'prototest'
+        elif kfold_num is None and holdout_set_type == 'main':
+            data_subdir = 'training' if train else 'testing'
         else:
             data_subdir = 'all_data'
 
@@ -692,6 +696,7 @@ class SiameseNetworkDataset(ARDSRawDataset):
         self.total_kfolds = None
         self.all_sequences = all_sequences
         self.n_sub_batches = n_sub_batches if all_sequences == [] else all_sequences[0][1].shape[0]
+        # XXX enable ability to split to main if wanted.
         data_subdir = 'prototrain' if train else 'prototest'
         raw_dir = os.path.join(data_path, 'experiment{}'.format(experiment_num), data_subdir, 'raw')
         self.dataset_type = dataset_type

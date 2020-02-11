@@ -181,6 +181,7 @@ class BaseTraining(object):
                 train=False,
                 unpadded_downsample_factor=self.args.downsample_factor,
                 drop_frame_if_frac_missing=self.args.no_drop_frames,
+                holdout_set_type=self.args.holdout_set_type,
             )
 
         return train_dataset, test_dataset
@@ -533,6 +534,7 @@ class NestedMixin(object):
                 unpadded_downsample_factor=self.args.downsample_factor,
                 drop_frame_if_frac_missing=self.args.no_drop_frames,
                 whole_patient_super_batch=True,
+                holdout_set_type=self.args.holdout_set_type,
             )
 
         return train_dataset, test_dataset
@@ -941,6 +943,7 @@ def main():
     parser.add_argument('--stop-after-epoch', type=int, default=1)
     parser.add_argument('--clip-grad', action='store_true')
     parser.add_argument('--clip-val', type=float, default=5)
+    parser.add_argument('--holdout-set-type', default='main', choices=['main', 'proto'], help='Choose whether or not you want to use the main train/test holdout split or the proto split (which can be pretty random and is used for prototyping)')
     args = parser.parse_args()
 
     # convenience code
