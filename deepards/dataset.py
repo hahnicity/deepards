@@ -43,6 +43,7 @@ class ARDSRawDataset(Dataset):
         self.train = train
         self.kfold_num = kfold_num
         self.all_sequences = all_sequences
+        self.seq_hours = []
         self.dataset_type = dataset_type
         self.total_kfolds = total_kfolds
         self.vent_bn_frac_missing = .5
@@ -328,7 +329,8 @@ class ARDSRawDataset(Dataset):
                     if not self._should_we_drop_frame(seq_vent_bns, patient_id):
                         target = np.zeros(2)
                         target[patho] = 1
-                        self.all_sequences.append([patient_id, np.array(batch_seq_hours), np.array(batch_arr).reshape((self.n_sub_batches, 1, self.seq_len)), np.array(meta_arr), target])
+                        self.all_sequences.append([patient_id, np.array(batch_arr).reshape((self.n_sub_batches, 1, self.seq_len)), np.array(meta_arr), target])
+                        self.seq_hours.append(batch_seq_hours)
                     batch_arr = []
                     seq_vent_bns = []
                     meta_arr = []
@@ -384,7 +386,8 @@ class ARDSRawDataset(Dataset):
                 b_seq = process_breath_func(flow)
                 # no scaling of the breath meta is required here because we are just doing
                 # regression
-                self.all_sequences.append([patient_id, np.nan, b_seq.reshape((1, self.seq_len)), meta])
+                self.all_sequences.append([patient_id, b_seq.reshape((1, self.seq_len)), meta])
+                self.seq_hours.append([np.nan])
 
     def _get_breath_by_breath_dataset(self, process_breath_func, target_func):
         """
@@ -441,7 +444,8 @@ class ARDSRawDataset(Dataset):
                         if self.whole_patient_super_batch:
                             super_batch_tmp_arr.append(breath_window)
                         else:
-                            self.all_sequences.append([patient_id, np.array(batch_seq_hours), breath_window, target])
+                            self.all_sequences.append([patient_id, breath_window, target])
+                        self.seq_hours.append(batch_seq_hours)
                     batch_arr = []
                     seq_vent_bns = []
                     batch_seq_hours = []
@@ -457,10 +461,11 @@ class ARDSRawDataset(Dataset):
                 batch_arr = []
                 breath_arr = []
                 seq_vent_bns = []
-                batch_seq_hours = []
                 if self.whole_patient_super_batch and super_batch_tmp_arr != []:
+                    self.seq_hours.append(batch_seq_hours)
                     self.all_sequences.append([last_patient, np.array(super_batch_tmp_arr), target])
                     super_batch_tmp_arr = []
+                batch_seq_hours = []
 
             last_patient = patient_id
             target = target_func(patient_id)
@@ -489,7 +494,7 @@ class ARDSRawDataset(Dataset):
                 batch_seq_hours.append(seq_hour)
 
                 if len(batch_arr) == self.n_sub_batches:
-                    if not self._should_we_drop_frame(seq_vent_bns, patient_id):
+                    if self._should_we_drop_frame(seq_vent_bns, patient_id):
                         # drop breath arr to be safe
                         breath_arr = []
                         batch_arr = []
@@ -500,7 +505,8 @@ class ARDSRawDataset(Dataset):
                     if self.whole_patient_super_batch:
                         super_batch_tmp_arr.append(breath_window)
                     else:
-                        self.all_sequences.append([patient_id, np.array(batch_seq_hours), breath_window, target])
+                        self.all_sequences.append([patient_id, breath_window, target])
+                    self.seq_hours.append(batch_seq_hours)
                     batch_arr = []
                     seq_vent_bns = []
                     batch_seq_hours = []

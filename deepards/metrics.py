@@ -1,6 +1,8 @@
 from copy import copy
 import os
 import csv
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from prettytable import PrettyTable
@@ -351,6 +353,54 @@ class DeepARDSResults(object):
         meter_name = '{}_epoch_{}'.format(metric_name, epoch_num)
         print(self.reporting.meters[meter_name])
 
+    def perform_hourly_patient_plot(self):
+        for i, rows in self.pred_to_hour_frame.groupby('patient'):
+            bar_data = [[0, 0] for _ in range(24)]
+            patient = rows.iloc[0].patient
+            for hour in range(24):
+                hourly_rows = rows[(rows.hour >= hour) & (rows.hour < hour+1)]
+                bar_data[hour] = [1 - hourly_rows.pred.sum() / len(hourly_rows), hourly_rows.pred.sum() / len(hourly_rows)]
+            self.plot_patient_preds_by_hour(patient, rows, bar_data)
+            plt.show()
+
+    def plot_patient_preds_by_hour(self, pt, pt_data, bar_data):
+        # defaults, but we can parameterize them in future if we need
+        legend = True
+        fontsize = 11
+        xylabel = True
+        xy_visible = True
+        cmap = ['#6c89b7', '#ff919c']
+        plt.rcParams['legend.loc'] = 'upper right'
+
+        plots = []
+        bottom = np.zeros(24)
+        for n in [0, 1]:
+            bar_fracs = np.array([bar_data[hour][n] for hour in range(0, 24)])
+            plots.append(plt.bar(range(0, 24), bar_fracs, bottom=bottom, color=cmap[n]))
+            bottom = bottom + bar_fracs
+
+        plt.title("Patient {}".format(pt[:4]), fontsize=fontsize, pad=1)
+        if xylabel:
+            plt.ylabel('Fraction Predicted', fontsize=fontsize)
+            plt.xlabel('Hour', fontsize=fontsize)
+        plt.xlim(-.8, 23.8)
+        if legend:
+            all_votes = len(pt_data)
+            mapping = {
+                'Non-ARDS_percent': round(1 - pt_data.pred.sum() / all_votes, 3) * 100,
+                'ARDS_percent': round(pt_data.pred.sum() / all_votes, 3) * 100,
+            }
+
+            plt.legend([
+                "{}: {}%".format(patho, mapping['{}_percent'.format(patho)]) for patho in ['Non-ARDS', 'ARDS']
+            ], fontsize=fontsize)
+        if not xy_visible:
+            plt.yticks([])
+            plt.xticks([])
+        else:
+            plt.yticks(np.arange(0, 1.01, .1))
+            plt.xticks([0, 5, 11, 17, 23], [1, 6, 12, 18, 24])
+
     def perform_patient_predictions(self, y_test, predictions, fold_num, epoch_num):
         """
         After a group of patients is run through the model, record all necessary stats
@@ -407,3 +457,18 @@ class DeepARDSResults(object):
     def save_all(self):
         self.reporting.save_all()
         torch.save(self.hyperparams, os.path.join(self.results_dir, self.experiment_save_filename))
+
+    def save_predictions_by_hour(self, y_test, predictions, pred_hour):
+        """
+        Save predictions that we make by the hour (after study inclusion) that they were made.
+
+        :param y_test: y_test dataset. Can be retrieved by dataset.get_ground_truth_df()
+        :param predictions: Predictions made indexed by their batch index
+        :param pred_hour: The hour that each breath was processed. Can be retrieved via dataset.seq_hours
+        """
+        processed_pred_hour = np.zeros(len(pred_hour))
+        self.pred_to_hour_frame = predictions.to_frame(name='pred')
+        for idx, hrs in enumerate(pred_hour):
+            pred_hour_mean = sum(hrs) / len(hrs)
+            self.pred_to_hour_frame.loc[idx, 'hour'] = pred_hour_mean
+        self.pred_to_hour_frame = self.pred_to_hour_frame.merge(y_test, left_index=True, right_index=True)

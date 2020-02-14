@@ -107,7 +107,7 @@ class BaseTraining(object):
     def run_train_epoch(self, model, train_loader, optimizer, epoch_num, fold_num):
         with torch.enable_grad():
             print("\nrun epoch {}\n".format(epoch_num))
-            for idx, (obs_idx, seq_hour, seq, metadata, target) in enumerate(train_loader):
+            for idx, (obs_idx, seq, metadata, target) in enumerate(train_loader):
                 model.zero_grad()
                 if not self.args.batch_size == 1:
                     obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)
@@ -226,6 +226,7 @@ class BaseTraining(object):
                 torch.save(model, model_path)
 
         self.perform_post_modeling_actions()
+        self.perform_plotting()
         print('Run start time: {}'.format(self.start_time))
 
     def get_base_network(self):
@@ -265,7 +266,7 @@ class BaseTraining(object):
         self.preds = []
         self.pred_idx = []
         with torch.no_grad():
-            for idx, (obs_idx, seq_hour, seq, metadata, target) in enumerate(test_loader):
+            for idx, (obs_idx, seq, metadata, target) in enumerate(test_loader):
                 if not self.args.batch_size == 1:
                     obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)
                 if seq.shape[0] == 0:
@@ -312,6 +313,10 @@ class BaseTraining(object):
             metadata = metadata[:new_dim]
         return obs_idx, seq, metadata, target
 
+    def perform_plotting(self):
+        if self.args.plot_disease_evolution:
+            self.results.perform_hourly_patient_plot()
+
 
 class PatientClassifierMixin(object):
     def record_testing_results(self, target, batch_preds, fold_num):
@@ -323,6 +328,7 @@ class PatientClassifierMixin(object):
         self.preds = self.preds.sort_index()
         y_test = test_dataset.get_ground_truth_df()
         self.results.perform_patient_predictions(y_test, self.preds, fold_num, epoch_num)
+        self.results.save_predictions_by_hour(y_test, self.preds, test_dataset.seq_hours)
 
     def set_loss_criterion(self):
         if self.args.loss_func == 'vacillating':
@@ -552,6 +558,7 @@ class NestedMixin(object):
         self.preds = self.preds.sort_index()
         y_test = test_dataset.get_ground_truth_df()
         self.results.perform_patient_predictions(y_test, self.preds, fold_num, epoch_num)
+        self.save_predictions_by_hour(y_test, self.preds, test_dataset.seq_hours)
 
     def transform_obs_idx(self, obs_idx, outputs):
         # XXX add last_breath / all_breaths split
@@ -617,7 +624,7 @@ class CNNLSTMModel(WithTimeLayerClassifierMixin, BaseTraining, PatientClassifier
         gt_df = train_loader.dataset.get_ground_truth_df()
         last_pt = None
         with torch.enable_grad():
-            for idx, (obs_idx, seq_hour, seq, metadata, target) in enumerate(train_loader):
+            for idx, (obs_idx, seq, metadata, target) in enumerate(train_loader):
                 model.zero_grad()
                 obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)
                 if seq.shape[0] == 0:
@@ -645,7 +652,7 @@ class CNNLSTMModel(WithTimeLayerClassifierMixin, BaseTraining, PatientClassifier
         gt_df = test_dataset.get_ground_truth_df()
         last_pt = None
         with torch.no_grad():
-            for idx, (obs_idx, seq_hour, seq, metadata, target) in enumerate(test_loader):
+            for idx, (obs_idx, seq, metadata, target) in enumerate(test_loader):
                 obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)
                 if seq.shape[0] == 0:
                     continue
@@ -944,6 +951,7 @@ def main():
     parser.add_argument('--clip-grad', action='store_true')
     parser.add_argument('--clip-val', type=float, default=5)
     parser.add_argument('--holdout-set-type', default='main', choices=['main', 'proto'], help='Choose whether or not you want to use the main train/test holdout split or the proto split (which can be pretty random and is used for prototyping)')
+    parser.add_argument('--plot-disease-evolution', action='store_true', help='Plot the our ARDS/non-ARDS predictions by hour')
     args = parser.parse_args()
 
     # convenience code
