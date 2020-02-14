@@ -107,7 +107,7 @@ class BaseTraining(object):
     def run_train_epoch(self, model, train_loader, optimizer, epoch_num, fold_num):
         with torch.enable_grad():
             print("\nrun epoch {}\n".format(epoch_num))
-            for idx, (obs_idx, seq, metadata, target) in enumerate(train_loader):
+            for idx, (obs_idx, seq_hour, seq, metadata, target) in enumerate(train_loader):
                 model.zero_grad()
                 if not self.args.batch_size == 1:
                     obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)
@@ -265,7 +265,7 @@ class BaseTraining(object):
         self.preds = []
         self.pred_idx = []
         with torch.no_grad():
-            for idx, (obs_idx, seq, metadata, target) in enumerate(test_loader):
+            for idx, (obs_idx, seq_hour, seq, metadata, target) in enumerate(test_loader):
                 if not self.args.batch_size == 1:
                     obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)
                 if seq.shape[0] == 0:
@@ -617,7 +617,7 @@ class CNNLSTMModel(WithTimeLayerClassifierMixin, BaseTraining, PatientClassifier
         gt_df = train_loader.dataset.get_ground_truth_df()
         last_pt = None
         with torch.enable_grad():
-            for idx, (obs_idx, seq, metadata, target) in enumerate(train_loader):
+            for idx, (obs_idx, seq_hour, seq, metadata, target) in enumerate(train_loader):
                 model.zero_grad()
                 obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)
                 if seq.shape[0] == 0:
@@ -645,7 +645,7 @@ class CNNLSTMModel(WithTimeLayerClassifierMixin, BaseTraining, PatientClassifier
         gt_df = test_dataset.get_ground_truth_df()
         last_pt = None
         with torch.no_grad():
-            for idx, (obs_idx, seq, metadata, target) in enumerate(test_loader):
+            for idx, (obs_idx, seq_hour, seq, metadata, target) in enumerate(test_loader):
                 obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)
                 if seq.shape[0] == 0:
                     continue
