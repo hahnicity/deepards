@@ -226,7 +226,8 @@ class BaseTraining(object):
                 torch.save(model, model_path)
 
         self.perform_post_modeling_actions()
-        self.perform_plotting()
+        # XXX will not work with kfold as it currently is
+        self.perform_plotting(test_dataset)
         print('Run start time: {}'.format(self.start_time))
 
     def get_base_network(self):
@@ -313,12 +314,20 @@ class BaseTraining(object):
             metadata = metadata[:new_dim]
         return obs_idx, seq, metadata, target
 
-    def perform_plotting(self):
+    def perform_plotting(self, test_dataset):
+        # just using hard-coded argument for now.
+        dtw_cache_dir = 'dtw_cache'
+        if self.args.plot_dtw_with_disease:
+            self.results.perform_dtw_preprocessing(test_dataset, dtw_cache_dir)
+
         if self.args.plot_untiled_disease_evol:
             self.results.perform_hourly_patient_plot()
 
         if self.args.plot_tiled_disease_evol:
-            self.results.plot_tiled_disease_evol()
+            self.results.plot_tiled_disease_evol(test_dataset, dtw_cache_dir, self.args.plot_dtw_with_disease)
+
+        if self.args.plot_dtw_with_disease and not self.args.plot_tiled_disease_evol:
+            self.results.perform_hourly_patient_plot_with_dtw(test_dataset, dtw_cache_dir)
 
 
 class PatientClassifierMixin(object):
@@ -956,6 +965,7 @@ def main():
     parser.add_argument('--holdout-set-type', default='main', choices=['main', 'proto'], help='Choose whether or not you want to use the main train/test holdout split or the proto split (which can be pretty random and is used for prototyping)')
     parser.add_argument('--plot-untiled-disease-evol', action='store_true', help='Plot the our ARDS/non-ARDS predictions by hour')
     parser.add_argument('--plot-tiled-disease-evol', action='store_true', help='Plot the our ARDS/non-ARDS predictions by hour but in tiled format grouped by TPs/TNs/FPs/FNs')
+    parser.add_argument('--plot-dtw-with-disease', action='store_true', help='Plot DTW with ARDS/non-ARDS predictions by hour')
     args = parser.parse_args()
 
     # convenience code

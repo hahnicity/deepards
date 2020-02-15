@@ -10,7 +10,10 @@ from prettytable import PrettyTable
 from sklearn.metrics import roc_auc_score
 import torch
 
+import deepards.dtw_lib as dtw_lib
+
 filename = './Data/data.csv'
+
 
 def get_fns_idx(actual, predictions, label):
     pos = actual[actual == label]
@@ -354,12 +357,42 @@ class DeepARDSResults(object):
         meter_name = '{}_epoch_{}'.format(metric_name, epoch_num)
         print(self.reporting.meters[meter_name])
 
+    def perform_dtw_preprocessing(self, test_dataset, dtw_cache_dir):
+        for _, pt_rows in self.pred_to_hour_frame.groupby('patient'):
+            pt = pt_rows.iloc[0].patient
+            dtw_scores = dtw_lib.analyze_patient(pt, test_dataset, dtw_cache_dir, self.pred_to_hour_frame)
+
+    def perform_hourly_patient_plot_with_dtw(self, test_dataset, dtw_cache_dir):
+        for _, pt_rows in self.pred_to_hour_frame.groupby('patient'):
+            self.plot_disease_evolution(pt_rows)
+            self.plot_dtw_patient_data(pt_rows, test_dataset, dtw_cache_dir, True, 1, True)
+            plt.show()
+
     def perform_hourly_patient_plot(self):
         for i, rows in self.pred_to_hour_frame.groupby('patient'):
             self.plot_disease_evolution(rows)
             plt.show()
 
-    def plot_tiled_disease_evol(self):
+    def plot_dtw_patient_data(self, pt_rows, test_dataset, dtw_cache_dir, set_label, lw, xy_visible):
+        """
+        Plot DTW for an individual patient
+
+        :param pt_rows: Rows grouped by patient from the dataframe received from
+                        self.results.get_all_hourly_preds
+        """
+        pt = pt_rows.iloc[0].patient
+        # can provide None because we will just be pulling from cache
+        dtw = dtw_lib.analyze_patient(pt, test_dataset, dtw_cache_dir, None)
+        dtw = dtw.sort_values(by='hour')
+        ax2 = plt.gca().twinx()
+        ax2.plot(dtw.hour, dtw.dtw, lw=lw, label='DTW', color='#663a3e')
+        if set_label:
+            ax2.set_ylabel('DTW Score')
+        if not xy_visible:
+            ax2.set_yticks([])
+            ax2.set_xticks([])
+
+    def plot_tiled_disease_evol(self, test_dataset, dtw_cache_dir, plot_with_dtw):
         """
         Plot a tiled bar chart of patient predictions. Plot by TPs/TNs/FPs/FNs
         """
@@ -395,9 +428,8 @@ class DeepARDSResults(object):
                 pt_rows = self.pred_to_hour_frame[self.pred_to_hour_frame.patient == pt]
                 plt.subplot(layout, layout, idx+1)
                 self.plot_disease_evolution(pt_rows, legend=False, fontsize=6, xylabel=False, xy_visible=False)
-                # XXX get to this later
-                #if plot_with_dtw:
-                #    self.plot_dtw_patient_data(pt_rows, False, .08, False)
+                if plot_with_dtw:
+                    self.plot_dtw_patient_data(pt_rows, test_dataset, dtw_cache_dir, False, .08, False)
             plt.show()
 
     def plot_disease_evolution(self, pt_data, legend=True, fontsize=11, xylabel=True, xy_visible=True):
