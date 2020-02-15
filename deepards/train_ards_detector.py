@@ -314,8 +314,11 @@ class BaseTraining(object):
         return obs_idx, seq, metadata, target
 
     def perform_plotting(self):
-        if self.args.plot_disease_evolution:
+        if self.args.plot_untiled_disease_evol:
             self.results.perform_hourly_patient_plot()
+
+        if self.args.plot_tiled_disease_evol:
+            self.results.plot_tiled_disease_evol()
 
 
 class PatientClassifierMixin(object):
@@ -951,7 +954,8 @@ def main():
     parser.add_argument('--clip-grad', action='store_true')
     parser.add_argument('--clip-val', type=float, default=5)
     parser.add_argument('--holdout-set-type', default='main', choices=['main', 'proto'], help='Choose whether or not you want to use the main train/test holdout split or the proto split (which can be pretty random and is used for prototyping)')
-    parser.add_argument('--plot-disease-evolution', action='store_true', help='Plot the our ARDS/non-ARDS predictions by hour')
+    parser.add_argument('--plot-untiled-disease-evol', action='store_true', help='Plot the our ARDS/non-ARDS predictions by hour')
+    parser.add_argument('--plot-tiled-disease-evol', action='store_true', help='Plot the our ARDS/non-ARDS predictions by hour but in tiled format grouped by TPs/TNs/FPs/FNs')
     args = parser.parse_args()
 
     # convenience code

@@ -1,4 +1,5 @@
 from copy import copy
+from math import ceil, sqrt
 import os
 import csv
 
@@ -355,22 +356,60 @@ class DeepARDSResults(object):
 
     def perform_hourly_patient_plot(self):
         for i, rows in self.pred_to_hour_frame.groupby('patient'):
-            bar_data = [[0, 0] for _ in range(24)]
-            patient = rows.iloc[0].patient
-            for hour in range(24):
-                hourly_rows = rows[(rows.hour >= hour) & (rows.hour < hour+1)]
-                bar_data[hour] = [1 - hourly_rows.pred.sum() / len(hourly_rows), hourly_rows.pred.sum() / len(hourly_rows)]
-            self.plot_patient_preds_by_hour(patient, rows, bar_data)
+            self.plot_disease_evolution(rows)
             plt.show()
 
-    def plot_patient_preds_by_hour(self, pt, pt_data, bar_data):
+    def plot_tiled_disease_evol(self):
+        """
+        Plot a tiled bar chart of patient predictions. Plot by TPs/TNs/FPs/FNs
+        """
+        tps, tns, fps, fns = [], [], [], []
+        for i, rows in self.results.groupby('patient'):
+            pt = rows.iloc[0].patient
+            total_votes = rows[['OTHER_votes', 'ARDS_votes']].sum().sum()
+            ards_votes = rows['ARDS_votes'].sum()
+            ground_truth = rows.iloc[0].patho
+            if ards_votes / float(total_votes) >= .5:
+                pred = 1
+            else:
+                pred = 0
+
+            if pred == 1 and ground_truth == 1:
+                tps.append(pt)
+            elif pred == 0 and ground_truth == 0:
+                tns.append(pt)
+            elif pred == 1 and ground_truth == 0:
+                fps.append(pt)
+            elif pred != 1 and ground_truth == 1:
+                fns.append(pt)
+
+        for arr, title in [
+            (tps, 'ARDS True Pos'),
+            (tns, 'ARDS True Neg'),
+            (fps, 'ARDS False Pos'),
+            (fns, 'ARDS False Neg'),
+        ]:
+            for idx, pt in enumerate(arr):
+                layout = int(ceil(sqrt(len(arr))))
+                plt.suptitle(title)
+                pt_rows = self.pred_to_hour_frame[self.pred_to_hour_frame.patient == pt]
+                plt.subplot(layout, layout, idx+1)
+                self.plot_disease_evolution(pt_rows, legend=False, fontsize=6, xylabel=False, xy_visible=False)
+                # XXX get to this later
+                #if plot_with_dtw:
+                #    self.plot_dtw_patient_data(pt_rows, False, .08, False)
+            plt.show()
+
+    def plot_disease_evolution(self, pt_data, legend=True, fontsize=11, xylabel=True, xy_visible=True):
         # defaults, but we can parameterize them in future if we need
-        legend = True
-        fontsize = 11
-        xylabel = True
-        xy_visible = True
         cmap = ['#6c89b7', '#ff919c']
         plt.rcParams['legend.loc'] = 'upper right'
+
+        bar_data = [[0, 0] for _ in range(24)]
+        pt = pt_data.iloc[0].patient
+        for hour in range(24):
+            hourly_pt_data = pt_data[(pt_data.hour >= hour) & (pt_data.hour < hour+1)]
+            bar_data[hour] = [1 - hourly_pt_data.pred.sum() / float(len(hourly_pt_data)), hourly_pt_data.pred.sum() / float(len(hourly_pt_data))]
 
         plots = []
         bottom = np.zeros(24)
@@ -387,8 +426,8 @@ class DeepARDSResults(object):
         if legend:
             all_votes = len(pt_data)
             mapping = {
-                'Non-ARDS_percent': round(1 - pt_data.pred.sum() / all_votes, 3) * 100,
-                'ARDS_percent': round(pt_data.pred.sum() / all_votes, 3) * 100,
+                'Non-ARDS_percent': round(1 - pt_data.pred.sum() / float(all_votes), 3) * 100,
+                'ARDS_percent': round(pt_data.pred.sum() / float(all_votes), 3) * 100,
             }
 
             plt.legend([
