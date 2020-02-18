@@ -57,6 +57,7 @@ base_networks = {
 
 
 class BaseTraining(object):
+    clip_odd_batches = False
 
     def __init__(self, args):
         self.args = args
@@ -214,7 +215,8 @@ class BaseTraining(object):
             model = self.get_model()
             optimizer = self.get_optimizer(model)
             for epoch_num in range(self.args.epochs):
-                self.run_train_epoch(model, train_loader, optimizer, epoch_num+1, fold_num)
+                if not self.args.no_train:
+                    self.run_train_epoch(model, train_loader, optimizer, epoch_num+1, fold_num)
                 if self.args.reshuffle_oversample_per_epoch:
                     train_loader.dataset.set_oversampling_indices()
 
@@ -268,7 +270,7 @@ class BaseTraining(object):
         self.pred_idx = []
         with torch.no_grad():
             for idx, (obs_idx, seq, metadata, target) in enumerate(test_loader):
-                if not self.args.batch_size == 1:
+                if not self.args.batch_size == 1 and self.clip_odd_batches:
                     obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)
                 if seq.shape[0] == 0:
                     continue
@@ -594,6 +596,8 @@ class CNNToNestedRNNModel(NestedMixin, BaseTraining):
 
 
 class CNNToNestedLSTMModel(NestedMixin, BaseTraining):
+    clip_odd_batches = True
+
     def __init__(self, args):
         args.batch_size = 1
         super(CNNToNestedLSTMModel, self).__init__(args)
@@ -620,6 +624,8 @@ class CNNTransformerModel(WithTimeLayerClassifierMixin, BaseTraining, PatientCla
 
 
 class CNNLSTMModel(WithTimeLayerClassifierMixin, BaseTraining, PatientClassifierMixin):
+    clip_odd_batches = True
+
     def __init__(self, args):
         super(CNNLSTMModel, self).__init__(args)
 
@@ -693,6 +699,8 @@ class CNNLSTMModel(WithTimeLayerClassifierMixin, BaseTraining, PatientClassifier
 
 
 class CNNLSTMDoubleLinearModel(BaseTraining, PatientClassifierMixin):
+    clip_odd_batches = True
+
     def __init__(self, args):
         super(CNNLSTMDoubleLinearModel, self).__init__(args)
 
@@ -792,6 +800,8 @@ class MetadataOnlyModel(BaseTraining, PatientClassifierMixin):
 
 
 class LSTMOnlyModel(WithTimeLayerClassifierMixin, BaseTraining, PatientClassifierMixin):
+    clip_odd_batches = True
+
     def __init__(self, args):
         super(LSTMOnlyModel, self).__init__(args)
 
@@ -838,6 +848,8 @@ class AutoencoderModel(BaseTraining, RegressorMixin):
 
 
 class SiameseCNNLSTMModel(SiameseMixin, BaseTraining):
+    clip_odd_batches = True
+
     def __init__(self, args):
         super(SiameseCNNLSTMModel, self).__init__(args)
 
@@ -941,6 +953,8 @@ def main():
     parser.add_argument('--loader-threads', type=int, default=0, help='specify how many threads we should use to load data. Sometimes the threads fail to shutdown correctly though and this can cause memory errors. If this happens a restart works well')
     parser.add_argument('--save-model', help='save the model to a specific file')
     parser.add_argument('--load-base-network', help='load base network only from a saved model')
+    parser.add_argument('--load-checkpoint', help='load a checkpoint of the model for further training or inference')
+    parser.add_argument('--no-train', action='store_true', help='Dont train model, just evaluate for inference')
     parser.add_argument('-rdc','--resnet-double-conv', action='store_true')
     parser.add_argument('--bm-to-linear', action='store_true')
     parser.add_argument('-exp', '--experiment-name')
@@ -958,7 +972,6 @@ def main():
     parser.add_argument('--fl-alpha', type=float, default=.9)
     parser.add_argument('--oversample', action='store_true')
     parser.add_argument('--reshuffle-oversample-per-epoch', action='store_true')
-    parser.add_argument('--load-checkpoint')
     parser.add_argument('--freeze-base-network', action='store_true')
     parser.add_argument('--stop-on-loss', action='store_true')
     parser.add_argument('--stop-thresh', type=float, default=1.5)

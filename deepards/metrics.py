@@ -358,9 +358,12 @@ class DeepARDSResults(object):
         print(self.reporting.meters[meter_name])
 
     def perform_dtw_preprocessing(self, test_dataset, dtw_cache_dir):
+        copy_pred_to_hour = self.pred_to_hour_frame.copy()
         for _, pt_rows in self.pred_to_hour_frame.groupby('patient'):
             pt = pt_rows.iloc[0].patient
             dtw_scores = dtw_lib.analyze_patient(pt, test_dataset, dtw_cache_dir, self.pred_to_hour_frame)
+            copy_pred_to_hour.loc[copy_pred_to_hour.patient==pt, 'dtw'] = dtw_scores.sort_index().dtw
+        copy_pred_to_hour.to_pickle('dtw_to_predictions.pkl')
 
     def perform_hourly_patient_plot_with_dtw(self, test_dataset, dtw_cache_dir):
         for _, pt_rows in self.pred_to_hour_frame.groupby('patient'):
@@ -369,7 +372,7 @@ class DeepARDSResults(object):
             # can provide None because we will just be pulling from cache
             dtw = dtw_lib.analyze_patient(pt, test_dataset, dtw_cache_dir, None)
             dtw = dtw.sort_values(by='hour')
-            self.plot_dtw_patient_data(dtw, True, 3.5, True)
+            self.plot_dtw_patient_data(dtw, True, 2, True)
             plt.show()
 
     def perform_hourly_patient_plot(self):
@@ -401,14 +404,14 @@ class DeepARDSResults(object):
         for hour in range(24):
             if len(pt_data[(pt_data.hour >= hour) & (pt_data.hour < hour+1)]) == 0:
                 continue
-            self.plot_disease_evolution(pt_data, plot_by='minute', plot_hour=hour)
+            self.plot_disease_evolution(pt_data, plot_by='minute', plot_hour=hour, plt_title='Plot by Minute {} hour: {}'.format(pt, hour+1), xlab='Minute')
             dtw_hr_data = dtw[(dtw.hour >= hour) & (dtw.hour < hour+1)]
             # denormalize minute back to 0-60
             dtw_hr_data['hour'] = (dtw_hr_data.hour - hour) * 60
             self.plot_dtw_patient_data(dtw_hr_data, True, 6, True, dtw['dtw'].max())
             plt.show()
 
-    def plot_disease_evolution(self, pt_data, legend=True, fontsize=11, xylabel=True, xy_visible=True, plot_by='hour', plot_hour=None):
+    def plot_disease_evolution(self, pt_data, legend=True, fontsize=11, xylabel=True, xy_visible=True, plot_by='hour', plot_hour=None, plt_title=None, xlab="Hour"):
         # defaults, but we can parameterize them in future if we need
         cmap = ['#6c89b7', '#ff919c']
         plt.rcParams['legend.loc'] = 'upper right'
@@ -431,10 +434,10 @@ class DeepARDSResults(object):
             plots.append(plt.bar(range(0, time_units), bar_fracs, bottom=bottom, color=cmap[n]))
             bottom = bottom + bar_fracs
 
-        plt.title("Patient {}".format(pt[:4]), fontsize=fontsize, pad=1)
+        plt.title("Patient {}".format(pt[:4]) if not plt_title else plt_title, fontsize=fontsize, pad=1)
         if xylabel:
             plt.ylabel('Fraction Predicted', fontsize=fontsize)
-            plt.xlabel('Hour', fontsize=fontsize)
+            plt.xlabel(xlab, fontsize=fontsize)
         plt.xlim(-.8, time_units - .02)
         if legend:
             all_votes = len(pt_data_in_bin)
@@ -563,6 +566,8 @@ class DeepARDSResults(object):
         processed_pred_hour = np.zeros(len(pred_hour))
         self.pred_to_hour_frame = predictions.to_frame(name='pred')
         for idx, hrs in enumerate(pred_hour):
+            if not idx in self.pred_to_hour_frame.index:
+                raise Exception('index {} not found in pred_to_hour_frame'.format(idx))
             pred_hour_mean = sum(hrs) / len(hrs)
             self.pred_to_hour_frame.loc[idx, 'hour'] = pred_hour_mean
         self.pred_to_hour_frame = self.pred_to_hour_frame.merge(y_test, left_index=True, right_index=True)
