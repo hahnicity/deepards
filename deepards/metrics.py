@@ -365,7 +365,11 @@ class DeepARDSResults(object):
     def perform_hourly_patient_plot_with_dtw(self, test_dataset, dtw_cache_dir):
         for _, pt_rows in self.pred_to_hour_frame.groupby('patient'):
             self.plot_disease_evolution(pt_rows)
-            self.plot_dtw_patient_data(pt_rows, test_dataset, dtw_cache_dir, True, 1, True)
+            pt = pt_rows.iloc[0].patient
+            # can provide None because we will just be pulling from cache
+            dtw = dtw_lib.analyze_patient(pt, test_dataset, dtw_cache_dir, None)
+            dtw = dtw.sort_values(by='hour')
+            self.plot_dtw_patient_data(dtw, True, 3.5, True)
             plt.show()
 
     def perform_hourly_patient_plot(self):
@@ -373,24 +377,81 @@ class DeepARDSResults(object):
             self.plot_disease_evolution(rows)
             plt.show()
 
-    def plot_dtw_patient_data(self, pt_rows, test_dataset, dtw_cache_dir, set_label, lw, xy_visible):
+    def plot_dtw_patient_data(self, dtw_data, set_label, size, xy_visible, y_max=None):
         """
         Plot DTW for an individual patient
 
         :param pt_rows: Rows grouped by patient from the dataframe received from
                         self.results.get_all_hourly_preds
         """
-        pt = pt_rows.iloc[0].patient
-        # can provide None because we will just be pulling from cache
-        dtw = dtw_lib.analyze_patient(pt, test_dataset, dtw_cache_dir, None)
-        dtw = dtw.sort_values(by='hour')
+        y_max = dtw_data.dtw.max() + 1 if not y_max else y_max
         ax2 = plt.gca().twinx()
-        ax2.plot(dtw.hour, dtw.dtw, lw=lw, label='DTW', color='#663a3e')
+        ax2.scatter(dtw_data.hour, dtw_data.dtw, s=size, label='DTW', c='#663a3e')
+        ax2.set_ylim(0, y_max)
         if set_label:
             ax2.set_ylabel('DTW Score')
         if not xy_visible:
             ax2.set_yticks([])
             ax2.set_xticks([])
+
+    def plot_dtw_by_minute(self, pt, test_dataset, dtw_cache_dir):
+        dtw = dtw_lib.analyze_patient(pt, test_dataset, dtw_cache_dir, None)
+        dtw = dtw.sort_values(by='hour')
+        pt_data = self.pred_to_hour_frame[self.pred_to_hour_frame.patient == pt]
+        for hour in range(24):
+            if len(pt_data[(pt_data.hour >= hour) & (pt_data.hour < hour+1)]) == 0:
+                continue
+            self.plot_disease_evolution(pt_data, plot_by='minute', plot_hour=hour)
+            dtw_hr_data = dtw[(dtw.hour >= hour) & (dtw.hour < hour+1)]
+            # denormalize minute back to 0-60
+            dtw_hr_data['hour'] = (dtw_hr_data.hour - hour) * 60
+            self.plot_dtw_patient_data(dtw_hr_data, True, 6, True, dtw['dtw'].max())
+            plt.show()
+
+    def plot_disease_evolution(self, pt_data, legend=True, fontsize=11, xylabel=True, xy_visible=True, plot_by='hour', plot_hour=None):
+        # defaults, but we can parameterize them in future if we need
+        cmap = ['#6c89b7', '#ff919c']
+        plt.rcParams['legend.loc'] = 'upper right'
+        time_units = {'hour': 24, 'minute': 60}[plot_by]
+
+        bar_data = [[0, 0] for _ in range(time_units)]
+        pt = pt_data.iloc[0].patient
+        pt_data_in_bin = pt_data if not plot_hour else pt_data[(pt_data.hour >= plot_hour) & (pt_data.hour < plot_hour+1)]
+
+        for interval  in range(time_units):
+            lower_bound = plot_hour + (interval / 60.0) if plot_hour is not None else interval
+            upper_bound = plot_hour + (interval / 60.0) + (1 / 60.0) if plot_hour is not None else interval+1
+            bin_pt_data = pt_data[(pt_data.hour >= lower_bound) & (pt_data.hour < upper_bound)]
+            bar_data[interval] = [1 - bin_pt_data.pred.sum() / float(len(bin_pt_data)), bin_pt_data.pred.sum() / float(len(bin_pt_data))]
+
+        plots = []
+        bottom = np.zeros(time_units)
+        for n in [0, 1]:
+            bar_fracs = np.array([bar_data[bin][n] for bin in range(0, time_units)])
+            plots.append(plt.bar(range(0, time_units), bar_fracs, bottom=bottom, color=cmap[n]))
+            bottom = bottom + bar_fracs
+
+        plt.title("Patient {}".format(pt[:4]), fontsize=fontsize, pad=1)
+        if xylabel:
+            plt.ylabel('Fraction Predicted', fontsize=fontsize)
+            plt.xlabel('Hour', fontsize=fontsize)
+        plt.xlim(-.8, time_units - .02)
+        if legend:
+            all_votes = len(pt_data_in_bin)
+            mapping = {
+                'Non-ARDS_percent': round(1 - pt_data_in_bin.pred.sum() / float(all_votes), 3) * 100,
+                'ARDS_percent': round(pt_data_in_bin.pred.sum() / float(all_votes), 3) * 100,
+            }
+
+            plt.legend([
+                "{}: {}%".format(patho, mapping['{}_percent'.format(patho)]) for patho in ['Non-ARDS', 'ARDS']
+            ], fontsize=fontsize)
+        if not xy_visible:
+            plt.yticks([])
+            plt.xticks([])
+        else:
+            plt.yticks(np.arange(0, 1.01, .1))
+            plt.xticks(range(0, time_units+1, 5), range(1, time_units+1, 5))
 
     def plot_tiled_disease_evol(self, test_dataset, dtw_cache_dir, plot_with_dtw):
         """
@@ -429,48 +490,10 @@ class DeepARDSResults(object):
                 plt.subplot(layout, layout, idx+1)
                 self.plot_disease_evolution(pt_rows, legend=False, fontsize=6, xylabel=False, xy_visible=False)
                 if plot_with_dtw:
-                    self.plot_dtw_patient_data(pt_rows, test_dataset, dtw_cache_dir, False, .08, False)
+                    dtw = dtw_lib.analyze_patient(pt, test_dataset, dtw_cache_dir, None)
+                    dtw = dtw.sort_values(by='hour')
+                    self.plot_dtw_patient_data(dtw, False, 1, False)
             plt.show()
-
-    def plot_disease_evolution(self, pt_data, legend=True, fontsize=11, xylabel=True, xy_visible=True):
-        # defaults, but we can parameterize them in future if we need
-        cmap = ['#6c89b7', '#ff919c']
-        plt.rcParams['legend.loc'] = 'upper right'
-
-        bar_data = [[0, 0] for _ in range(24)]
-        pt = pt_data.iloc[0].patient
-        for hour in range(24):
-            hourly_pt_data = pt_data[(pt_data.hour >= hour) & (pt_data.hour < hour+1)]
-            bar_data[hour] = [1 - hourly_pt_data.pred.sum() / float(len(hourly_pt_data)), hourly_pt_data.pred.sum() / float(len(hourly_pt_data))]
-
-        plots = []
-        bottom = np.zeros(24)
-        for n in [0, 1]:
-            bar_fracs = np.array([bar_data[hour][n] for hour in range(0, 24)])
-            plots.append(plt.bar(range(0, 24), bar_fracs, bottom=bottom, color=cmap[n]))
-            bottom = bottom + bar_fracs
-
-        plt.title("Patient {}".format(pt[:4]), fontsize=fontsize, pad=1)
-        if xylabel:
-            plt.ylabel('Fraction Predicted', fontsize=fontsize)
-            plt.xlabel('Hour', fontsize=fontsize)
-        plt.xlim(-.8, 23.8)
-        if legend:
-            all_votes = len(pt_data)
-            mapping = {
-                'Non-ARDS_percent': round(1 - pt_data.pred.sum() / float(all_votes), 3) * 100,
-                'ARDS_percent': round(pt_data.pred.sum() / float(all_votes), 3) * 100,
-            }
-
-            plt.legend([
-                "{}: {}%".format(patho, mapping['{}_percent'.format(patho)]) for patho in ['Non-ARDS', 'ARDS']
-            ], fontsize=fontsize)
-        if not xy_visible:
-            plt.yticks([])
-            plt.xticks([])
-        else:
-            plt.yticks(np.arange(0, 1.01, .1))
-            plt.xticks([0, 5, 11, 17, 23], [1, 6, 12, 18, 24])
 
     def perform_patient_predictions(self, y_test, predictions, fold_num, epoch_num):
         """
