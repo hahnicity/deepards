@@ -495,7 +495,7 @@ class DeepARDSResults(object):
                 if plot_with_dtw:
                     dtw = dtw_lib.analyze_patient(pt, test_dataset, dtw_cache_dir, None)
                     dtw = dtw.sort_values(by='hour')
-                    self.plot_dtw_patient_data(dtw, False, 1, False)
+                    self.plot_dtw_patient_data(dtw, False, 0.05, False, y_max=100)
             plt.show()
 
     def perform_patient_predictions(self, y_test, predictions, fold_num, epoch_num):
