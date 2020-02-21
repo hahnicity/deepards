@@ -3,6 +3,7 @@ from glob import glob
 from warnings import warn
 
 import matplotlib.pyplot as plt
+plt.switch_backend('tkagg')
 import numpy as np
 from pprint import pprint
 from prettytable import PrettyTable
