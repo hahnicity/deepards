@@ -33,8 +33,8 @@ def dtw_analyze(pt_data, n_breaths, rolling_av_len, pt_preds_by_hour):
 
     for idx, seq in enumerate(pt_data):
         cur_obs_idx = pt_obs_idxs[idx]
-        current_seq_time = pt_preds_by_hour.loc[cur_obs_idx].iloc[0].hour
-        for breath in seq:
+        for j, breath in enumerate(seq):
+            current_seq_time = pt_preds_by_hour.loc[cur_obs_idx].iloc[j].hour
             df_idx.append(cur_obs_idx)
             if len(flow_waves) == (n_breaths+1):
                 flow_waves.pop(0)

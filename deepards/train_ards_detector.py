@@ -319,20 +319,19 @@ class BaseTraining(object):
     def perform_plotting(self, test_dataset):
         # just using hard-coded argument for now.
         dtw_cache_dir = 'dtw_cache'
-        if self.args.plot_dtw_with_disease or self.args.plot_dtw_by_minute:
+        if self.args.plot_dtw_with_disease or self.args.plot_dtw_by_minute or self.args.perform_dtw_preprocessing:
             self.results.perform_dtw_preprocessing(test_dataset, dtw_cache_dir)
 
         if self.args.plot_dtw_by_minute:
             self.results.plot_dtw_by_minute(self.args.plot_dtw_by_minute, test_dataset, dtw_cache_dir)
 
-        if self.args.plot_untiled_disease_evol:
+        if self.args.plot_dtw_with_disease and not self.args.plot_tiled_disease_evol:
+            self.results.perform_hourly_patient_plot_with_dtw(test_dataset, dtw_cache_dir)
+        elif self.args.plot_untiled_disease_evol:
             self.results.perform_hourly_patient_plot()
 
         if self.args.plot_tiled_disease_evol:
             self.results.plot_tiled_disease_evol(test_dataset, dtw_cache_dir, self.args.plot_dtw_with_disease)
-
-        if self.args.plot_dtw_with_disease and not self.args.plot_tiled_disease_evol:
-            self.results.perform_hourly_patient_plot_with_dtw(test_dataset, dtw_cache_dir)
 
 
 class PatientClassifierMixin(object):
@@ -983,6 +982,7 @@ def main():
     parser.add_argument('--plot-tiled-disease-evol', action='store_true', help='Plot the our ARDS/non-ARDS predictions by hour but in tiled format grouped by TPs/TNs/FPs/FNs')
     parser.add_argument('--plot-dtw-with-disease', action='store_true', help='Plot DTW with ARDS/non-ARDS predictions by hour')
     parser.add_argument('--plot-dtw-by-minute', help='Plot DTW and predictions by minute for a single patient')
+    parser.add_argument('--perform-dtw-preprocessing', action='store_true', help='perform DTW preprocessing actions even if we dont want to visualize DTW')
     args = parser.parse_args()
 
     # convenience code

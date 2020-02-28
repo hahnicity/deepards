@@ -303,6 +303,7 @@ class DeepARDSResults(object):
                 auc = np.nan
             elif len(self.pathos) == 2:
                 auc = round(roc_auc_score(patient_results.patho.tolist(), patient_results.pred_frac.tolist()), 4)
+
             try:
                 f1 = round(2 * ((precision * sensitivity) / (precision + sensitivity)), 4)
             except ZeroDivisionError:
@@ -565,9 +566,6 @@ class DeepARDSResults(object):
         """
         processed_pred_hour = np.zeros(len(pred_hour))
         self.pred_to_hour_frame = predictions.to_frame(name='pred')
-        for idx, hrs in enumerate(pred_hour):
-            if not idx in self.pred_to_hour_frame.index:
-                raise Exception('index {} not found in pred_to_hour_frame'.format(idx))
-            pred_hour_mean = sum(hrs) / len(hrs)
-            self.pred_to_hour_frame.loc[idx, 'hour'] = pred_hour_mean
+        for idx, hrs in pred_hour.items():
+            self.pred_to_hour_frame.loc[idx, 'hour'] = hrs
         self.pred_to_hour_frame = self.pred_to_hour_frame.merge(y_test, left_index=True, right_index=True)
