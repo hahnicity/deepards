@@ -1,6 +1,8 @@
+import argparse
 from glob import glob
 import os
 
+import numpy as np
 import pandas as pd
 from sklearn.metrics import confusion_matrix, roc_auc_score, f1_score
 
@@ -42,6 +44,7 @@ def computeMetricsFromPatientResults(df, df_stats):
 
     return df_stats
 
+
 def getMeanMetrics(start_times):
     df_patient_results_list = []
     for time in start_times:
@@ -60,19 +63,44 @@ def getMeanMetrics(start_times):
     return mean_df_stats
 
 
+def do_fold_graphing(start_times):
+    df_patient_results_list = []
+    for time in start_times:
+        df = pd.read_pickle("results/{}_patient_results.pkl".format(time))
+        df_patient_results_list.append(df)
+
+    df_stats = pd.DataFrame(columns = ['fold','epoch','AUC', 'Accuracy', 'sensitivity', 'specificity', 'precision', 'f1'])
+    for df in df_patient_results_list:
+        df_stats = computeMetricsFromPatientResults(df, df_stats)
+
+    # XXX instead of doing all this its easier to just use something like
+    # sns.lineplot(x='epoch', y='AUC', data=df_stats[df_stats.fold == 0])
+    n_folds = len(df_stats.fold.unique())
+    k_epochs = len(df_stats.epoch.unique())
+    fold_stats = np.zeros((n_folds, len(df_patient_results_list), k_epochs))
+    for fold in df_stats.fold.unique():
+        for e_idx, e_stats in df_stats[df_stats.fold == fold].groupby('epoch'):
+            fold_stats[int(fold), :, int(e_idx)] = e_stats.AUC.values
+    import IPython; IPython.embed()
+    pass
+
+
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-e', '--experiment-name', default='main_experiment')
+    args = parser.parse_args()
+
     exp_results = []
     datasets = ['unpadded_centered_sequences', 'unpadded_sequences', 'padded_breath_by_breath', 'unpadded_downsampled_sequences']
     networks = ['cnn_lstm', 'cnn_single_breath_linear', 'cnn_transformer', 'lstm_only']
     base_networks = ['se_resnet18', 'resnet18', 'densenet18', 'vgg11']
 
-    main_experiments = glob('results/main_experiment*')
+    main_experiments = glob('results/{}*'.format(args.experiment_name))
     unique_experiments = set(['_'.join(exp.split('_')[:-1]) for exp in main_experiments])
     for exp in sorted(unique_experiments):
-        if 'cnn_linear' in exp:
-            continue
         start_times = list(set([os.path.splitext(file_.split('_')[-1])[0] for file_ in glob(exp + '*')]))
         mean_df_stats = getMeanMetrics(start_times)
+        #do_fold_graphing(start_times)
 
         for dt in datasets:
             if dt in exp:

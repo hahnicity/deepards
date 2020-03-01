@@ -4,6 +4,7 @@ import shutil
 import subprocess
 
 import numpy as np
+import pandas as pd
 
 ards_train =  ['0723RPI2120190416', '0015RPI0320150401', '0021RPI0420150513', '0026RPI1020150523', '0027RPI0620150525', '0093RPI0920151212', '0098RPI1420151218', '0099RPI0120151219', '0102RPI0120151225', '0120RPI1820160118', '0129RPI1620160126', '0147RPI1220160213', '0148RPI0120160214', '0149RPI1820160212', '0153RPI0720160217', '0194RPI0320160317', '0209RPI1920160408', '0224RPI3020160414', '0243RPI0720160512', '0245RPI1420160512', '0253RPI1220160606', '0260RPI2420160617', '0265RPI2920160622', '0266RPI1720160622', '0268RPI1220160624', '0271RPI1220160630', '0372RPI2220161211', '0381RPI2320161212', '0390RPI2220161230', '0412RPI5520170121', '0484RPI4220170630', '0506RPI3720170807', '0511RPI5220170831', '0514RPI5420170905', '0527RPI0420171028', '0546RPI5120171216', '0549RPI4420171213', '0551RPI0720180102', '0569RPI0420180116', '0640RPI2820180822']
 
@@ -19,10 +20,114 @@ other_test = ['0443RPI1620170319', '0410RPI4120170118', '0380RPI3920161212',
        '0137RPI1920160202', '0315RPI2720160910', '0132RPI1720160127',
        '0225RPI2520160416']
 
+aim1_train = ['0271RPI1220160630',
+ '0027RPI0620150525',
+ '0625RPI2820180628',
+ '0343RPI3920161016',
+ '0209RPI1920160408',
+ '0372RPI2220161211',
+ '0194RPI0320160317',
+ '0149RPI1820160212',
+ '0245RPI1420160512',
+ '0257RPI1220160615',
+ '0357RPI3520161101',
+ '0268RPI1220160624',
+ '0260RPI2420160617',
+ '0412RPI5520170121',
+ '0365RPI5820161125',
+ '0434RPI4520170224',
+ '0387RPI3920161224',
+ '0546RPI5120171216',
+ '0527RPI0420171028',
+ '0593RPI1920180226',
+ '0253RPI1220160606',
+ '0108RPI0120160101',
+ '0170RPI2120160301',
+ '0390RPI2220161230',
+ '0133RPI0920160127',
+ '0511RPI5220170831',
+ '0111RPI1520160101',
+ '0225RPI2520160416',
+ '0304RPI1620160829',
+ '0398RPI4220170104',
+ '0033RPI0520150603',
+ '0347RPI4220161016',
+ '0231RPI1220160424',
+ '0144RPI0920160212',
+ '0315RPI2720160910',
+ '0265RPI2920160622',
+ '0544RPI2420171204',
+ '0098RPI1420151218',
+ '0261RPI1220160617',
+ '0624RPI1920180702',
+ '0460RPI2220170518',
+ '0463RPI3220170522',
+ '0624RPI0320180708',
+ '0317RPI3220160910',
+ '0251RPI1820160609',
+ '0585RPI2720180206',
+ '0166RPI2220160227',
+ '0423RPI3220170205',
+ '0153RPI0720160217',
+ '0021RPI0420150513',
+ '0551RPI0720180102',
+ '0102RPI0120151225',
+ '0361RPI4620161115',
+ '0160RPI1420160220',
+ '0127RPI0120160124',
+ '0545RPI0520171214',
+ '0235RPI1320160426',
+ '0122RPI1320160120',
+ '0139RPI1620160205',
+ '0266RPI1720160622',
+ '0129RPI1620160126',
+ '0484RPI4220170630',
+ '0506RPI3720170807',
+ '0354RPI5820161029',
+ '0093RPI0920151212',
+ '0640RPI2820180822',
+ '0356RPI2220161101',
+ '0443RPI1620170319',
+ '0124RPI1220160123',
+ '0410RPI4120170118']
 
-def perform_random_split(dataset_path, split_ratio):
-    ards_pts = ards_train + ards_test
-    other_pts = other_train + other_test
+aim1_test = ['0411RPI5820170119',
+ '0224RPI3020160414',
+ '0336RPI3920161006',
+ '0147RPI1220160213',
+ '0514RPI5420170905',
+ '0099RPI0120151219',
+ '0558RPI0820180104',
+ '0552RPI2520180101',
+ '0148RPI0120160214',
+ '0243RPI0720160512',
+ '0549RPI4420171213',
+ '0163RPI0720160222',
+ '0132RPI1720160127',
+ '0026RPI1020150523',
+ '0015RPI0320150401',
+ '0380RPI3920161212',
+ '0120RPI1820160118',
+ '0137RPI1920160202',
+ '0381RPI2320161212',
+ '0112RPI1620160105',
+ '0135RPI1420160203',
+ '0723RPI2120190416',
+ '0306RPI3520160830',
+ '0173RPI1920160303',
+ '0569RPI0420180116',
+ '0125RPI1120160123',
+ '0705RPI5020190318',
+ '0745RPI1900000000',
+ '0157RPI0920160218',
+ '0145RPI1120160212']
+
+
+def perform_random_split(dataset_path, split_ratio, cohort_path):
+    cohort = pd.read_csv(cohort_path)
+    cohort['Patient Unique Identifier'] = cohort['Patient Unique Identifier'].astype(str)
+    ards_pts = cohort[cohort.Pathophysiology == 'ARDS']['Patient Unique Identifier'].to_list()
+    other_pts = cohort[cohort.Pathophysiology != 'ARDS']["Patient Unique Identifier"].to_list()
     all_pts = ards_pts + other_pts
     len_patho_test_pts = int((len(all_pts) * split_ratio) / 2)
     other_test_pts = list(np.random.choice(other_pts, size=len_patho_test_pts, replace=False))
@@ -32,16 +137,26 @@ def perform_random_split(dataset_path, split_ratio):
     perform_split(dataset_path, train_pts, test_pts)
 
 
-def perform_preset_split(dataset_path):
+def perform_preset_proto_split(dataset_path):
     perform_split(dataset_path, ards_train + other_train, ards_test + other_test)
+
+
+def perform_preset_aim1_split(dataset_path):
+    perform_split(dataset_path, aim1_train, aim1_test)
 
 
 def perform_split(dataset_path, train_pts, test_pts):
     all_data_dir = os.path.join(dataset_path, 'experiment1/all_data')
     train_dir = os.path.join(dataset_path, 'experiment1/prototrain')
     test_dir = os.path.join(dataset_path, 'experiment1/prototest')
-    shutil.rmtree(train_dir)
-    shutil.rmtree(test_dir)
+    try:
+        shutil.rmtree(train_dir)
+    except OSError:
+        pass
+    try:
+        shutil.rmtree(test_dir)
+    except OSError:
+        pass
     os.mkdir(train_dir)
     os.mkdir(test_dir)
     all_data_raw_dir = os.path.join(all_data_dir, 'raw')
@@ -71,15 +186,17 @@ def perform_split(dataset_path, train_pts, test_pts):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-dp', '--dataset-path', required=True)
-    parser.add_argument('set_type', choices=['preset', 'random'])
+    parser.add_argument('set_type', choices=['preset_proto', 'preset_aim1', 'random'])
     parser.add_argument('-sr', '--split-ratio', type=float, default=.2)
+    parser.add_argument('-c', '--cohort-path', default='cohort-description.csv')
     args = parser.parse_args()
 
-    if args.set_type == 'preset':
-        perform_preset_split(args.dataset_path)
+    if args.set_type == 'preset_proto':
+        perform_preset_proto_split(args.dataset_path)
     elif args.set_type == 'random':
-        perform_random_split(args.dataset_path, args.split_ratio)
-
+        perform_random_split(args.dataset_path, args.split_ratio, args.cohort_path)
+    elif args.set_type == 'preset_aim1':
+        perform_preset_aim1_split(args.dataset_path)
 
 
 if __name__ == "__main__":

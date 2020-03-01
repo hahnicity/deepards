@@ -29,24 +29,27 @@ class ARDSRawDataset(Dataset):
                  dataset_type,
                  bm_features=None,
                  to_pickle=None,
+                 all_sequences=[],
                  train=True,
                  kfold_num=None,
                  total_kfolds=None,
                  oversample_minority=False,
                  unpadded_downsample_factor=4.0,
                  drop_frame_if_frac_missing=True,
-                 whole_patient_super_batch=False):
+                 whole_patient_super_batch=False,
+                 holdout_set_type='main'):
         """
         Dataset to generate sequences of data for ARDS Detection
         """
         self.train = train
         self.kfold_num = kfold_num
-        self.all_sequences = []
+        self.all_sequences = all_sequences
+        self.seq_hours = []
         self.dataset_type = dataset_type
         self.total_kfolds = total_kfolds
         self.vent_bn_frac_missing = .5
         self.frames_dropped = dict()
-        self.n_sub_batches = n_sub_batches
+        self.n_sub_batches = n_sub_batches if all_sequences == [] else all_sequences[0][1].shape[0]
         self.unpadded_downsample_factor = unpadded_downsample_factor
         self.drop_frame_if_frac_missing = drop_frame_if_frac_missing
         self.cohort_file = cohort_file
@@ -56,10 +59,30 @@ class ARDSRawDataset(Dataset):
             raise Exception('currently oversampling with whole patient super batch is not supported')
 
         self.cohort = pd.read_csv(cohort_file)
-        if kfold_num is None:
+        self.cohort = self.cohort.rename(columns={'Patient Unique Identifier': 'patient_id'})
+        self.cohort['patient_id'] = self.cohort['patient_id'].astype(str)
+
+        if kfold_num is None and holdout_set_type == 'proto':
             data_subdir = 'prototrain' if train else 'prototest'
+        elif kfold_num is None and holdout_set_type == 'main':
+            data_subdir = 'training' if train else 'testing'
         else:
             data_subdir = 'all_data'
+
+        self.flow_time_bm_mu = [
+            -1.12003803e+01,  2.27065158e+01,  5.41515510e+01,  2.68864330e+01,
+            8.81662707e-01,  1.98707801e+00,  5.14447986e-01,  3.08663952e-02,
+            1.03526574e+00
+        ]
+        self.flow_time_bm_std = [
+            4.96512973e+00, 6.28153415e+00, 9.68798546e+01, 2.14905835e+01,
+            1.57385909e-01, 8.65758973e-01, 4.93673691e-01, 5.38365875e-02,
+            5.44132642e-01
+        ]
+        if self.all_sequences != []:
+            self.finalize_dataset_create(to_pickle, kfold_num)
+            return
+
         raw_dir = os.path.join(data_path, 'experiment{}'.format(experiment_num), data_subdir, 'raw')
         self.meta_dir = os.path.join(data_path, 'experiment{}'.format(experiment_num), data_subdir, 'meta')
         if not os.path.exists(raw_dir):
@@ -79,16 +102,7 @@ class ARDSRawDataset(Dataset):
             'dyn_compliance',
             'tve:tvi ratio',
         ]
-        self.flow_time_bm_mu = [
-            -1.12003803e+01,  2.27065158e+01,  5.41515510e+01,  2.68864330e+01,
-            8.81662707e-01,  1.98707801e+00,  5.14447986e-01,  3.08663952e-02,
-            1.03526574e+00
-        ]
-        self.flow_time_bm_std = [
-            4.96512973e+00, 6.28153415e+00, 9.68798546e+01, 2.14905835e+01,
-            1.57385909e-01, 8.65758973e-01, 4.93673691e-01, 5.38365875e-02,
-            5.44132642e-01
-        ]
+
         if dataset_type == 'padded_breath_by_breath':
             self._get_breath_by_breath_dataset(self._pad_breath, self._pathophysiology_target)
         elif dataset_type == 'stretched_breath_by_breath':
@@ -117,7 +131,9 @@ class ARDSRawDataset(Dataset):
             self._get_breath_by_breath_with_breath_meta_target(self._pad_breath, bm_features)
         else:
             raise Exception('Unknown dataset type: {}'.format(dataset_type))
+        self.finalize_dataset_create(to_pickle, kfold_num)
 
+    def finalize_dataset_create(self, to_pickle, kfold_num):
         self.derive_scaling_factors()
         if to_pickle:
             pd.to_pickle(self, to_pickle)
@@ -174,7 +190,6 @@ class ARDSRawDataset(Dataset):
             kfold_num=train_dataset.kfold_num,
             total_kfolds=train_dataset.total_kfolds,
         )
-        test_dataset.scaling_factors = train_dataset.scaling_factors
         return test_dataset
 
     @classmethod
@@ -255,8 +270,9 @@ class ARDSRawDataset(Dataset):
                 batch_arr = []
                 seq_vent_bns = []
                 meta_arr = []
+                batch_seq_hours = []
             last_patient = patient_id
-            patient_row = self.cohort[self.cohort['Patient Unique Identifier'] == patient_id]
+            patient_row = self.cohort[self.cohort['patient_id'] == patient_id]
             patient_row = patient_row.iloc[0]
             patho = 1 if patient_row['Pathophysiology'] == 'ARDS' else 0
             start_time = self._get_patient_start_time(patient_id)
@@ -303,25 +319,25 @@ class ARDSRawDataset(Dataset):
                 if np.any(np.abs(meta[ratio_indices]) > 100):
                     continue
 
+                seq_hour = (breath_time - start_time).total_seconds() / 60 / 60
                 meta = (meta - self.flow_time_bm_mu) / self.flow_time_bm_std
                 flow = np.array(breath['flow'])
                 b_seq = process_breath_func(flow)
                 batch_arr.append(b_seq)
                 seq_vent_bns.append(breath['vent_bn'])
                 meta_arr.append(meta)
+                batch_seq_hours.append(seq_hour)
 
                 if len(batch_arr) == self.n_sub_batches:
-                    if self._should_we_drop_frame(seq_vent_bns, patient_id):
-                        batch_arr = []
-                        seq_vent_bns = []
-                        meta_arr = []
-                        continue
-                    target = np.zeros(2)
-                    target[patho] = 1
-                    self.all_sequences.append([patient_id, np.array(batch_arr).reshape((self.n_sub_batches, 1, self.seq_len)), np.array(meta_arr), target])
+                    if not self._should_we_drop_frame(seq_vent_bns, patient_id):
+                        target = np.zeros(2)
+                        target[patho] = 1
+                        self.all_sequences.append([patient_id, np.array(batch_arr).reshape((self.n_sub_batches, 1, self.seq_len)), np.array(meta_arr), target])
+                        self.seq_hours.append(batch_seq_hours)
                     batch_arr = []
                     seq_vent_bns = []
                     meta_arr = []
+                    batch_seq_hours = []
 
     def _get_breath_by_breath_with_breath_meta_target(self, process_breath_func, bm_features):
         try:
@@ -374,6 +390,7 @@ class ARDSRawDataset(Dataset):
                 # no scaling of the breath meta is required here because we are just doing
                 # regression
                 self.all_sequences.append([patient_id, b_seq.reshape((1, self.seq_len)), meta])
+                self.seq_hours.append([np.nan])
 
     def _get_breath_by_breath_dataset(self, process_breath_func, target_func):
         """
@@ -391,6 +408,7 @@ class ARDSRawDataset(Dataset):
             if patient_id != last_patient:
                 batch_arr = []
                 seq_vent_bns = []
+                batch_seq_hours = []
                 if self.whole_patient_super_batch and super_batch_tmp_arr != []:
                     self.all_sequences.append([last_patient, np.array(super_batch_tmp_arr), target])
                     super_batch_tmp_arr = []
@@ -416,23 +434,24 @@ class ARDSRawDataset(Dataset):
                 elif breath_time > start_time + pd.Timedelta(hours=24):
                     break
 
+                seq_hour = (breath_time - start_time).total_seconds() / 60 / 60
                 flow = np.array(breath['flow'])
                 b_seq = process_breath_func(flow)
                 batch_arr.append(b_seq)
                 seq_vent_bns.append(breath['vent_bn'])
+                batch_seq_hours.append(seq_hour)
 
                 if len(batch_arr) == self.n_sub_batches:
-                    if self._should_we_drop_frame(seq_vent_bns, patient_id):
-                        batch_arr = []
-                        seq_vent_bns = []
-                        continue
-                    breath_window = np.array(batch_arr).reshape((self.n_sub_batches, 1, self.seq_len))
-                    if self.whole_patient_super_batch:
-                        super_batch_tmp_arr.append(breath_window)
-                    else:
-                        self.all_sequences.append([patient_id, breath_window, target])
+                    if not self._should_we_drop_frame(seq_vent_bns, patient_id):
+                        breath_window = np.array(batch_arr).reshape((self.n_sub_batches, 1, self.seq_len))
+                        if self.whole_patient_super_batch:
+                            super_batch_tmp_arr.append(breath_window)
+                        else:
+                            self.all_sequences.append([patient_id, breath_window, target])
+                        self.seq_hours.append(batch_seq_hours)
                     batch_arr = []
                     seq_vent_bns = []
+                    batch_seq_hours = []
 
     def get_unpadded_sequences_dataset(self, processing_func, target_func):
         last_patient = None
@@ -446,8 +465,10 @@ class ARDSRawDataset(Dataset):
                 breath_arr = []
                 seq_vent_bns = []
                 if self.whole_patient_super_batch and super_batch_tmp_arr != []:
+                    self.seq_hours.append(batch_seq_hours)
                     self.all_sequences.append([last_patient, np.array(super_batch_tmp_arr), target])
                     super_batch_tmp_arr = []
+                batch_seq_hours = []
 
             last_patient = patient_id
             target = target_func(patient_id)
@@ -470,8 +491,10 @@ class ARDSRawDataset(Dataset):
                 elif breath_time > start_time + pd.Timedelta(hours=24):
                     break
 
+                seq_hour = (breath_time - start_time).total_seconds() / 60 / 60
                 seq_vent_bns.append(breath['vent_bn'])
                 batch_arr, breath_arr = processing_func(breath['flow'], breath_arr, batch_arr)
+                batch_seq_hours.append(seq_hour)
 
                 if len(batch_arr) == self.n_sub_batches:
                     if self._should_we_drop_frame(seq_vent_bns, patient_id):
@@ -479,28 +502,34 @@ class ARDSRawDataset(Dataset):
                         breath_arr = []
                         batch_arr = []
                         seq_vent_bns = []
+                        batch_seq_hours = []
                         continue
                     breath_window = np.array(batch_arr).reshape((self.n_sub_batches, 1, self.seq_len))
                     if self.whole_patient_super_batch:
                         super_batch_tmp_arr.append(breath_window)
                     else:
                         self.all_sequences.append([patient_id, breath_window, target])
+                    self.seq_hours.append(batch_seq_hours)
                     batch_arr = []
                     seq_vent_bns = []
+                    batch_seq_hours = []
 
     def _autoencoder_target(self, _):
         return np.array([np.nan, np.nan])
 
     def _pathophysiology_target(self, patient_id):
-        patient_row = self.cohort[self.cohort['Patient Unique Identifier'] == patient_id]
-        patient_row = patient_row.iloc[0]
+        patient_row = self.cohort[self.cohort['patient_id'] == patient_id]
+        try:
+            patient_row = patient_row.iloc[0]
+        except:
+            raise ValueError('Could not find patient {} in cohort file'.format(patient_id))
         patho = 1 if patient_row['Pathophysiology'] == 'ARDS' else 0
         target = np.zeros(2)
         target[patho] = 1
         return target
 
     def _get_patient_start_time(self, patient_id):
-        patient_row = self.cohort[self.cohort['Patient Unique Identifier'] == patient_id]
+        patient_row = self.cohort[self.cohort['patient_id'] == patient_id]
         patient_row = patient_row.iloc[0]
         patho = 1 if patient_row['Pathophysiology'] == 'ARDS' else 0
         if patho == 1:
@@ -573,9 +602,15 @@ class ARDSRawDataset(Dataset):
         return self._unpadded_centered_processing(flow, breath_arr, batch_arr)
 
     def _get_patient_id_from_file(self, filename):
+        pt_id = filename.split('/')[-2]
+        # sanity check to see if patient
         match = re.search(r'(0\d{3}RPI\d{10})', filename)
-        try:
+        if match:
             return match.groups()[0]
+        try:
+            # id is from anonymous dataset
+            float(pt_id)
+            return pt_id
         except:
             raise ValueError('could not find patient id in file: {}'.format(filename))
 
@@ -676,6 +711,7 @@ class SiameseNetworkDataset(ARDSRawDataset):
         self.total_kfolds = None
         self.all_sequences = all_sequences
         self.n_sub_batches = n_sub_batches if all_sequences == [] else all_sequences[0][1].shape[0]
+        # XXX enable ability to split to main if wanted.
         data_subdir = 'prototrain' if train else 'prototest'
         raw_dir = os.path.join(data_path, 'experiment{}'.format(experiment_num), data_subdir, 'raw')
         self.dataset_type = dataset_type

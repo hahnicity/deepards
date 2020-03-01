@@ -1,13 +1,19 @@
 from copy import copy
+from math import ceil, sqrt
 import os
 import csv
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from prettytable import PrettyTable
 from sklearn.metrics import roc_auc_score
 import torch
 
+import deepards.dtw_lib as dtw_lib
+
 filename = './Data/data.csv'
+
 
 def get_fns_idx(actual, predictions, label):
     pos = actual[actual == label]
@@ -351,6 +357,147 @@ class DeepARDSResults(object):
         meter_name = '{}_epoch_{}'.format(metric_name, epoch_num)
         print(self.reporting.meters[meter_name])
 
+    def perform_dtw_preprocessing(self, test_dataset, dtw_cache_dir):
+        copy_pred_to_hour = self.pred_to_hour_frame.copy()
+        for _, pt_rows in self.pred_to_hour_frame.groupby('patient'):
+            pt = pt_rows.iloc[0].patient
+            dtw_scores = dtw_lib.analyze_patient(pt, test_dataset, dtw_cache_dir, self.pred_to_hour_frame)
+            copy_pred_to_hour.loc[copy_pred_to_hour.patient==pt, 'dtw'] = dtw_scores.sort_index().dtw
+        copy_pred_to_hour.to_pickle('dtw_to_predictions.pkl')
+
+    def perform_hourly_patient_plot_with_dtw(self, test_dataset, dtw_cache_dir):
+        for _, pt_rows in self.pred_to_hour_frame.groupby('patient'):
+            self.plot_disease_evolution(pt_rows)
+            pt = pt_rows.iloc[0].patient
+            # can provide None because we will just be pulling from cache
+            dtw = dtw_lib.analyze_patient(pt, test_dataset, dtw_cache_dir, None)
+            dtw = dtw.sort_values(by='hour')
+            self.plot_dtw_patient_data(dtw, True, 2, True)
+            plt.show()
+
+    def perform_hourly_patient_plot(self):
+        for i, rows in self.pred_to_hour_frame.groupby('patient'):
+            self.plot_disease_evolution(rows)
+            plt.show()
+
+    def plot_dtw_patient_data(self, dtw_data, set_label, size, xy_visible, y_max=None):
+        """
+        Plot DTW for an individual patient
+
+        :param pt_rows: Rows grouped by patient from the dataframe received from
+                        self.results.get_all_hourly_preds
+        """
+        y_max = dtw_data.dtw.max() + 1 if not y_max else y_max
+        ax2 = plt.gca().twinx()
+        ax2.scatter(dtw_data.hour, dtw_data.dtw, s=size, label='DTW', c='#663a3e')
+        ax2.set_ylim(0, y_max)
+        if set_label:
+            ax2.set_ylabel('DTW Score')
+        if not xy_visible:
+            ax2.set_yticks([])
+            ax2.set_xticks([])
+
+    def plot_dtw_by_minute(self, pt, test_dataset, dtw_cache_dir):
+        dtw = dtw_lib.analyze_patient(pt, test_dataset, dtw_cache_dir, None)
+        dtw = dtw.sort_values(by='hour')
+        pt_data = self.pred_to_hour_frame[self.pred_to_hour_frame.patient == pt]
+        for hour in range(24):
+            if len(pt_data[(pt_data.hour >= hour) & (pt_data.hour < hour+1)]) == 0:
+                continue
+            self.plot_disease_evolution(pt_data, plot_by='minute', plot_hour=hour, plt_title='Plot by Minute {} hour: {}'.format(pt, hour+1), xlab='Minute')
+            dtw_hr_data = dtw[(dtw.hour >= hour) & (dtw.hour < hour+1)]
+            # denormalize minute back to 0-60
+            dtw_hr_data['hour'] = (dtw_hr_data.hour - hour) * 60
+            self.plot_dtw_patient_data(dtw_hr_data, True, 6, True, dtw['dtw'].max())
+            plt.show()
+
+    def plot_disease_evolution(self, pt_data, legend=True, fontsize=11, xylabel=True, xy_visible=True, plot_by='hour', plot_hour=None, plt_title=None, xlab="Hour"):
+        # defaults, but we can parameterize them in future if we need
+        cmap = ['#6c89b7', '#ff919c']
+        plt.rcParams['legend.loc'] = 'upper right'
+        time_units = {'hour': 24, 'minute': 60}[plot_by]
+
+        bar_data = [[0, 0] for _ in range(time_units)]
+        pt = pt_data.iloc[0].patient
+        pt_data_in_bin = pt_data if not plot_hour else pt_data[(pt_data.hour >= plot_hour) & (pt_data.hour < plot_hour+1)]
+
+        for interval  in range(time_units):
+            lower_bound = plot_hour + (interval / 60.0) if plot_hour is not None else interval
+            upper_bound = plot_hour + (interval / 60.0) + (1 / 60.0) if plot_hour is not None else interval+1
+            bin_pt_data = pt_data[(pt_data.hour >= lower_bound) & (pt_data.hour < upper_bound)]
+            bar_data[interval] = [1 - bin_pt_data.pred.sum() / float(len(bin_pt_data)), bin_pt_data.pred.sum() / float(len(bin_pt_data))]
+
+        plots = []
+        bottom = np.zeros(time_units)
+        for n in [0, 1]:
+            bar_fracs = np.array([bar_data[bin][n] for bin in range(0, time_units)])
+            plots.append(plt.bar(range(0, time_units), bar_fracs, bottom=bottom, color=cmap[n]))
+            bottom = bottom + bar_fracs
+
+        plt.title("Patient {}".format(pt[:4]) if not plt_title else plt_title, fontsize=fontsize, pad=1)
+        if xylabel:
+            plt.ylabel('Fraction Predicted', fontsize=fontsize)
+            plt.xlabel(xlab, fontsize=fontsize)
+        plt.xlim(-.8, time_units - .02)
+        if legend:
+            all_votes = len(pt_data_in_bin)
+            mapping = {
+                'Non-ARDS_percent': round(1 - pt_data_in_bin.pred.sum() / float(all_votes), 3) * 100,
+                'ARDS_percent': round(pt_data_in_bin.pred.sum() / float(all_votes), 3) * 100,
+            }
+
+            plt.legend([
+                "{}: {}%".format(patho, mapping['{}_percent'.format(patho)]) for patho in ['Non-ARDS', 'ARDS']
+            ], fontsize=fontsize)
+        if not xy_visible:
+            plt.yticks([])
+            plt.xticks([])
+        else:
+            plt.yticks(np.arange(0, 1.01, .1))
+            plt.xticks(range(0, time_units+1, 5), range(1, time_units+1, 5))
+
+    def plot_tiled_disease_evol(self, test_dataset, dtw_cache_dir, plot_with_dtw):
+        """
+        Plot a tiled bar chart of patient predictions. Plot by TPs/TNs/FPs/FNs
+        """
+        tps, tns, fps, fns = [], [], [], []
+        for i, rows in self.results.groupby('patient'):
+            pt = rows.iloc[0].patient
+            total_votes = rows[['OTHER_votes', 'ARDS_votes']].sum().sum()
+            ards_votes = rows['ARDS_votes'].sum()
+            ground_truth = rows.iloc[0].patho
+            if ards_votes / float(total_votes) >= .5:
+                pred = 1
+            else:
+                pred = 0
+
+            if pred == 1 and ground_truth == 1:
+                tps.append(pt)
+            elif pred == 0 and ground_truth == 0:
+                tns.append(pt)
+            elif pred == 1 and ground_truth == 0:
+                fps.append(pt)
+            elif pred != 1 and ground_truth == 1:
+                fns.append(pt)
+
+        for arr, title in [
+            (tps, 'ARDS True Pos'),
+            (tns, 'ARDS True Neg'),
+            (fps, 'ARDS False Pos'),
+            (fns, 'ARDS False Neg'),
+        ]:
+            for idx, pt in enumerate(arr):
+                layout = int(ceil(sqrt(len(arr))))
+                plt.suptitle(title)
+                pt_rows = self.pred_to_hour_frame[self.pred_to_hour_frame.patient == pt]
+                plt.subplot(layout, layout, idx+1)
+                self.plot_disease_evolution(pt_rows, legend=False, fontsize=6, xylabel=False, xy_visible=False)
+                if plot_with_dtw:
+                    dtw = dtw_lib.analyze_patient(pt, test_dataset, dtw_cache_dir, None)
+                    dtw = dtw.sort_values(by='hour')
+                    self.plot_dtw_patient_data(dtw, False, 0.05, False, y_max=100)
+            plt.show()
+
     def perform_patient_predictions(self, y_test, predictions, fold_num, epoch_num):
         """
         After a group of patients is run through the model, record all necessary stats
@@ -407,3 +554,20 @@ class DeepARDSResults(object):
     def save_all(self):
         self.reporting.save_all()
         torch.save(self.hyperparams, os.path.join(self.results_dir, self.experiment_save_filename))
+
+    def save_predictions_by_hour(self, y_test, predictions, pred_hour):
+        """
+        Save predictions that we make by the hour (after study inclusion) that they were made.
+
+        :param y_test: y_test dataset. Can be retrieved by dataset.get_ground_truth_df()
+        :param predictions: Predictions made indexed by their batch index
+        :param pred_hour: The hour that each breath was processed. Can be retrieved via dataset.seq_hours
+        """
+        processed_pred_hour = np.zeros(len(pred_hour))
+        self.pred_to_hour_frame = predictions.to_frame(name='pred')
+        for idx, hrs in enumerate(pred_hour):
+            if not idx in self.pred_to_hour_frame.index:
+                raise Exception('index {} not found in pred_to_hour_frame'.format(idx))
+            pred_hour_mean = sum(hrs) / len(hrs)
+            self.pred_to_hour_frame.loc[idx, 'hour'] = pred_hour_mean
+        self.pred_to_hour_frame = self.pred_to_hour_frame.merge(y_test, left_index=True, right_index=True)
