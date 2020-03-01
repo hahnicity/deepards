@@ -943,6 +943,11 @@ def main():
     # convenience code
     if args.load_siamese:
         args.network = 'siamese_pretrained'
+    
+    #take care of command-line input for bm_features
+    for i in range(len(args.bm_features)):
+        if 'ratio' in args.bm_features[i]:
+            args.bm_features[i] = args.bm_features[i].replace('_',' ')
 
     if args.fl_alpha > 1 or args.fl_alpha < 0:
         raise Exception('Focal loss alpha must be between 0 and 1')
