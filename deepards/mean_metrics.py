@@ -2,8 +2,10 @@ import argparse
 from glob import glob
 import os
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import seaborn as sns
 from sklearn.metrics import confusion_matrix, roc_auc_score, f1_score
 
 
@@ -73,16 +75,12 @@ def do_fold_graphing(start_times):
     for df in df_patient_results_list:
         df_stats = computeMetricsFromPatientResults(df, df_stats)
 
-    # XXX instead of doing all this its easier to just use something like
-    # sns.lineplot(x='epoch', y='AUC', data=df_stats[df_stats.fold == 0])
-    n_folds = len(df_stats.fold.unique())
-    k_epochs = len(df_stats.epoch.unique())
-    fold_stats = np.zeros((n_folds, len(df_patient_results_list), k_epochs))
-    for fold in df_stats.fold.unique():
-        for e_idx, e_stats in df_stats[df_stats.fold == fold].groupby('epoch'):
-            fold_stats[int(fold), :, int(e_idx)] = e_stats.AUC.values
-    import IPython; IPython.embed()
-    pass
+    if len(df_stats.fold.unique()) > 1:
+        for k, stats in df_stats.groupby('fold'):
+            sns.lineplot(x='epoch', y='AUC', data=stats, label='fold {}'.format(k))
+    sns.lineplot(x='epoch', y='AUC', data=df_stats, label='aggregate_results')
+    plt.xticks(np.arange(len(df_stats.epoch.unique())), sorted((df_stats.epoch.unique()+1).astype(int)))
+    plt.show()
 
 
 if __name__ == "__main__":
@@ -123,4 +121,5 @@ if __name__ == "__main__":
 
         exp_results.append([dt, net, base, mean_df_stats.AUC.mean()])
     exp_results = pd.DataFrame(exp_results, columns=['dataset_type', 'network', 'base_cnn', 'auc'])
+    do_fold_graphing(start_times)
     import IPython; IPython.embed()

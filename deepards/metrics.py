@@ -364,7 +364,11 @@ class DeepARDSResults(object):
             pt = pt_rows.iloc[0].patient
             dtw_scores = dtw_lib.analyze_patient(pt, test_dataset, dtw_cache_dir, self.pred_to_hour_frame)
             copy_pred_to_hour.loc[copy_pred_to_hour.patient==pt, 'dtw'] = dtw_scores.sort_index().dtw
-        copy_pred_to_hour.to_pickle('dtw_to_predictions.pkl')
+        copy_pred_to_hour.to_pickle(os.path.join(dtw_cache_dir, 'dtw_{}_nb{}_{}_predictions.pkl'.format(
+            test_dataset.dataset_type,
+            test_dataset.n_sub_batches,
+            'kfold' if test_dataset.kfold_num else 'holdout',
+        )))
 
     def perform_hourly_patient_plot_with_dtw(self, test_dataset, dtw_cache_dir):
         for _, pt_rows in self.pred_to_hour_frame.groupby('patient'):
