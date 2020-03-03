@@ -7,6 +7,22 @@ import seaborn as sns
 import statsmodels.api as sm
 
 
+def group_by_hour(dtw_and_preds):
+    dtw_to_frac = []
+    for _, pt_rows in dtw_and_preds.groupby('patient'):
+        patho = pt_rows.iloc[0].y
+        for hour in range(24):
+            rows = pt_rows[(pt_rows.hour >= hour) & (pt_rows.hour < hour+1)]
+            if len(rows) == 0:
+                continue
+
+            pred_frac = rows.pred.sum() / float(len(rows))
+            dtw_to_frac.append([pred_frac, patho, rows.dtw.mean(), rows.dtw.max(), rows.dtw.min(), rows.dtw.std()])
+    data = pd.DataFrame(dtw_to_frac, columns=['target', 'patho', 'mean', 'max', 'min', 'std'])
+    data = data.replace([np.inf, -np.inf], np.nan).dropna()
+    return data
+
+
 def group_by_minute(dtw_and_preds):
     # first col is pred frac, next is avg dtw, next is max, next is min, next is std
     dtw_to_frac = []
@@ -56,12 +72,14 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('file')
     parser.add_argument('--regression-type', choices=['class_targeting', 'misclassification_targeting'], default='class_targeting')
-    parser.add_argument('--feature-method', choices=['group_by_minute', 'obs_only'], default='obs_only')
+    parser.add_argument('--feature-method', choices=['group_by_hour', 'group_by_minute', 'obs_only'], default='obs_only')
     args = parser.parse_args()
 
     df = pd.read_pickle(args.file)
     if args.feature_method == 'group_by_minute':
         data = group_by_minute(df)
+    elif args.feature_method == 'group_by_hour':
+        data = group_by_hour(df)
     elif args.feature_method == 'obs_only':
         data = obs_only(df)
 
