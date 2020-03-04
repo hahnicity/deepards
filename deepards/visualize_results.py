@@ -3,7 +3,7 @@ from glob import glob
 from warnings import warn
 
 import matplotlib.pyplot as plt
-plt.switch_backend('tkagg')
+plt.switch_backend('agg')
 import numpy as np
 from pprint import pprint
 from prettytable import PrettyTable
@@ -11,7 +11,6 @@ import torch
 
 
 get_moving_average = lambda x, N: np.convolve(x, np.ones((N,))/N, mode='valid')
-
 
 def visualize_results_for_start_time(start_time):
     glob_search = 'results/loss_fold_*_{}*'.format(start_time)
@@ -144,8 +143,9 @@ def stats(metric, vals):
     print(table)
 
 
-def visualize_results_for_experiment(experiment_name, filter_by_base_network):
-    experiment_files = glob('results/{}_1*.pth'.format(experiment_name))
+def visualize_results_for_experiment(experiment_name, filter_by_base_network, save):
+    experiment_files = glob('results/{}_*.pth'.format(experiment_name))
+    #print(experiment_files)
     experiment_data = [torch.load(f) for f in experiment_files]
     for i, exp_data in enumerate(experiment_data):
         if 'n_sub_batches' not in exp_data:
@@ -191,7 +191,12 @@ def visualize_results_for_experiment(experiment_name, filter_by_base_network):
         plt.legend(loc='lower right', prop={'size': 8})
         plt.grid()
         plt.ylabel(metric.replace('_', ' '))
-        plt.show()
+        if save:
+            file_name = 'plots/{}_{}_{}.png'.format(metric, experiment_name, start_time)
+            plt.savefig(file_name)
+            plt.clf()
+        else:
+            plt.show()
 
 
 def main():
@@ -200,12 +205,13 @@ def main():
     mutex.add_argument('-st', '--start-time')
     mutex.add_argument('-exp', '--experiment-name')
     parser.add_argument('--filter-by-base-net', help='filter all results by a base netwwork')
+    parser.add_argument('--save', action='store_true')
     args = parser.parse_args()
 
     if args.start_time:
         visualize_results_for_start_time(args.start_time)
     elif args.experiment_name:
-        visualize_results_for_experiment(args.experiment_name, args.filter_by_base_net)
+        visualize_results_for_experiment(args.experiment_name, args.filter_by_base_net,args.save)
 
 
 if __name__ == "__main__":

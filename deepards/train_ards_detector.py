@@ -31,33 +31,32 @@ from deepards.models.unet import UNet
 from deepards.models.vgg import vgg11_bn, vgg13_bn
 
 torch.set_default_tensor_type('torch.FloatTensor')
-base_networks = {
-    'resnet18': resnet18,
-    'resnet50': resnet50,
-    'resnet101': resnet101,
-    'resnet152': resnet152,
-    'unet': UNet,
-    'densenet18': densenet18,
-    'densenet121': densenet121,
-    'densenet161': densenet161,
-    'densenet169': densenet169,
-    'densenet201': densenet201,
-    'basic_cnn_ae': AutoencoderCNN,
-    'senet18': senet18,
-    'senet154': senet154,
-    'se_resnet18': se_resnet18,
-    'se_resnet50': se_resnet50,
-    'se_resnet101': se_resnet101,
-    'se_resnet152': se_resnet152,
-    'se_resnext50_32x4d': se_resnext50_32x4d,
-    'se_resnext101_32x4d': se_resnext101_32x4d,
-    'vgg11': vgg11_bn,
-    'vgg13': vgg13_bn,
-}
 
 
 class BaseTraining(object):
-    clip_odd_batches = False
+    base_networks = {
+        'resnet18': resnet18,
+        'resnet50': resnet50,
+        'resnet101': resnet101,
+        'resnet152': resnet152,
+        'unet': UNet,
+        'densenet18': densenet18,
+        'densenet121': densenet121,
+        'densenet161': densenet161,
+        'densenet169': densenet169,
+        'densenet201': densenet201,
+        'basic_cnn_ae': AutoencoderCNN,
+        'senet18': senet18,
+        'senet154': senet154,
+        'se_resnet18': se_resnet18,
+        'se_resnet50': se_resnet50,
+        'se_resnet101': se_resnet101,
+        'se_resnet152': se_resnet152,
+        'se_resnext50_32x4d': se_resnext50_32x4d,
+        'se_resnext101_32x4d': se_resnext101_32x4d,
+        'vgg11': vgg11_bn,
+        'vgg13': vgg13_bn,
+    }
 
     def __init__(self, args):
         self.args = args
@@ -152,11 +151,7 @@ class BaseTraining(object):
                 self.args.cohort_file,
                 self.args.n_sub_batches,
                 dataset_type=self.args.dataset_type,
-<<<<<<< HEAD
                 bm_features=self.args.bm_features,
-=======
-                all_sequences=[],
->>>>>>> master
                 to_pickle=self.args.train_to_pickle,
                 kfold_num=kfold_num,
                 total_kfolds=self.args.kfolds,
@@ -168,28 +163,22 @@ class BaseTraining(object):
             train_dataset = ARDSRawDataset.from_pickle(self.args.train_from_pickle, self.args.oversample)
 
         self.n_sub_batches = train_dataset.n_sub_batches
-        if not self.args.test_from_pickle and (self.args.kfolds is not None):
+        if not self.args.test_from_pickle and self.args.kfolds is not None:
             test_dataset = ARDSRawDataset.make_test_dataset_if_kfold(train_dataset)
         elif self.args.test_from_pickle:
             test_dataset = ARDSRawDataset.from_pickle(self.args.test_from_pickle)
         else:  # holdout, no pickle, no kfold
-            # there is a really bizarre bug where my default arg is being overwritten by
-            # the state of the train_dataset obj. I checked pointer references and there was
-            # nothing. I might be able to do a deepcopy, but it might be easier to just supply
-            # a blank list instead of relying on default
             test_dataset = ARDSRawDataset(
                 self.args.data_path,
                 self.args.experiment_num,
                 self.args.cohort_file,
                 self.args.n_sub_batches,
-                all_sequences=[],
                 dataset_type=self.args.dataset_type,
                 bm_features=self.args.bm_features,
                 to_pickle=self.args.test_to_pickle,
                 train=False,
                 unpadded_downsample_factor=self.args.downsample_factor,
                 drop_frame_if_frac_missing=self.args.no_drop_frames,
-                holdout_set_type=self.args.holdout_set_type,
             )
 
         return train_dataset, test_dataset
@@ -222,8 +211,7 @@ class BaseTraining(object):
             model = self.get_model()
             optimizer = self.get_optimizer(model)
             for epoch_num in range(self.args.epochs):
-                if not self.args.no_train:
-                    self.run_train_epoch(model, train_loader, optimizer, epoch_num+1, fold_num)
+                self.run_train_epoch(model, train_loader, optimizer, epoch_num+1, fold_num)
                 if self.args.reshuffle_oversample_per_epoch:
                     train_loader.dataset.set_oversampling_indices()
 
@@ -235,12 +223,10 @@ class BaseTraining(object):
                 torch.save(model, model_path)
 
         self.perform_post_modeling_actions()
-        # XXX will not work with kfold as it currently is
-        self.perform_plotting(test_dataset)
         print('Run start time: {}'.format(self.start_time))
 
     def get_base_network(self):
-        base_network = base_networks[self.args.base_network]
+        base_network = self.base_networks[self.args.base_network]
 
         if self.args.load_base_network:
             saved_model = torch.load(self.args.load_base_network)
@@ -277,7 +263,7 @@ class BaseTraining(object):
         self.pred_idx = []
         with torch.no_grad():
             for idx, (obs_idx, seq, metadata, target) in enumerate(test_loader):
-                if not self.args.batch_size == 1 and self.clip_odd_batches:
+                if not self.args.batch_size == 1:
                     obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)
                 if seq.shape[0] == 0:
                     continue
@@ -323,24 +309,6 @@ class BaseTraining(object):
             metadata = metadata[:new_dim]
         return obs_idx, seq, metadata, target
 
-    def perform_plotting(self, test_dataset):
-        # just using hard-coded argument for now.
-        dtw_cache_dir = 'dtw_cache'
-        if self.args.plot_dtw_with_disease or self.args.plot_dtw_by_minute:
-            self.results.perform_dtw_preprocessing(test_dataset, dtw_cache_dir)
-
-        if self.args.plot_dtw_by_minute:
-            self.results.plot_dtw_by_minute(self.args.plot_dtw_by_minute, test_dataset, dtw_cache_dir)
-
-        if self.args.plot_untiled_disease_evol:
-            self.results.perform_hourly_patient_plot()
-
-        if self.args.plot_tiled_disease_evol:
-            self.results.plot_tiled_disease_evol(test_dataset, dtw_cache_dir, self.args.plot_dtw_with_disease)
-
-        if self.args.plot_dtw_with_disease and not self.args.plot_tiled_disease_evol:
-            self.results.perform_hourly_patient_plot_with_dtw(test_dataset, dtw_cache_dir)
-
 
 class PatientClassifierMixin(object):
     def record_testing_results(self, target, batch_preds, fold_num):
@@ -352,7 +320,6 @@ class PatientClassifierMixin(object):
         self.preds = self.preds.sort_index()
         y_test = test_dataset.get_ground_truth_df()
         self.results.perform_patient_predictions(y_test, self.preds, fold_num, epoch_num)
-        self.results.save_predictions_by_hour(y_test, self.preds, test_dataset.seq_hours)
 
     def set_loss_criterion(self):
         if self.args.loss_func == 'vacillating':
@@ -534,7 +501,6 @@ class NestedMixin(object):
                 self.args.experiment_num,
                 self.args.cohort_file,
                 self.args.n_sub_batches,
-                all_sequences=[],
                 dataset_type=self.args.dataset_type,
                 bm_features=self.args.bm_features,
                 to_pickle=self.args.train_to_pickle,
@@ -558,7 +524,6 @@ class NestedMixin(object):
                 self.args.experiment_num,
                 self.args.cohort_file,
                 self.args.n_sub_batches,
-                all_sequences=[],
                 dataset_type=self.args.dataset_type,
                 bm_features=self.args.bm_features,
                 to_pickle=self.args.test_to_pickle,
@@ -566,7 +531,6 @@ class NestedMixin(object):
                 unpadded_downsample_factor=self.args.downsample_factor,
                 drop_frame_if_frac_missing=self.args.no_drop_frames,
                 whole_patient_super_batch=True,
-                holdout_set_type=self.args.holdout_set_type,
             )
 
         return train_dataset, test_dataset
@@ -584,7 +548,6 @@ class NestedMixin(object):
         self.preds = self.preds.sort_index()
         y_test = test_dataset.get_ground_truth_df()
         self.results.perform_patient_predictions(y_test, self.preds, fold_num, epoch_num)
-        self.save_predictions_by_hour(y_test, self.preds, test_dataset.seq_hours)
 
     def transform_obs_idx(self, obs_idx, outputs):
         # XXX add last_breath / all_breaths split
@@ -605,8 +568,6 @@ class CNNToNestedRNNModel(NestedMixin, BaseTraining):
 
 
 class CNNToNestedLSTMModel(NestedMixin, BaseTraining):
-    clip_odd_batches = True
-
     def __init__(self, args):
         args.batch_size = 1
         super(CNNToNestedLSTMModel, self).__init__(args)
@@ -633,8 +594,6 @@ class CNNTransformerModel(WithTimeLayerClassifierMixin, BaseTraining, PatientCla
 
 
 class CNNLSTMModel(WithTimeLayerClassifierMixin, BaseTraining, PatientClassifierMixin):
-    clip_odd_batches = True
-
     def __init__(self, args):
         super(CNNLSTMModel, self).__init__(args)
 
@@ -708,8 +667,6 @@ class CNNLSTMModel(WithTimeLayerClassifierMixin, BaseTraining, PatientClassifier
 
 
 class CNNLSTMDoubleLinearModel(BaseTraining, PatientClassifierMixin):
-    clip_odd_batches = True
-
     def __init__(self, args):
         super(CNNLSTMDoubleLinearModel, self).__init__(args)
 
@@ -809,8 +766,6 @@ class MetadataOnlyModel(BaseTraining, PatientClassifierMixin):
 
 
 class LSTMOnlyModel(WithTimeLayerClassifierMixin, BaseTraining, PatientClassifierMixin):
-    clip_odd_batches = True
-
     def __init__(self, args):
         super(LSTMOnlyModel, self).__init__(args)
 
@@ -857,8 +812,6 @@ class AutoencoderModel(BaseTraining, RegressorMixin):
 
 
 class SiameseCNNLSTMModel(SiameseMixin, BaseTraining):
-    clip_odd_batches = True
-
     def __init__(self, args):
         super(SiameseCNNLSTMModel, self).__init__(args)
 
@@ -893,31 +846,28 @@ class SiamesePretrainedModel(WithTimeLayerClassifierMixin, BaseTraining, Patient
         return SiameseARDSClassifier(network)
 
 
-# Is putting a global in code like this a great idea? probably not, but saves some hassle
-# on outside scripting
-network_map = {
-    'cnn_lstm': CNNLSTMModel,
-    'cnn_linear': CNNLinearModel,
-    'cnn_regressor': CNNRegressorModel,
-    'metadata_only': MetadataOnlyModel,
-    'autoencoder': AutoencoderModel,
-    'cnn_transformer': CNNTransformerModel,
-    'siamese_cnn_linear': SiameseCNNLinearModel,
-    'siamese_cnn_lstm': SiameseCNNLSTMModel,
-    'siamese_cnn_transformer': SiameseCNNTransformerModel,
-    'siamese_pretrained': SiamesePretrainedModel,
-    'cnn_lstm_double_linear': CNNLSTMDoubleLinearModel,
-    'cnn_double_linear': CNNDoubleLinearModel,
-    'cnn_single_breath_linear': CNNSingleBreathLinearModel,
-    'lstm_only': LSTMOnlyModel,
-    'cnn_to_nested_rnn': CNNToNestedRNNModel,
-    'cnn_to_nested_lstm': CNNToNestedLSTMModel,
-    'cnn_to_nested_transformer': CNNToNestedTransformerModel,
-    'cnn_linear_compr_to_rf': CNNLinearComprToRFModel,
-}
-
-
 def main():
+    network_map = {
+        'cnn_lstm': CNNLSTMModel,
+        'cnn_linear': CNNLinearModel,
+        'cnn_regressor': CNNRegressorModel,
+        'metadata_only': MetadataOnlyModel,
+        'autoencoder': AutoencoderModel,
+        'cnn_transformer': CNNTransformerModel,
+        'siamese_cnn_linear': SiameseCNNLinearModel,
+        'siamese_cnn_lstm': SiameseCNNLSTMModel,
+        'siamese_cnn_transformer': SiameseCNNTransformerModel,
+        'siamese_pretrained': SiamesePretrainedModel,
+        'cnn_lstm_double_linear': CNNLSTMDoubleLinearModel,
+        'cnn_double_linear': CNNDoubleLinearModel,
+        'cnn_single_breath_linear': CNNSingleBreathLinearModel,
+        'lstm_only': LSTMOnlyModel,
+        'cnn_to_nested_rnn': CNNToNestedRNNModel,
+        'cnn_to_nested_lstm': CNNToNestedLSTMModel,
+        'cnn_to_nested_transformer': CNNToNestedTransformerModel,
+        'cnn_linear_compr_to_rf': CNNLinearComprToRFModel,
+    }
+
     parser = argparse.ArgumentParser()
     parser.add_argument('-dp', '--data-path', default='/fastdata/ardsdetection', help='Path to ARDS detection dataset')
     parser.add_argument('-en', '--experiment-num', type=int, default=1)
@@ -930,7 +880,7 @@ def main():
     parser.add_argument('--test-to-pickle')
     parser.add_argument('--cuda', action='store_true')
     parser.add_argument('-b', '--batch-size', type=int, default=16)
-    parser.add_argument('--base-network', choices=base_networks, default='resnet18')
+    parser.add_argument('--base-network', choices=BaseTraining.base_networks, default='resnet18')
     parser.add_argument('-lc', '--loss-calc', choices=['all_breaths', 'last_breath'], default='all_breaths')
     parser.add_argument('-nb', '--n-sub-batches', type=int, default=100, help=(
         "number of breath-subbatches for each breath frame. This has different "
@@ -964,8 +914,6 @@ def main():
     parser.add_argument('--loader-threads', type=int, default=0, help='specify how many threads we should use to load data. Sometimes the threads fail to shutdown correctly though and this can cause memory errors. If this happens a restart works well')
     parser.add_argument('--save-model', help='save the model to a specific file')
     parser.add_argument('--load-base-network', help='load base network only from a saved model')
-    parser.add_argument('--load-checkpoint', help='load a checkpoint of the model for further training or inference')
-    parser.add_argument('--no-train', action='store_true', help='Dont train model, just evaluate for inference')
     parser.add_argument('-rdc','--resnet-double-conv', action='store_true')
     parser.add_argument('--bm-to-linear', action='store_true')
     parser.add_argument('-exp', '--experiment-name')
@@ -983,17 +931,13 @@ def main():
     parser.add_argument('--fl-alpha', type=float, default=.9)
     parser.add_argument('--oversample', action='store_true')
     parser.add_argument('--reshuffle-oversample-per-epoch', action='store_true')
+    parser.add_argument('--load-checkpoint')
     parser.add_argument('--freeze-base-network', action='store_true')
     parser.add_argument('--stop-on-loss', action='store_true')
     parser.add_argument('--stop-thresh', type=float, default=1.5)
     parser.add_argument('--stop-after-epoch', type=int, default=1)
     parser.add_argument('--clip-grad', action='store_true')
     parser.add_argument('--clip-val', type=float, default=5)
-    parser.add_argument('--holdout-set-type', default='main', choices=['main', 'proto'], help='Choose whether or not you want to use the main train/test holdout split or the proto split (which can be pretty random and is used for prototyping)')
-    parser.add_argument('--plot-untiled-disease-evol', action='store_true', help='Plot the our ARDS/non-ARDS predictions by hour')
-    parser.add_argument('--plot-tiled-disease-evol', action='store_true', help='Plot the our ARDS/non-ARDS predictions by hour but in tiled format grouped by TPs/TNs/FPs/FNs')
-    parser.add_argument('--plot-dtw-with-disease', action='store_true', help='Plot DTW with ARDS/non-ARDS predictions by hour')
-    parser.add_argument('--plot-dtw-by-minute', help='Plot DTW and predictions by minute for a single patient')
     args = parser.parse_args()
 
     # convenience code

@@ -1,17 +1,17 @@
-Model 1:1581986609
+Model 1: 1581986609
 python train_ards_detector.py -n cnn_regressor --base-network densenet18 --cuda --save-model pretrained-model-1.pth  -dt padded_breath_by_breath_with_custom_bm_target --bm-features inst_RR --train-from-pickle ~/deepards-data-pretraining/pickled-data/model_1_train_data.pkl --test-from-pickle ~/deepards-data-pretraining/pickled-data/model_1_test_data.pkl
 
-Model 2:
+Model 2: 1581987265
 python train_ards_detector.py -n cnn_regressor --base-network densenet18 --cuda --save-model pretrained-model-2.pth  -dt padded_breath_by_breath_with_custom_bm_target --bm-features inst_RR iTime -dp ~/deepards-data-pretraining/new_bm_dataset_c50_b500 --train-to-pickle ~/deepards-data-pretraining/pickled-data/model_2_train_data.pkl --test-to-pickle ~/deepards-data-pretraining/pickled-data/model_2_test_data.pkl
 
-Model 3:
+Model 3: 1581987508
 python train_ards_detector.py -n cnn_regressor --base-network densenet18 --cuda --save-model pretrained-model-3.pth  -dt padded_breath_by_breath_with_custom_bm_target --bm-features inst_RR iTime eTime -dp ~/deepards-data-pretraining/new_bm_dataset_c50_b500 --train-to-pickle ~/deepards-data-pretraining/pickled-data/model_3_train_data.pkl --test-to-pickle ~/deepards-data-pretraining/pickled-data/model_3_test_data.pkl
 
-Model 4:
+Model 4: 1581987980
 python train_ards_detector.py -n cnn_regressor --base-network densenet18 --cuda --save-model pretrained-model-4.pth  -dt padded_breath_by_breath_with_custom_bm_target --bm-features inst_RR iTime eTime I:E_ratio -dp ~/deepards-data-pretraining/new_bm_dataset_c50_b500 --train-to-pickle ~/deepards-data-pretraining/pickled-data/model_4_train_data.pkl --test-to-pickle ~/deepards-data-pretraining/pickled-data/model_4_test_data.pkl
 
-Model 5:
+Model 5: 1581988100
 python train_ards_detector.py -n cnn_regressor --base-network densenet18 --cuda --save-model pretrained-model-5.pth  -dt padded_breath_by_breath_with_custom_bm_target --bm-features inst_RR iTime eTime I:E_ratio tve:tvi_ratio -dp ~/deepards-data-pretraining/new_bm_dataset_c50_b500 --train-to-pickle ~/deepards-data-pretraining/pickled-data/model_5_train_data.pkl --test-to-pickle ~/deepards-data-pretraining/pickled-data/model_5_test_data.pkl
 
-Model 6:
+Model 6: 1581988164
 python train_ards_detector.py -n cnn_regressor --base-network densenet18 --cuda --save-model pretrained-model-6.pth  -dt padded_breath_by_breath_with_custom_bm_target --bm-features inst_RR iTime eTime I:E_ratio tve:tvi_ratio mean_flow_from_pef -dp ~/deepards-data-pretraining/new_bm_dataset_c50_b500 --train-to-pickle ~/deepards-data-pretraining/pickled-data/model_6_train_data.pkl --test-to-pickle ~/deepards-data-pretraining/pickled-data/model_6_test_data.pkl
