@@ -12,12 +12,8 @@ grad_clip = .01
 dataset_path_train = '~/deepards-data-finetuning/pickled-data/train.pkl'
 dataset_path_test = '~/deepards-data-finetuning/pickled-data/test.pkl'
 model_paths = [
-    'pretrained-model-1.pth',
-    'pretrained-model-2.pth',
-    'pretrained-model-3.pth',
-    'pretrained-model-4.pth',
-    'pretrained-model-5.pth',
-    'pretrained-model-6.pth',
+    'pretrained-model-7.pth',
+    'pretrained-model-8.pth',
 ]
 
 

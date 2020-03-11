@@ -37,7 +37,7 @@ class ARDSRawDataset(Dataset):
                  unpadded_downsample_factor=4.0,
                  drop_frame_if_frac_missing=True,
                  whole_patient_super_batch=False,
-                 holdout_set_type='main'):
+                 holdout_set_type='proto'):
         """
         Dataset to generate sequences of data for ARDS Detection
         """

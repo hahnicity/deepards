@@ -10,7 +10,8 @@ results/
 *.DS_Store
 *.Rhistory
 Data/
-
+*.pt
+*.png
 # C extensions
 *.so
 
