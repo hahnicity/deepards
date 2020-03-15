@@ -25,9 +25,12 @@ python train_ards_detector.py -n cnn_regressor --base-network densenet18 --cuda 
 Model 9: 1583466413
 python train_ards_detector.py -n cnn_regressor --base-network densenet18 --cuda --save-model pretrained-model-9.pth  -dt padded_breath_by_breath_with_custom_bm_target --bm-features I:E_ratio -dp ~/deepards-data-pretraining/new_bm_dataset_c50_b500 --train-to-pickle ~/deepards-data-pretraining/pickled-data/model_9_train_data.pkl --test-to-pickle ~/deepards-data-pretraining/pickled-data/model_9_test_data.pkl
 
-Model 10: 1583884717
+Model 10: 1584310673
 python train_ards_detector.py -n cnn_regressor --base-network densenet18 --cuda --save-model pretrained-model-10.pth  -dt padded_breath_by_breath_with_custom_bm_target --bm-features tve:tvi_ratio -dp ~/deepards-data-pretraining/new_bm_dataset_c50_b500 --train-to-pickle ~/deepards-data-pretraining/pickled-data/model_10_train_data.pkl --test-to-pickle ~/deepards-data-pretraining/pickled-data/model_10_test_data.pkl
 
 Model 11: 1583466505
 python train_ards_detector.py -n cnn_regressor --base-network densenet18 --cuda --save-model pretrained-model-11.pth  -dt padded_breath_by_breath_with_custom_bm_target --bm-features mean_flow_from_pef -dp ~/deepards-data-pretraining/new_bm_dataset_c50_b500 --train-to-pickle ~/deepards-data-pretraining/pickled-data/model_11_train_data.pkl --test-to-pickle ~/deepards-data-pretraining/pickled-data/model_11_test_data.pkl
+
+
+
 
