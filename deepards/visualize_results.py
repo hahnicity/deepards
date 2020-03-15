@@ -217,7 +217,10 @@ def visualize_results_for_experiment(experiment_name, filter_by_base_network, sa
             stats(metric, metric_data)
         plt.legend(loc='lower right', prop={'size': 8})
         plt.grid()
+        plt.title(experiment_name.replace('_', ' '))
         plt.ylabel(metric.replace('_', ' '))
+        plt.xlabel('epochs')
+        plt.ylim((0,1))
         if save:
             if average_folds:
                 file_name = 'plots/{}_{}_{}_{}.png'.format(metric, experiment_name, 'folds', start_time)
