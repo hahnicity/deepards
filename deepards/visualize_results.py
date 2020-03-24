@@ -2,8 +2,10 @@ import argparse
 from glob import glob
 from warnings import warn
 
+import pandas as pd
 import matplotlib.pyplot as plt
 plt.switch_backend('agg')
+import seaborn as sns; sns.set()
 import numpy as np
 from pprint import pprint
 from prettytable import PrettyTable
@@ -176,6 +178,7 @@ def visualize_results_for_experiment(experiment_name, filter_by_base_network, sa
     for metric in metrics:
 
         metric_data = []
+        #plot over folds
         if average_folds:
             start_times = []
             for i, exp_data in enumerate(experiment_data):
@@ -198,6 +201,7 @@ def visualize_results_for_experiment(experiment_name, filter_by_base_network, sa
                 plt.plot(av, label='fold {}'.format(fold))
             stats(metric, metric_data, folds=True)
 
+        #plot over runs
         if not average_folds:
             for i, exp_data in enumerate(experiment_data):
                 start_time = exp_data['start_time']
@@ -213,19 +217,35 @@ def visualize_results_for_experiment(experiment_name, filter_by_base_network, sa
                         vals += torch.load(f).values.numpy()
                 av = vals / len(metric_files)
                 metric_data.append((i, av))
-                plt.plot(av, label='run {}'.format(i))
+                #plt.plot(av, label='run {}'.format(i))
+            x = []
+            y = []
             stats(metric, metric_data)
+            for data_run in metric_data:
+                for data in data_run[1]:
+                    x.append(data_run[0])
+                    y.append(data)
+            averages = {'epochs': x, metric: y}
+            averages = pd.DataFrame(data=averages)
+            #print(x)
+            ax = sns.lineplot(x = 'epochs', y = metric, data = averages)
+            #file_name = 'plots/{}_{}_{}_{}.png'.format( experiment_name, metric, 'runs', start_time)
+            #ax.savefig(file_name)
+            #plt.savefig(file_name)
+            #plt.clf()
+
         plt.legend(loc='lower right', prop={'size': 8})
-        plt.grid()
+        #plt.grid()
+        sns.set_style('darkgrid')
         plt.title(experiment_name.replace('_', ' '))
         plt.ylabel(metric.replace('_', ' '))
         plt.xlabel('epochs')
-        plt.ylim((0,1))
+        #plt.ylim((0,1))
         if save:
             if average_folds:
-                file_name = 'plots/{}_{}_{}_{}.png'.format(metric, experiment_name, 'folds', start_time)
+                file_name = 'plots/{}_{}_{}_{}.png'.format(experiment_name, metric, ' folds', start_time)
             else:
-                file_name = 'plots/{}_{}_{}_{}.png'.format(metric, experiment_name, 'runs', start_time)
+                file_name = 'plots/{}_{}_{}_{}.png'.format( experiment_name, metric, 'runs', start_time)
             plt.savefig(file_name)
             plt.clf()
         else:

@@ -12,7 +12,7 @@ grad_clip = .01
 dataset_path_train = '~/deepards-data-finetuning/pickled-data/train.pkl'
 dataset_path_test = '~/deepards-data-finetuning/pickled-data/test.pkl'
 model_paths = [
-    'pretrained-model-9.pth',
+    'pretrained-model-11.pth',
 ]
 
 
@@ -21,7 +21,7 @@ def run_experiment(dataset_path, network, pretrained_model, bs, epochs, kfolds, 
     experiment_name = "{}_{}_{}_{}_{}".format(experiment_name_prefix, model_name, dataset_type, network, base_network)
     if no_pretrain == False:
         command = [str(i) for i in [
-            'python', 'train_ards_detector.py', '--train-from-pickle', dataset_path_train,
+            'ts', 'python', 'train_ards_detector.py', '--train-from-pickle', dataset_path_train,
             '--load-base-network', pretrained_model, '-n', network, '--cuda', '-b', bs, '-e', epochs, '--no-print-progress',
             '--kfolds', kfolds, '-exp', experiment_name, '--base-network', base_network,
             '--oversample', '-wd', weight_decay, '-dt', dataset_type, '--clip-grad', '--clip-val',
