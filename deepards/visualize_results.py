@@ -148,7 +148,7 @@ def stats(metric, vals, folds = False):
     print(table)
 
 
-def visualize_results_for_experiment(experiment_name, filter_by_base_network, save, average_folds = False, num_folds = None):
+def visualize_results_for_experiment(experiment_name, filter_by_base_network, save, average_folds = False, num_folds = None, line_plot = False):
     experiment_files = glob('results/{}_*.pth'.format(experiment_name))
     #print(experiment_files)
     experiment_data = [torch.load(f) for f in experiment_files]
@@ -217,18 +217,20 @@ def visualize_results_for_experiment(experiment_name, filter_by_base_network, sa
                         vals += torch.load(f).values.numpy()
                 av = vals / len(metric_files)
                 metric_data.append((i, av))
-                #plt.plot(av, label='run {}'.format(i))
-            x = []
-            y = []
+                if not line_plot:
+                    plt.plot(av, label='run {}'.format(i))
             stats(metric, metric_data)
-            for data_run in metric_data:
-                for data in data_run[1]:
-                    x.append(data_run[0])
-                    y.append(data)
-            averages = {'epochs': x, metric: y}
-            averages = pd.DataFrame(data=averages)
-            #print(x)
-            ax = sns.lineplot(x = 'epochs', y = metric, data = averages)
+            if line_plot:
+                x = []
+                y = []
+                for data_run in metric_data:
+                    for e, data in enumerate(data_run[1]):
+                        x.append(e)
+                        y.append(data)
+                averages = {'epochs': x, metric: y}
+                averages = pd.DataFrame(data=averages)
+                print("hello")
+                ax = sns.lineplot(x = 'epochs', y = metric, data = averages)
             #file_name = 'plots/{}_{}_{}_{}.png'.format( experiment_name, metric, 'runs', start_time)
             #ax.savefig(file_name)
             #plt.savefig(file_name)
@@ -260,6 +262,7 @@ def main():
     parser.add_argument('--filter-by-base-net', help='filter all results by a base netwwork')
     parser.add_argument('--save', action='store_true')
     parser.add_argument('--average-folds', type=int)
+    parser.add_argument('--line-plot', action='store_true')
     args = parser.parse_args()
 
     if args.start_time:
@@ -268,7 +271,11 @@ def main():
         if args.average_folds:
             visualize_results_for_experiment(args.experiment_name, args.filter_by_base_net,args.save, True, args.average_folds)
         else:
-            visualize_results_for_experiment(args.experiment_name, args.filter_by_base_net,args.save)
+            if not args.line_plot:
+                print("hello")
+                visualize_results_for_experiment(args.experiment_name, args.filter_by_base_net,args.save)
+            else:
+                visualize_results_for_experiment(args.experiment_name, args.filter_by_base_net,args.save, line_plot = args.line_plot)
 
 
 if __name__ == "__main__":
