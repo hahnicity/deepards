@@ -124,6 +124,9 @@ def visualize_results_for_start_time(start_time):
 
 
 def stats(metric, vals, folds = False):
+    row = "runs"
+    if folds:
+        row = "folds"
     if len(vals) == 0:
         return
     stats_data = {}
@@ -139,14 +142,24 @@ def stats(metric, vals, folds = False):
         }
     cols = list(stats_data[list(stats_data.keys())[0]].keys())
     table = PrettyTable()
-    if not folds:
-        table.field_names = ['run'] + cols
-    else:
-        table.field_names = ['fold'] + cols
+    table.title = "Stats for each {}".format(row)
+    table.field_names = [row] + cols
     for run, data in stats_data.items():
         table.add_row([run] + list(data.values()))
     print(table)
 
+    table = PrettyTable()
+    table.title = "Mean stats across {}".format(row)
+    all_means = dict()
+    for stat in cols:
+        all_means[stat] = []
+    for _ , means in stats_data.items():
+        for stat, value in means.items():
+            all_means[stat].append(value)
+    table.field_names = ["stat"] + cols
+    table.add_row(["Mean"]+list(np.mean(i).round(4) for i in all_means.values()))
+    table.add_row(["Std"]+list(np.std(i).round(4) for i in all_means.values()))
+    print(table)
 
 def visualize_results_for_experiment(experiment_name, filter_by_base_network, save, average_folds = False, num_folds = None, line_plot = False):
     experiment_files = glob('results/{}_*.pth'.format(experiment_name))
@@ -229,7 +242,7 @@ def visualize_results_for_experiment(experiment_name, filter_by_base_network, sa
                         y.append(data)
                 averages = {'epochs': x, metric: y}
                 averages = pd.DataFrame(data=averages)
-                print("hello")
+                #print("hello")
                 ax = sns.lineplot(x = 'epochs', y = metric, data = averages)
             #file_name = 'plots/{}_{}_{}_{}.png'.format( experiment_name, metric, 'runs', start_time)
             #ax.savefig(file_name)
@@ -272,7 +285,7 @@ def main():
             visualize_results_for_experiment(args.experiment_name, args.filter_by_base_net,args.save, True, args.average_folds)
         else:
             if not args.line_plot:
-                print("hello")
+                #print("hello")
                 visualize_results_for_experiment(args.experiment_name, args.filter_by_base_net,args.save)
             else:
                 visualize_results_for_experiment(args.experiment_name, args.filter_by_base_net,args.save, line_plot = args.line_plot)
