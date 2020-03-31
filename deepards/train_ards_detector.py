@@ -798,14 +798,23 @@ class MetadataOnlyModel(BaseTraining, PatientClassifierMixin):
         return MetadataOnlyNetwork()
 
 
-class LSTMOnlyModel(WithTimeLayerClassifierMixin, BaseTraining, PatientClassifierMixin):
+class LSTMOnlyModel(BaseTraining, PatientClassifierMixin):
     clip_odd_batches = True
 
     def __init__(self, args):
         super(LSTMOnlyModel, self).__init__(args)
 
+    def calc_loss(self, outputs, target, inputs):
+        return self.criterion(outputs, target)
+
+    def _process_test_batch_results(self, outputs, target, inputs, fold_num):
+        batch_preds = outputs.argmax(dim=-1).cpu()
+        target = target.argmax(dim=-1).cpu()
+        self.record_testing_results(target, batch_preds, fold_num)
+        return batch_preds.tolist()
+
     def get_network(self, _):
-        return LSTMOnlyNetwork(self.args.time_series_hidden_units)
+        return LSTMOnlyNetwork(self.args.time_series_hidden_units, self.args.n_sub_batches)
 
 
 class CNNRegressorModel(BaseTraining, RegressorMixin):
@@ -963,7 +972,7 @@ def main():
     parser.add_argument('-loss', '--loss-func', choices=['bce', 'vacillating', 'confidence', 'focal'], default='bce', help='This option only works for classification. Choose the loss function you want to use for classification purposes: BCE or vacillating loss.')
     parser.add_argument('--valpha', type=float, default=float('Inf'), help='alpha value to use for vacillating loss. Lower alpha values mean vacillating loss will contribute less to overall loss of the system. Default value is inf')
     parser.add_argument('--conf-beta', type=float, default=1.0, help='Modifier to the intensity of the confidence penalty')
-    parser.add_argument('--time-series-hidden-units', type=int, default=512)
+    parser.add_argument('--time-series-hidden-units', type=int, default=16)
     parser.add_argument('--transformer-blocks', type=int, default=2)
     parser.add_argument('--unshuffled', action='store_true', help='dont shuffle data for lstm processing')
     parser.add_argument('--load-siamese', help='load a siamese network pretrained model')
