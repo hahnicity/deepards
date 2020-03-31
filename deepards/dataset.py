@@ -148,7 +148,7 @@ class ARDSRawDataset(Dataset):
 
         if self.total_kfolds:
             x = self.non_oversampled_kfold_indexes
-            y = [self.all_sequences[idx][-1].argmax() for idx in x]
+            y = [self.all_sequences[idx][-2].argmax() for idx in x]
             ros = RandomOverSampler()
             x_resampled, y_resampled = ros.fit_resample(np.array(x).reshape(-1, 1), y)
             self.kfold_indexes = x_resampled.ravel()

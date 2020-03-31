@@ -66,7 +66,7 @@ def analyze_patient(patient_id, dataset, cache_dir, preds_by_hour):
         os.mkdir(os.path.join(cache_dir, patient_id))
 
     n_breaths = 3
-    rolling_len = 3
+    rolling_len = 1
     if dataset.kfold_num:
         split_type = 'kfold'
     else:
