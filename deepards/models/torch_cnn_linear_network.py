@@ -68,6 +68,10 @@ class CNNDoubleLinearNetwork(nn.Module):
 
 
 class CNNLinearNetwork(nn.Module):
+    """
+    Flatten everything by sub-batch. Then perform a linear layer on it. Get sub-batch level
+    predictions.
+    """
     def __init__(self, breath_block, sequence_size, metadata_features):
         super(CNNLinearNetwork, self).__init__()
 
@@ -79,7 +83,6 @@ class CNNLinearNetwork(nn.Module):
         # input should be in shape: (batches, breaths in seq, chans, 224)
         if x.shape[-1] != 224:
             raise Exception('input breaths must have sequence length of 224')
-        # XXX add logic to handle metadata eventually
         batches = x.shape[0]
         breaths = x.shape[1]
         outputs = self.linear_final(self.breath_block(x[0]).view(-1)).unsqueeze(0)

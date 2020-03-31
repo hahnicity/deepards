@@ -570,6 +570,10 @@ class DeepARDSResults(object):
         """
         processed_pred_hour = np.zeros(len(pred_hour))
         self.pred_to_hour_frame = predictions.to_frame(name='pred')
-        for idx, hrs in pred_hour.items():
-            self.pred_to_hour_frame.loc[idx, 'hour'] = hrs
+        for idx in self.pred_to_hour_frame.index.unique():
+            hrs = pred_hour[idx]
+            if isinstance(self.pred_to_hour_frame.loc[idx, 'pred'], int):
+                self.pred_to_hour_frame.loc[idx, 'hour'] = hrs[0]
+            else:
+                self.pred_to_hour_frame.loc[idx, 'hour'] = hrs
         self.pred_to_hour_frame = self.pred_to_hour_frame.merge(y_test, left_index=True, right_index=True)
