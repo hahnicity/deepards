@@ -83,9 +83,9 @@ class BaseTraining(object):
         if self.args.unshuffled and self.args.batch_size > 1:
             raise Exception('Currently we can only run unshuffled runs with a batch size of 1!')
 
-        self.n_runs = self.args.kfolds if self.args.kfolds is not None else 1
+        self.n_kfolds = self.args.kfolds if self.args.kfolds is not None else 1
         # Train and test both load from the same dataset in the case of kfold
-        if self.n_runs > 1:
+        if self.n_kfolds > 1:
             self.args.test_to_pickle = None
 
         self.start_time = datetime.now().strftime('%s')
@@ -157,15 +157,16 @@ class BaseTraining(object):
                 unpadded_downsample_factor=self.args.downsample_factor,
                 drop_frame_if_frac_missing=self.args.no_drop_frames,
                 oversample_minority=self.args.oversample,
+                train_patient_fraction=self.args.train_pt_frac,
             )
         else:
-            train_dataset = ARDSRawDataset.from_pickle(self.args.train_from_pickle, self.args.oversample)
+            train_dataset = ARDSRawDataset.from_pickle(self.args.train_from_pickle, self.args.oversample, self.args.train_pt_frac)
 
         self.n_sub_batches = train_dataset.n_sub_batches
         if not self.args.test_from_pickle and (self.args.kfolds is not None):
             test_dataset = ARDSRawDataset.make_test_dataset_if_kfold(train_dataset)
         elif self.args.test_from_pickle:
-            test_dataset = ARDSRawDataset.from_pickle(self.args.test_from_pickle)
+            test_dataset = ARDSRawDataset.from_pickle(self.args.test_from_pickle, False, 1.0)
         else:  # holdout, no pickle, no kfold
             # there is a really bizarre bug where my default arg is being overwritten by
             # the state of the train_dataset obj. I checked pointer references and there was
@@ -183,13 +184,14 @@ class BaseTraining(object):
                 unpadded_downsample_factor=self.args.downsample_factor,
                 drop_frame_if_frac_missing=self.args.no_drop_frames,
                 holdout_set_type=self.args.holdout_set_type,
+                train_patient_fraction=1.0,
             )
 
         return train_dataset, test_dataset
 
     def get_splits(self):
         train_dataset, test_dataset = self.get_base_datasets()
-        for i in range(self.n_runs):
+        for i in range(self.n_kfolds):
             if self.args.kfolds is not None:
                 print('--- Run Fold {} ---'.format(i+1))
                 train_dataset.set_kfold_indexes_for_fold(i)
@@ -224,7 +226,7 @@ class BaseTraining(object):
                     self.run_test_epoch(epoch_num, model, test_dataset, test_loader, fold_num)
 
             if self.args.save_model:
-                model_path = self.args.save_model.replace('.pth', '') + "-fold-{}.pth".format(fold_num) if self.n_runs > 1 else self.args.save_model
+                model_path = self.args.save_model.replace('.pth', '') + "-fold-{}.pth".format(fold_num) if self.n_kfolds > 1 else self.args.save_model
                 torch.save(model, model_path)
 
         self.perform_post_modeling_actions()
@@ -417,7 +419,7 @@ class SiameseMixin(object):
         self.n_sub_batches = train_dataset.n_sub_batches
         # for holdout and pickle
         if self.args.test_from_pickle:
-            test_dataset = SiameseNetworkDataset.from_pickle(self.args.test_from_pickle)
+            test_dataset = SiameseNetworkDataset.from_pickle(self.args.test_from_pickle, False, 1.0)
         else:  # holdout, no pickle
             test_dataset = SiameseNetworkDataset(
                 self.args.data_path,
@@ -534,15 +536,16 @@ class NestedMixin(object):
                 unpadded_downsample_factor=self.args.downsample_factor,
                 drop_frame_if_frac_missing=self.args.no_drop_frames,
                 whole_patient_super_batch=True,
+                train_patient_fraction=self.args.train_pt_frac,
             )
         else:
-            train_dataset = ARDSRawDataset.from_pickle(self.args.train_from_pickle, self.args.oversample)
+            train_dataset = ARDSRawDataset.from_pickle(self.args.train_from_pickle, self.args.oversample, self.args.train_pt_frac)
 
         self.n_sub_batches = train_dataset.n_sub_batches
         if not self.args.test_from_pickle and self.args.kfolds is not None:
             test_dataset = ARDSRawDataset.make_test_dataset_if_kfold(train_dataset)
         elif self.args.test_from_pickle:
-            test_dataset = ARDSRawDataset.from_pickle(self.args.test_from_pickle)
+            test_dataset = ARDSRawDataset.from_pickle(self.args.test_from_pickle, False, 1.0)
         else:  # holdout, no pickle, no kfold
             test_dataset = ARDSRawDataset(
                 self.args.data_path,
@@ -557,6 +560,7 @@ class NestedMixin(object):
                 drop_frame_if_frac_missing=self.args.no_drop_frames,
                 whole_patient_super_batch=True,
                 holdout_set_type=self.args.holdout_set_type,
+                train_patient_fraction=1.0,
             )
 
         return train_dataset, test_dataset
@@ -993,6 +997,7 @@ def main():
     parser.add_argument('--plot-dtw-with-disease', action='store_true', help='Plot DTW with ARDS/non-ARDS predictions by hour')
     parser.add_argument('--plot-dtw-by-minute', help='Plot DTW and predictions by minute for a single patient')
     parser.add_argument('--perform-dtw-preprocessing', action='store_true', help='perform DTW preprocessing actions even if we dont want to visualize DTW')
+    parser.add_argument('--train-pt-frac', type=float, help='Fraction of random training patients to use', default=1.0)
     args = parser.parse_args()
 
     # convenience code

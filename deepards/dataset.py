@@ -36,13 +36,15 @@ class ARDSRawDataset(Dataset):
                  unpadded_downsample_factor=4.0,
                  drop_frame_if_frac_missing=True,
                  whole_patient_super_batch=False,
-                 holdout_set_type='main'):
+                 holdout_set_type='main',
+                 train_patient_fraction=1.0):
         """
         Dataset to generate sequences of data for ARDS Detection
         """
         self.train = train
         self.kfold_num = kfold_num
         self.all_sequences = all_sequences
+        self.experiment_num = experiment_num
         self.seq_hours = dict()
         self.dataset_type = dataset_type
         self.total_kfolds = total_kfolds
@@ -54,6 +56,8 @@ class ARDSRawDataset(Dataset):
         self.cohort_file = cohort_file
         self.oversample = oversample_minority
         self.whole_patient_super_batch = whole_patient_super_batch
+        self.train_patient_fraction = train_patient_fraction
+
         if self.oversample and self.whole_patient_super_batch:
             raise Exception('currently oversampling with whole patient super batch is not supported')
 
@@ -155,6 +159,30 @@ class ARDSRawDataset(Dataset):
         else:
             raise NotImplementedError('We havent implemented oversampling for holdout sets yet')
 
+    def set_indices_by_patient(self):
+        if self.train_patient_fraction == 1.0:
+            return
+
+        if self.total_kfolds:
+            uniq_patients = set()
+            for i in self.kfold_indexes:
+                uniq_patients.add(self.all_sequences[i][0])
+            patient_data = self.cohort[self.cohort.patient_id.isin(list(uniq_patients)) & (self.cohort.experiment_group == self.experiment_num)]
+            ards_patients = patient_data[patient_data.Pathophysiology == 'ARDS'].patient_id
+            other_patients = patient_data[patient_data.Pathophysiology != 'ARDS'].patient_id
+            # divide by 2 because then we have equal numbers patients in each classification
+            n_patients = int(math.floor(len(uniq_patients)*self.train_patient_fraction)) / 2
+
+            to_select = set(np.random.choice(list(other_patients), size=n_patients, replace=False))
+            to_select.update(set(np.random.choice(list(ards_patients), size=n_patients, replace=False)))
+            tmp = []
+            for i in self.kfold_indexes:
+                if self.all_sequences[i][0] in to_select:
+                    tmp.append(i)
+            self.kfold_indexes = tmp
+        else:
+            raise NotImplementedError("We haven't implemented train patient fractions for holdout yet")
+
     def derive_scaling_factors(self):
         is_kfolds = self.total_kfolds is not None
         if is_kfolds:
@@ -186,15 +214,17 @@ class ARDSRawDataset(Dataset):
             train=False,
             kfold_num=train_dataset.kfold_num,
             total_kfolds=train_dataset.total_kfolds,
+            train_patient_fraction=1.0,
         )
         return test_dataset
 
     @classmethod
-    def from_pickle(self, data_path, oversample_minority=False):
+    def from_pickle(cls, data_path, oversample_minority, train_patient_fraction):
         dataset = pd.read_pickle(data_path)
         if not isinstance(dataset, ARDSRawDataset):
             raise ValueError('The pickle file you have specified is out-of-date. Please re-process your dataset and save the new pickled dataset.')
-        self.oversample = oversample_minority
+        dataset.oversample = oversample_minority
+        dataset.train_patient_fraction = train_patient_fraction
         # paranoia
         try:
             dataset.scaling_factors
@@ -206,6 +236,7 @@ class ARDSRawDataset(Dataset):
         self.kfold_num = kfold_num
         self.kfold_indexes = self.get_kfold_indexes_for_fold(kfold_num)
         self.non_oversampled_kfold_indexes = copy(list(self.kfold_indexes))
+        self.set_indices_by_patient()
         self.set_oversampling_indices()
 
     def get_kfold_indexes_for_fold(self, kfold_num):
