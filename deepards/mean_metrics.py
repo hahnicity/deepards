@@ -3,6 +3,7 @@ from glob import glob
 import os
 
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MultipleLocator
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -77,9 +78,12 @@ def do_fold_graphing(start_times):
 
     if len(df_stats.fold.unique()) > 1:
         for k, stats in df_stats.groupby('fold'):
-            sns.lineplot(x='epoch', y='AUC', data=stats, label='fold {}'.format(k))
+            sns.lineplot(x='epoch', y='AUC', data=stats, label='fold {}'.format(int(k)))
     sns.lineplot(x='epoch', y='AUC', data=df_stats, label='aggregate_results')
     plt.xticks(np.arange(len(df_stats.epoch.unique())), sorted((df_stats.epoch.unique()+1).astype(int)))
+    ax = plt.gca()
+    ax.yaxis.set_minor_locator(MultipleLocator(.01))
+    plt.grid(axis='both')
     plt.show()
 
 
@@ -90,7 +94,7 @@ if __name__ == "__main__":
 
     exp_results = []
     datasets = ['unpadded_centered_sequences', 'unpadded_sequences', 'padded_breath_by_breath', 'unpadded_downsampled_sequences']
-    networks = ['cnn_lstm', 'cnn_single_breath_linear', 'cnn_transformer', 'lstm_only']
+    networks = ['cnn_linear', 'cnn_lstm', 'cnn_single_breath_linear', 'cnn_transformer', 'lstm_only']
     base_networks = ['se_resnet18', 'resnet18', 'densenet18', 'vgg11']
 
     main_experiments = glob('results/{}*'.format(args.experiment_name))

@@ -12,14 +12,14 @@ n_times_each_experiment = 10
 grad_clip = .01
 
 
-def run_experiment(dataset_path, network, bs, epochs, kfolds, base_network, weight_decay, dataset_type, dry_run, experiment_name_prefix, n_sub_batches, clip_val):
+def run_experiment(dataset_path, network, bs, epochs, kfolds, base_network, weight_decay, dataset_type, dry_run, experiment_name_prefix, n_sub_batches, clip_val, cuda_arg):
     experiment_name = "{}_{}_{}_{}".format(experiment_name_prefix, dataset_type, network, base_network)
     command = [str(i) for i in [
         'ts', 'python', 'train_ards_detector.py', '--train-from-pickle', dataset_path,
-        '-n', network, '--cuda', '-b', bs, '-e', epochs, '--no-print-progress',
+        '-n', network, '-b', bs, '-e', epochs, '--no-print-progress',
         '--kfolds', kfolds, '-exp', experiment_name, '--base-network', base_network,
         '--oversample', '-wd', weight_decay, '-dt', dataset_type, '--clip-grad', '--clip-val',
-        clip_val, '-nb', n_sub_batches,
+        clip_val, '-nb', n_sub_batches, cuda_arg
     ]]
     if dry_run:
         print("Running:\n\n{}".format(" ".join(command)))
@@ -51,10 +51,10 @@ def main():
         for network in args.networks:
             if network == 'lstm_only':
                 # the base network input doesnt matter here
-                run_experiment(dataset_path, network, bs, epochs, kfolds, 'resnet18', weight_decay, dataset_type, args.dry_run, args.experiment_name, n_sub_batches, args.clip_val)
+                run_experiment(dataset_path, network, bs, epochs, kfolds, 'resnet18', weight_decay, dataset_type, args.dry_run, args.experiment_name, n_sub_batches, args.clip_val, '--cuda-no-dp')
             else:
                 for base_network in args.base_networks:
-                    run_experiment(dataset_path, network, bs, epochs, kfolds, base_network, weight_decay, dataset_type, args.dry_run, args.experiment_name, n_sub_batches, args.clip_val)
+                    run_experiment(dataset_path, network, bs, epochs, kfolds, base_network, weight_decay, dataset_type, args.dry_run, args.experiment_name, n_sub_batches, args.clip_val, '--cuda')
 
 
 if __name__ == "__main__":

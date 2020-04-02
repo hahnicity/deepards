@@ -62,7 +62,7 @@ class BaseTraining(object):
     def __init__(self, args):
         self.args = args
         self.cuda_wrapper = lambda x: x.cuda() if args.cuda else x
-        if self.args.debug:
+        if self.args.debug or self.args.cuda_no_dp:
             self.model_cuda_wrapper = lambda x: x.cuda() if args.cuda else x
         else:
             self.model_cuda_wrapper = lambda x: nn.DataParallel(x).cuda() if args.cuda else x
@@ -361,7 +361,7 @@ class PatientClassifierMixin(object):
         self.results.save_all()
 
 
-class WithTimeLayerClassifierMixin(object):
+class PerBreathClassifierMixin(object):
     def calc_loss(self, outputs, target, inputs):
         if self.args.batch_size > 1:
             target = target.unsqueeze(1)
@@ -614,7 +614,7 @@ class CNNToNestedTransformerModel(NestedMixin, BaseTraining):
         return CNNToNestedTransformerNetwork(base_network, self.args.n_sub_batches, self.args.cuda, self.args.transformer_blocks)
 
 
-class CNNTransformerModel(WithTimeLayerClassifierMixin, BaseTraining, PatientClassifierMixin):
+class CNNTransformerModel(PerBreathClassifierMixin, BaseTraining, PatientClassifierMixin):
     def __init__(self, args):
         super(CNNTransformerModel, self).__init__(args)
 
@@ -622,7 +622,7 @@ class CNNTransformerModel(WithTimeLayerClassifierMixin, BaseTraining, PatientCla
         return CNNTransformerNetwork(base_network, self.n_metadata_inputs, self.args.bm_to_linear, self.args.time_series_hidden_units, self.args.transformer_blocks)
 
 
-class CNNLSTMModel(WithTimeLayerClassifierMixin, BaseTraining, PatientClassifierMixin):
+class CNNLSTMModel(PerBreathClassifierMixin, BaseTraining, PatientClassifierMixin):
     clip_odd_batches = True
 
     def __init__(self, args):
@@ -753,7 +753,7 @@ class CNNDoubleLinearModel(BaseTraining, PatientClassifierMixin):
         return CNNDoubleLinearNetwork(base_network, self.args.n_sub_batches, self.n_metadata_inputs)
 
 
-class CNNSingleBreathLinearModel(WithTimeLayerClassifierMixin, BaseTraining, PatientClassifierMixin):
+class CNNSingleBreathLinearModel(PerBreathClassifierMixin, BaseTraining, PatientClassifierMixin):
     def __init__(self, args):
         super(CNNSingleBreathLinearModel, self).__init__(args)
 
@@ -761,7 +761,7 @@ class CNNSingleBreathLinearModel(WithTimeLayerClassifierMixin, BaseTraining, Pat
         return CNNSingleBreathLinearNetwork(base_network)
 
 
-class CNNLinearComprToRFModel(WithTimeLayerClassifierMixin, BaseTraining, PatientClassifierMixin):
+class CNNLinearComprToRFModel(PerBreathClassifierMixin, BaseTraining, PatientClassifierMixin):
     def __init__(self, args):
         super(CNNLinearComprToRFModel, self).__init__(args)
 
@@ -881,7 +881,7 @@ class SiameseCNNLinearModel(SiameseMixin, BaseTraining):
         return SiameseCNNLinearNetwork(base_network, self.n_sub_batches)
 
 
-class SiamesePretrainedModel(WithTimeLayerClassifierMixin, BaseTraining, PatientClassifierMixin):
+class SiamesePretrainedModel(PerBreathClassifierMixin, BaseTraining, PatientClassifierMixin):
     def __init__(self, args):
         super(SiamesePretrainedModel, self).__init__(args)
 
@@ -928,6 +928,7 @@ def main():
     parser.add_argument('--test-from-pickle')
     parser.add_argument('--test-to-pickle')
     parser.add_argument('--cuda', action='store_true')
+    parser.add_argument('--cuda-no-dp', action='store_true')
     parser.add_argument('-b', '--batch-size', type=int, default=16)
     parser.add_argument('--base-network', choices=base_networks, default='resnet18')
     parser.add_argument('-lc', '--loss-calc', choices=['all_breaths', 'last_breath'], default='all_breaths')
