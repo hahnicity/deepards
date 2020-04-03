@@ -4,14 +4,24 @@ Deep Learning for ARDS Detection with Ventilator Waveform Data
 ## Install
 Install using anaconda. First install anaconda on your machine then setup a new environment
 
-    conda create -n deepards python=3.7
-    source activate deepards
-    conda install pytorch torchvision matplotlib -c PyTorch
+    conda env create -f environment.yml
+    conda activate deepards
 
 After that install everything else with pip, because for some reason numpy and pandas dependencies
 get all messed up in anaconda. Also need to install our private python pkg, ucdpvanalysis.
 
     pip install ucdpvanalysis-1.5.tar.gz
+
+Then install dtwco
+
+    cd ../
+    git clone https://github.com/lukauskas/dtwco
+    cd dtwco
+    pip install -e .
+    cd ../deepards
+
+Finally install the deepards package
+
     pip install -e .
 
 Now go to the deepards directory and make a results directory so that your model can store its

@@ -1,0 +1,14 @@
+name: deepards
+dependencies:
+  - python=2.7
+  - cython
+  - numpy
+  - pandas
+  - pytorch
+  - torchvision
+  - cudatoolkit=10.1
+  - seaborn
+  - scipy
+  - scikit-learn
+channels:
+  - pytorch
