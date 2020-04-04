@@ -11,6 +11,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
+from deepards.config import Configuration
 from deepards.dataset import ARDSRawDataset, SiameseNetworkDataset
 from deepards.loss import ConfidencePenaltyLoss, FocalLoss, VacillatingLoss
 from deepards.metrics import DeepARDSResults, Reporting
@@ -59,13 +60,13 @@ base_networks = {
 class BaseTraining(object):
     clip_odd_batches = False
 
-    def __init__(self, args):
-        self.args = args
-        self.cuda_wrapper = lambda x: x.cuda() if args.cuda else x
+    def __init__(self, parser_args):
+        self.args = Configuration(parser_args)
+        self.cuda_wrapper = lambda x: x.cuda() if self.args.cuda else x
         if self.args.debug or self.args.cuda_no_dp:
-            self.model_cuda_wrapper = lambda x: x.cuda() if args.cuda else x
+            self.model_cuda_wrapper = lambda x: x.cuda() if self.args.cuda else x
         else:
-            self.model_cuda_wrapper = lambda x: nn.DataParallel(x).cuda() if args.cuda else x
+            self.model_cuda_wrapper = lambda x: nn.DataParallel(x).cuda() if self.args.cuda else x
         self.set_loss_criterion()
 
         if self.args.dataset_type == 'padded_breath_by_breath_with_limited_bm_target':
@@ -922,32 +923,33 @@ network_map = {
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('-dp', '--data-path', default='/fastdata/ardsdetection', help='Path to ARDS detection dataset')
-    parser.add_argument('-en', '--experiment-num', type=int, default=1)
-    parser.add_argument('-c', '--cohort-file', default='cohort-description.csv')
-    parser.add_argument('-n', '--network', choices=list(network_map.keys()), default='cnn_lstm')
-    parser.add_argument('-e', '--epochs', type=int, default=5)
+    parser.add_argument('-co', '--config-override', help='path to yml file that overrides elements of defaults.yml')
+    parser.add_argument('-dp', '--data-path', help='Path to ARDS detection dataset')
+    parser.add_argument('-en', '--experiment-num', type=int)
+    parser.add_argument('-c', '--cohort-file')
+    parser.add_argument('-n', '--network', choices=list(network_map.keys()))
+    parser.add_argument('-e', '--epochs', type=int)
     parser.add_argument('-p', '--train-from-pickle')
     parser.add_argument('--train-to-pickle')
     parser.add_argument('--test-from-pickle')
     parser.add_argument('--test-to-pickle')
     parser.add_argument('--cuda', action='store_true')
     parser.add_argument('--cuda-no-dp', action='store_true')
-    parser.add_argument('-b', '--batch-size', type=int, default=16)
-    parser.add_argument('--base-network', choices=base_networks, default='resnet18')
-    parser.add_argument('-lc', '--loss-calc', choices=['all_breaths', 'last_breath'], default='all_breaths')
-    parser.add_argument('-nb', '--n-sub-batches', type=int, default=100, help=(
+    parser.add_argument('-b', '--batch-size', type=int)
+    parser.add_argument('--base-network', choices=base_networks)
+    parser.add_argument('-lc', '--loss-calc', choices=['all_breaths', 'last_breath'])
+    parser.add_argument('-nb', '--n-sub-batches', type=int, help=(
         "number of breath-subbatches for each breath frame. This has different "
         "meanings for different dataset types. For breath_by_breath this means the "
         "number of individual breaths in each breath frame. For unpadded_sequences "
         "this means the number of contiguous flow measurements in each frame."))
     parser.add_argument('--no-print-progress', action='store_true')
     parser.add_argument('--kfolds', type=int)
-    parser.add_argument('-rip', '--initial-planes', type=int, default=64)
-    parser.add_argument('-rfpt', '--resnet-first-pool-type', default='max', choices=['max', 'avg'])
+    parser.add_argument('-rip', '--initial-planes', type=int)
+    parser.add_argument('-rfpt', '--resnet-first-pool-type', choices=['max', 'avg'])
     parser.add_argument('--no-test-after-epochs', action='store_true')
     parser.add_argument('--debug', action='store_true', help='debug code and dont train')
-    parser.add_argument('--optimizer', choices=['adam', 'sgd'], default='sgd')
+    parser.add_argument('--optimizer', choices=['adam', 'sgd'])
     parser.add_argument('-dt', '--dataset-type', choices=[
         'padded_breath_by_breath',
         'unpadded_sequences',
@@ -961,9 +963,9 @@ def main():
         'padded_breath_by_breath_with_experimental_bm_target',
         'padded_breath_by_breath_with_flow_time_features',
         'unpadded_downsampled_autoencoder_sequences'
-    ], default='padded_breath_by_breath')
-    parser.add_argument('-lr', '--learning-rate', default=0.001, type=float)
-    parser.add_argument('--loader-threads', type=int, default=0, help='specify how many threads we should use to load data. Sometimes the threads fail to shutdown correctly though and this can cause memory errors. If this happens a restart works well')
+    ])
+    parser.add_argument('-lr', '--learning-rate', type=float)
+    parser.add_argument('--loader-threads', type=int, help='specify how many threads we should use to load data. Sometimes the threads fail to shutdown correctly though and this can cause memory errors. If this happens a restart works well')
     parser.add_argument('--save-model', help='save the model to a specific file')
     parser.add_argument('--load-base-network', help='load base network only from a saved model')
     parser.add_argument('--load-checkpoint', help='load a checkpoint of the model for further training or inference')
@@ -971,14 +973,14 @@ def main():
     parser.add_argument('-rdc','--resnet-double-conv', action='store_true')
     parser.add_argument('--bm-to-linear', action='store_true')
     parser.add_argument('-exp', '--experiment-name')
-    parser.add_argument('--downsample-factor', type=float, default=4.0)
+    parser.add_argument('--downsample-factor', type=float)
     parser.add_argument('--no-drop-frames', action='store_false')
-    parser.add_argument('-wd', '--weight-decay', type=float, default=.0001)
-    parser.add_argument('-loss', '--loss-func', choices=['bce', 'vacillating', 'confidence', 'focal'], default='bce', help='This option only works for classification. Choose the loss function you want to use for classification purposes: BCE or vacillating loss.')
+    parser.add_argument('-wd', '--weight-decay', type=float)
+    parser.add_argument('-loss', '--loss-func', choices=['bce', 'vacillating', 'confidence', 'focal'], help='This option only works for classification. Choose the loss function you want to use for classification purposes: BCE or vacillating loss.')
     parser.add_argument('--valpha', type=float, default=float('Inf'), help='alpha value to use for vacillating loss. Lower alpha values mean vacillating loss will contribute less to overall loss of the system. Default value is inf')
     parser.add_argument('--conf-beta', type=float, default=1.0, help='Modifier to the intensity of the confidence penalty')
-    parser.add_argument('--time-series-hidden-units', type=int, default=16)
-    parser.add_argument('--transformer-blocks', type=int, default=2)
+    parser.add_argument('--time-series-hidden-units', type=int)
+    parser.add_argument('--transformer-blocks', type=int)
     parser.add_argument('--unshuffled', action='store_true', help='dont shuffle data for lstm processing')
     parser.add_argument('--load-siamese', help='load a siamese network pretrained model')
     parser.add_argument('--fl-gamma', type=float, default=2.0)
@@ -987,17 +989,17 @@ def main():
     parser.add_argument('--reshuffle-oversample-per-epoch', action='store_true')
     parser.add_argument('--freeze-base-network', action='store_true')
     parser.add_argument('--stop-on-loss', action='store_true')
-    parser.add_argument('--stop-thresh', type=float, default=1.5)
-    parser.add_argument('--stop-after-epoch', type=int, default=1)
+    parser.add_argument('--stop-thresh', type=float)
+    parser.add_argument('--stop-after-epoch', type=int)
     parser.add_argument('--clip-grad', action='store_true')
-    parser.add_argument('--clip-val', type=float, default=5)
-    parser.add_argument('--holdout-set-type', default='main', choices=['main', 'proto'], help='Choose whether or not you want to use the main train/test holdout split or the proto split (which can be pretty random and is used for prototyping)')
+    parser.add_argument('--clip-val', type=float)
+    parser.add_argument('--holdout-set-type', choices=['main', 'proto'], help='Choose whether or not you want to use the main train/test holdout split or the proto split (which can be pretty random and is used for prototyping)')
     parser.add_argument('--plot-untiled-disease-evol', action='store_true', help='Plot the our ARDS/non-ARDS predictions by hour')
     parser.add_argument('--plot-tiled-disease-evol', action='store_true', help='Plot the our ARDS/non-ARDS predictions by hour but in tiled format grouped by TPs/TNs/FPs/FNs')
     parser.add_argument('--plot-dtw-with-disease', action='store_true', help='Plot DTW with ARDS/non-ARDS predictions by hour')
     parser.add_argument('--plot-dtw-by-minute', help='Plot DTW and predictions by minute for a single patient')
     parser.add_argument('--perform-dtw-preprocessing', action='store_true', help='perform DTW preprocessing actions even if we dont want to visualize DTW')
-    parser.add_argument('--train-pt-frac', type=float, help='Fraction of random training patients to use', default=1.0)
+    parser.add_argument('--train-pt-frac', type=float, help='Fraction of random training patients to use')
     args = parser.parse_args()
 
     # convenience code

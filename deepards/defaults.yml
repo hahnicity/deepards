@@ -1,1 +1,45 @@
+# Default arguments for training purposes. You can override them by creating a new
+# yml file and just setting new values for any argument listed in this file. Order of
+# variable precedence is like so:
+#
+# 1.) CLI
+# 2.) Overrides file
+# 3.) Defaults file
+#
+# NOTE: true/false flag args cannot be set here, only string/float/int values
 
+# generic training options
+data_path: /fastdata/ardsdetection
+experiment_num: 1
+cohort_file: cohort-description.csv
+network: cnn_lstm
+epochs: 10
+batch_size: 16
+base_network: densenet18
+loss_calc: all_breaths
+loader_threads: 0
+
+# resnet options
+initial_planes: 64
+resnet_first_pool_type: max
+
+# main hyperparameters
+optimizer: sgd
+dataset_type: padded_breath_by_breath
+learning_rate: 0.001
+n_sub_batches: 100
+weight_decay: 0.0001
+loss_func: bce
+clip_val: 0.01
+
+time_series_hidden_units: 16
+transformer_blocks: 2
+
+# stop if loss too high
+stop_thresh: 1.5
+stop_after_epoch: 1
+
+# other options
+holdout_set_type: main
+train_pt_frac: 1.0
+downsample_factor: 4.0
