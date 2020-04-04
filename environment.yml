@@ -2,6 +2,7 @@ name: deepards
 dependencies:
   - python=2.7
   - cython
+  - ipython
   - numpy
   - pandas
   - pytorch
