@@ -62,9 +62,9 @@ class BaseTraining(object):
 
     def __init__(self, args):
         self.args = args
-        self.cuda_wrapper = lambda x: x.cuda() if self.args.cuda else x
+        self.cuda_wrapper = lambda x: x.cuda() if self.args.cuda or self.args.cuda_no_dp else x
         if self.args.debug or self.args.cuda_no_dp:
-            self.model_cuda_wrapper = lambda x: x.cuda() if self.args.cuda else x
+            self.model_cuda_wrapper = lambda x: x.cuda() if self.args.cuda_no_dp else x
         else:
             self.model_cuda_wrapper = lambda x: nn.DataParallel(x).cuda() if self.args.cuda else x
         self.set_loss_criterion()
