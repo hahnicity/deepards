@@ -68,6 +68,8 @@ class BaseTraining(object):
         elif self.args.cuda_no_dp:
             single_gpu = torch.device('cuda:{}'.format(args.cuda_device))
             self.cuda_wrapper = lambda x: x.to(single_gpu)
+        else:
+            self.cuda_wrapper = lambda x: x
 
         if self.args.debug or self.args.cuda_no_dp:
             self.model_cuda_wrapper = lambda x: x.to(single_gpu) if self.args.cuda_no_dp else x
