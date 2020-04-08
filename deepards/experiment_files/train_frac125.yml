@@ -1,0 +1,12 @@
+data_path: /home/grehm/workspace/datasets/ardsdetection/
+cohort_file: /home/grehm/workspace/python/deepards/deepards/cohort-description.csv
+kfolds: 5
+dataset_type: unpadded_centered_sequences
+n_sub_batches: 20
+loader_threads: 0
+train_from_pickle: unpadded_centered_sequences-nb20.pkl
+train_pt_frac: .125
+clip_val: 0.01
+base_network: densenet18
+network: cnn_linear
+batch_size: 16
