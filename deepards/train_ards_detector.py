@@ -62,9 +62,15 @@ class BaseTraining(object):
 
     def __init__(self, args):
         self.args = args
-        self.cuda_wrapper = lambda x: x.cuda() if self.args.cuda or self.args.cuda_no_dp else x
+
+        if self.args.cuda:
+            self.cuda_wrapper = lambda x: x.cuda()
+        elif self.args.cuda_no_dp:
+            single_gpu = torch.device('cuda:{}'.format(args.cuda_device))
+            self.cuda_wrapper = lambda x: x.to(single_gpu)
+
         if self.args.debug or self.args.cuda_no_dp:
-            self.model_cuda_wrapper = lambda x: x.cuda() if self.args.cuda_no_dp else x
+            self.model_cuda_wrapper = lambda x: x.to(single_gpu) if self.args.cuda_no_dp else x
         else:
             self.model_cuda_wrapper = lambda x: nn.DataParallel(x).cuda() if self.args.cuda else x
         self.set_loss_criterion()
@@ -1000,6 +1006,7 @@ def main():
     parser.add_argument('--plot-dtw-by-minute', help='Plot DTW and predictions by minute for a single patient')
     parser.add_argument('--perform-dtw-preprocessing', action='store_true', help='perform DTW preprocessing actions even if we dont want to visualize DTW')
     parser.add_argument('--train-pt-frac', type=float, help='Fraction of random training patients to use')
+    parser.add_argument('--cuda-device', type=int, help='number of cuda device you want to use')
     args = parser.parse_args()
     args = Configuration(args)
 
