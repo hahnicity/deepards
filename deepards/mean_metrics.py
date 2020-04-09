@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from sklearn.metrics import confusion_matrix, roc_auc_score, f1_score
+import torch
 
 
 def computeMetricsFromPatientResults(df, df_stats):
@@ -93,37 +94,21 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     exp_results = []
-    datasets = ['unpadded_centered_sequences', 'unpadded_sequences', 'padded_breath_by_breath', 'unpadded_downsampled_sequences']
-    networks = ['cnn_linear', 'cnn_lstm', 'cnn_single_breath_linear', 'cnn_transformer', 'lstm_only']
-    base_networks = ['se_resnet18', 'resnet18', 'densenet18', 'vgg11']
 
     main_experiments = glob('results/{}*'.format(args.experiment_name))
     unique_experiments = set(['_'.join(exp.split('_')[:-1]) for exp in main_experiments])
     for exp in sorted(unique_experiments):
         start_times = list(set([os.path.splitext(file_.split('_')[-1])[0] for file_ in glob(exp + '*')]))
         mean_df_stats = getMeanMetrics(start_times)
-        #do_fold_graphing(start_times)
 
-        for dt in datasets:
-            if dt in exp:
-                dataset_type = dt
-                break
-        else:
-            raise Exception('dataset not found for experiment: ' + exp)
+        # get hyperparameter file
+        hyperparam_file = glob('results/*{}*.pth'.format(start_times[0]))
+        hyperparams = torch.load(hyperparam_file[0])
+        dataset_type = hyperparams['dataset_type']
+        network_type = hyperparams['network']
+        base_net = hyperparams['base_network']
 
-        for net in networks:
-            if net in exp:
-                network_type = net
-                break
-        else:
-            raise Exception('network not found for experiment: ' + exp)
-
-        for base in base_networks:
-            if base in exp:
-                base_net = base
-                break
-
-        exp_results.append([dt, net, base, mean_df_stats.AUC.mean()])
+        exp_results.append([dataset_type, network_type, base_net, mean_df_stats.AUC.mean()])
     exp_results = pd.DataFrame(exp_results, columns=['dataset_type', 'network', 'base_cnn', 'auc'])
     do_fold_graphing(start_times)
     import IPython; IPython.embed()
