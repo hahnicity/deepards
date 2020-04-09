@@ -97,6 +97,26 @@ a few different ways.
 
         python visualize_results.py -exp test_learning_rate_changes
 
+## Getting Results Across Many Runs
+It is common in deep learning to run an experiment multiple times and to average the results to obtain a more clear picture
+of what your results will statistically look like. We have also written a script to help users with this called `mean_metrics.py`. If you provided an experiment name to your training script, then you can tell `mean_metrics.py` to aggregate results
+
+    python train_ards_detector.py -lr .001 --kfolds 5 -exp test_learning_rate_changes
+    python train_ards_detector.py -lr .001 --kfolds 5 -exp test_learning_rate_changes
+
+    # now aggregate results
+    python mean_metrics.py -e test_learning_rate_changes
+
+`mean_metrics.py` will first plot individual kfolds and the average performance of the model over a number of epochs. The script
+will also drop into an IPython interpreter when it's done. You can then poke around at different results variables to determine how well the model was doing.
+To get aggregate results you can do
+
+    In [1]: exp_results
+
+to see overall performance. To see more individualized performance metrics you can type
+
+    In [1]: mean_df_stats
+
 ## Pretraining
 It has been noted that training a neural network on a related task and then applying it to your dataset in question has
 either improved results of the classifier or improved the speed at which a classifier converges. We can do this using the ARDS
