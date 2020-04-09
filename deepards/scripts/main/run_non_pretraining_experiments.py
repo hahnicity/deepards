@@ -7,12 +7,11 @@ bs = str(16)
 epochs = str(10)
 weight_decay = str(0.0001)
 kfolds = str(5)
-n_times_each_experiment = 10
 # found .001 and .01 to be pretty good via experimentation
 grad_clip = .01
 
 
-def run_experiment(dataset_path, network, bs, epochs, kfolds, base_network, weight_decay, dataset_type, dry_run, experiment_name_prefix, n_sub_batches, clip_val, cuda_arg):
+def run_experiment(dataset_path, network, bs, epochs, kfolds, base_network, weight_decay, dataset_type, dry_run, experiment_name_prefix, n_sub_batches, clip_val, cuda_arg, n_times_each_experiment):
     experiment_name = "{}_{}_{}_{}".format(experiment_name_prefix, dataset_type, network, base_network)
     command = [str(i) for i in [
         'ts', 'python', 'train_ards_detector.py', '--train-from-pickle', dataset_path,
@@ -38,7 +37,9 @@ def main():
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('-e', '--experiment-name', required=True)
     parser.add_argument('--clip-val', type=float, default=.01)
+    parser.add_argument('--n-runs', type=int, default=10)
     args = parser.parse_args()
+
 
     for dataset_type, dataset_path, n_sub_batches in [
        ('unpadded_sequences', '/fastdata/deepards/unpadded_sequences-nb150-kfold.pkl', 150),
@@ -51,10 +52,10 @@ def main():
         for network in args.networks:
             if network == 'lstm_only':
                 # the base network input doesnt matter here
-                run_experiment(dataset_path, network, bs, epochs, kfolds, 'resnet18', weight_decay, dataset_type, args.dry_run, args.experiment_name, n_sub_batches, args.clip_val, '--cuda-no-dp')
+                run_experiment(dataset_path, network, bs, epochs, kfolds, 'resnet18', weight_decay, dataset_type, args.dry_run, args.experiment_name, n_sub_batches, args.clip_val, '--cuda-no-dp', args.n_runs)
             else:
                 for base_network in args.base_networks:
-                    run_experiment(dataset_path, network, bs, epochs, kfolds, base_network, weight_decay, dataset_type, args.dry_run, args.experiment_name, n_sub_batches, args.clip_val, '--cuda')
+                    run_experiment(dataset_path, network, bs, epochs, kfolds, base_network, weight_decay, dataset_type, args.dry_run, args.experiment_name, n_sub_batches, args.clip_val, '--cuda', args.n_runs)
 
 
 if __name__ == "__main__":
