@@ -357,13 +357,34 @@ class DeepARDSResults(object):
     def print_epoch_meter_results(self, metric_name, epoch_num):
         meter_name = '{}_epoch_{}'.format(metric_name, epoch_num)
         print(self.reporting.meters[meter_name])
+    
+    def process_pred_to_hour_for_dtw(self, test_dataset):
+        copy_pred_to_hour = self.pred_to_hour_frame.copy()
+        gt = test_dataset.get_ground_truth_df()
+        idx_pt = gt.patient.unique()[0]
+        pt_preds = len(self.pred_to_hour_frame[self.pred_to_hour_frame.patient == idx_pt])
+        pt_gt = len(gt[gt.patient == idx_pt])
+        
+        # in this case we aare doing breath window preds and must duplicate our indexing
+        if pt_gt == pt_preds:
+            repeat_n = test_dataset.all_sequences[0][1].shape[0]
+            copy_pred_to_hour = copy_pred_to_hour.loc[copy_pred_to_hour.index.repeat(repeat_n)]
+
+            for pt, pt_rows in gt.groupby('patient'):
+                pt_gt = gt[gt.patient == pt]
+                for idx in gt.index:
+                    copy_pred_to_hour.loc[idx, 'hour'] = test_dataset.all_sequences[idx][-1]
+
+        return copy_pred_to_hour
 
     def perform_dtw_preprocessing(self, test_dataset, dtw_cache_dir):
-        copy_pred_to_hour = self.pred_to_hour_frame.copy()
+        copy_pred_to_hour = self.process_pred_to_hour_for_dtw(test_dataset)
+
         for _, pt_rows in self.pred_to_hour_frame.groupby('patient'):
             pt = pt_rows.iloc[0].patient
-            dtw_scores = dtw_lib.analyze_patient(pt, test_dataset, dtw_cache_dir, self.pred_to_hour_frame)
+            dtw_scores = dtw_lib.analyze_patient(pt, test_dataset, dtw_cache_dir, copy_pred_to_hour)
             copy_pred_to_hour.loc[copy_pred_to_hour.patient==pt, 'dtw'] = dtw_scores.sort_index().dtw
+
         copy_pred_to_hour.to_pickle(os.path.join(dtw_cache_dir, 'dtw_{}_nb{}_{}_predictions.pkl'.format(
             test_dataset.dataset_type,
             test_dataset.n_sub_batches,
