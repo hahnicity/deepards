@@ -235,8 +235,8 @@ class ARDSRawDataset(Dataset):
     def set_kfold_indexes_for_fold(self, kfold_num):
         self.kfold_num = kfold_num
         self.kfold_indexes = self.get_kfold_indexes_for_fold(kfold_num)
-        self.non_oversampled_kfold_indexes = copy(list(self.kfold_indexes))
         self.set_indices_by_patient()
+        self.non_oversampled_kfold_indexes = copy(list(self.kfold_indexes))
         self.set_oversampling_indices()
 
     def get_kfold_indexes_for_fold(self, kfold_num):
