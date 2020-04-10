@@ -164,7 +164,6 @@ class BaseTraining(object):
                 kfold_num=kfold_num,
                 total_kfolds=self.args.kfolds,
                 unpadded_downsample_factor=self.args.downsample_factor,
-                drop_frame_if_frac_missing=self.args.no_drop_frames,
                 oversample_minority=self.args.oversample,
                 train_patient_fraction=self.args.train_pt_frac,
             )
@@ -191,7 +190,6 @@ class BaseTraining(object):
                 to_pickle=self.args.test_to_pickle,
                 train=False,
                 unpadded_downsample_factor=self.args.downsample_factor,
-                drop_frame_if_frac_missing=self.args.no_drop_frames,
                 holdout_set_type=self.args.holdout_set_type,
                 train_patient_fraction=1.0,
             )
@@ -543,7 +541,6 @@ class NestedMixin(object):
                 kfold_num=kfold_num,
                 total_kfolds=self.args.kfolds,
                 unpadded_downsample_factor=self.args.downsample_factor,
-                drop_frame_if_frac_missing=self.args.no_drop_frames,
                 whole_patient_super_batch=True,
                 train_patient_fraction=self.args.train_pt_frac,
             )
@@ -566,7 +563,6 @@ class NestedMixin(object):
                 to_pickle=self.args.test_to_pickle,
                 train=False,
                 unpadded_downsample_factor=self.args.downsample_factor,
-                drop_frame_if_frac_missing=self.args.no_drop_frames,
                 whole_patient_super_batch=True,
                 holdout_set_type=self.args.holdout_set_type,
                 train_patient_fraction=1.0,
@@ -941,8 +937,8 @@ def main():
     parser.add_argument('--train-to-pickle')
     parser.add_argument('--test-from-pickle')
     parser.add_argument('--test-to-pickle')
-    parser.add_argument('--cuda', action='store_true')
-    parser.add_argument('--cuda-no-dp', action='store_true')
+    parser.add_argument('--cuda', action='store_true', default=None)
+    parser.add_argument('--cuda-no-dp', action='store_true', default=None)
     parser.add_argument('-b', '--batch-size', type=int)
     parser.add_argument('--base-network', choices=base_networks)
     parser.add_argument('-lc', '--loss-calc', choices=['all_breaths', 'last_breath'])
@@ -951,12 +947,12 @@ def main():
         "meanings for different dataset types. For breath_by_breath this means the "
         "number of individual breaths in each breath frame. For unpadded_sequences "
         "this means the number of contiguous flow measurements in each frame."))
-    parser.add_argument('--no-print-progress', action='store_true')
+    parser.add_argument('--no-print-progress', action='store_true', default=None)
     parser.add_argument('--kfolds', type=int)
     parser.add_argument('-rip', '--initial-planes', type=int)
     parser.add_argument('-rfpt', '--resnet-first-pool-type', choices=['max', 'avg'])
-    parser.add_argument('--no-test-after-epochs', action='store_true')
-    parser.add_argument('--debug', action='store_true', help='debug code and dont train')
+    parser.add_argument('--no-test-after-epochs', action='store_true', default=None)
+    parser.add_argument('--debug', action='store_true', help='debug code and dont train', default=None)
     parser.add_argument('--optimizer', choices=['adam', 'sgd'])
     parser.add_argument('-dt', '--dataset-type', choices=[
         'padded_breath_by_breath',
@@ -977,36 +973,35 @@ def main():
     parser.add_argument('--save-model', help='save the model to a specific file')
     parser.add_argument('--load-base-network', help='load base network only from a saved model')
     parser.add_argument('--load-checkpoint', help='load a checkpoint of the model for further training or inference')
-    parser.add_argument('--no-train', action='store_true', help='Dont train model, just evaluate for inference')
-    parser.add_argument('-rdc','--resnet-double-conv', action='store_true')
-    parser.add_argument('--bm-to-linear', action='store_true')
+    parser.add_argument('--no-train', action='store_true', help='Dont train model, just evaluate for inference', default=None)
+    parser.add_argument('-rdc','--resnet-double-conv', action='store_true', default=None)
+    parser.add_argument('--bm-to-linear', action='store_true', default=None)
     parser.add_argument('-exp', '--experiment-name')
     parser.add_argument('--downsample-factor', type=float)
-    parser.add_argument('--no-drop-frames', action='store_false')
     parser.add_argument('-wd', '--weight-decay', type=float)
     parser.add_argument('-loss', '--loss-func', choices=['bce', 'vacillating', 'confidence', 'focal'], help='This option only works for classification. Choose the loss function you want to use for classification purposes: BCE or vacillating loss.')
     parser.add_argument('--valpha', type=float, default=float('Inf'), help='alpha value to use for vacillating loss. Lower alpha values mean vacillating loss will contribute less to overall loss of the system. Default value is inf')
     parser.add_argument('--conf-beta', type=float, default=1.0, help='Modifier to the intensity of the confidence penalty')
     parser.add_argument('--time-series-hidden-units', type=int)
     parser.add_argument('--transformer-blocks', type=int)
-    parser.add_argument('--unshuffled', action='store_true', help='dont shuffle data for lstm processing')
+    parser.add_argument('--unshuffled', action='store_true', help='dont shuffle data for lstm processing', default=None)
     parser.add_argument('--load-siamese', help='load a siamese network pretrained model')
     parser.add_argument('--fl-gamma', type=float, default=2.0)
     parser.add_argument('--fl-alpha', type=float, default=.9)
-    parser.add_argument('--oversample', action='store_true')
-    parser.add_argument('--reshuffle-oversample-per-epoch', action='store_true')
-    parser.add_argument('--freeze-base-network', action='store_true')
-    parser.add_argument('--stop-on-loss', action='store_true')
+    parser.add_argument('--oversample', action='store_true', default=None)
+    parser.add_argument('--reshuffle-oversample-per-epoch', action='store_true', default=None)
+    parser.add_argument('--freeze-base-network', action='store_true', default=None)
+    parser.add_argument('--stop-on-loss', action='store_true', default=None)
     parser.add_argument('--stop-thresh', type=float)
     parser.add_argument('--stop-after-epoch', type=int)
-    parser.add_argument('--clip-grad', action='store_true')
+    parser.add_argument('--clip-grad', action='store_true', default=None)
     parser.add_argument('--clip-val', type=float)
     parser.add_argument('--holdout-set-type', choices=['main', 'proto'], help='Choose whether or not you want to use the main train/test holdout split or the proto split (which can be pretty random and is used for prototyping)')
-    parser.add_argument('--plot-untiled-disease-evol', action='store_true', help='Plot the our ARDS/non-ARDS predictions by hour')
-    parser.add_argument('--plot-tiled-disease-evol', action='store_true', help='Plot the our ARDS/non-ARDS predictions by hour but in tiled format grouped by TPs/TNs/FPs/FNs')
-    parser.add_argument('--plot-dtw-with-disease', action='store_true', help='Plot DTW with ARDS/non-ARDS predictions by hour')
+    parser.add_argument('--plot-untiled-disease-evol', action='store_true', help='Plot the our ARDS/non-ARDS predictions by hour', default=None)
+    parser.add_argument('--plot-tiled-disease-evol', action='store_true', help='Plot the our ARDS/non-ARDS predictions by hour but in tiled format grouped by TPs/TNs/FPs/FNs', default=None)
+    parser.add_argument('--plot-dtw-with-disease', action='store_true', help='Plot DTW with ARDS/non-ARDS predictions by hour', default=None)
     parser.add_argument('--plot-dtw-by-minute', help='Plot DTW and predictions by minute for a single patient')
-    parser.add_argument('--perform-dtw-preprocessing', action='store_true', help='perform DTW preprocessing actions even if we dont want to visualize DTW')
+    parser.add_argument('--perform-dtw-preprocessing', action='store_true', help='perform DTW preprocessing actions even if we dont want to visualize DTW', default=None)
     parser.add_argument('--train-pt-frac', type=float, help='Fraction of random training patients to use')
     parser.add_argument('--cuda-device', type=int, help='number of cuda device you want to use')
     args = parser.parse_args()

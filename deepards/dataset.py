@@ -34,7 +34,6 @@ class ARDSRawDataset(Dataset):
                  total_kfolds=None,
                  oversample_minority=False,
                  unpadded_downsample_factor=4.0,
-                 drop_frame_if_frac_missing=True,
                  whole_patient_super_batch=False,
                  holdout_set_type='main',
                  train_patient_fraction=1.0):
@@ -52,7 +51,6 @@ class ARDSRawDataset(Dataset):
         self.frames_dropped = dict()
         self.n_sub_batches = n_sub_batches if all_sequences == [] else all_sequences[0][1].shape[0]
         self.unpadded_downsample_factor = unpadded_downsample_factor
-        self.drop_frame_if_frac_missing = drop_frame_if_frac_missing
         self.cohort_file = cohort_file
         self.oversample = oversample_minority
         self.whole_patient_super_batch = whole_patient_super_batch
@@ -643,9 +641,6 @@ class ARDSRawDataset(Dataset):
             raise ValueError('could not find patient id in file: {}'.format(filename))
 
     def _should_we_drop_frame(self, seq_vent_bns, patient_id):
-        if not self.drop_frame_if_frac_missing:
-            return False
-
         seq_vent_bns = np.array(seq_vent_bns)
         diffs = seq_vent_bns[:-1] + 1 - seq_vent_bns[1:]
         # do not include the stack if it is discontiguous to too large a degree

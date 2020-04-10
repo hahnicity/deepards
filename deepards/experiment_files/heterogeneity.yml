@@ -4,9 +4,15 @@ holdout_set_type: main
 dataset_type: unpadded_centered_sequences
 n_sub_batches: 20
 loader_threads: 0
-train_from_pickle: unpadded_centered_sequences-nb20-train.pkl
-test_from_pickle: unpadded_centered_sequences-nb20-test.pkl
+train_from_pickle: /fastdata/deepards/unpadded_centered_sequences-nb20-train-holdout.pkl
+test_from_pickle: /fastdata/deepards/unpadded_centered_sequences-nb20-test-holdout.pkl
 clip_val: 0.01
 base_network: densenet18
 network: cnn_linear
 batch_size: 16
+no_train: true
+plot_dtw_with_disease: true
+cuda_no_dp: true
+load_checkpoint: saved_models/unpadded_centered_sequences-nb20-holdout.pth
+plot_tiled_disease_evol: true
+perform_dtw_preprocessing: true

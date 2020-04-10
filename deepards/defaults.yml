@@ -6,7 +6,7 @@
 # 2.) Overrides file
 # 3.) Defaults file
 #
-# NOTE: true/false flag args cannot be set here, only string/float/int values
+# NOTE: true/false flag args *SHOULD* not be set here, only string/float/int values
 
 # generic training options
 data_path: /fastdata/ardsdetection
