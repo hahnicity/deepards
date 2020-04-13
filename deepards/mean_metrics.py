@@ -67,6 +67,18 @@ def getMeanMetrics(start_times):
     return mean_df_stats
 
 
+def _do_fold_graphing(df_stats, metric):
+    if len(df_stats.fold.unique()) > 1:
+        for k, stats in df_stats.groupby('fold'):
+            sns.lineplot(x='epoch', y=metric, data=stats, label='fold {}'.format(int(k)))
+    sns.lineplot(x='epoch', y=metric, data=df_stats, label='aggregate_results')
+    plt.xticks(np.arange(len(df_stats.epoch.unique())), sorted((df_stats.epoch.unique()+1).astype(int)))
+    ax = plt.gca()
+    ax.yaxis.set_minor_locator(MultipleLocator(.01))
+    plt.grid(axis='both')
+    plt.show()
+
+
 def do_fold_graphing(start_times):
     df_patient_results_list = []
     for time in start_times:
@@ -77,15 +89,8 @@ def do_fold_graphing(start_times):
     for df in df_patient_results_list:
         df_stats = computeMetricsFromPatientResults(df, df_stats)
 
-    if len(df_stats.fold.unique()) > 1:
-        for k, stats in df_stats.groupby('fold'):
-            sns.lineplot(x='epoch', y='AUC', data=stats, label='fold {}'.format(int(k)))
-    sns.lineplot(x='epoch', y='AUC', data=df_stats, label='aggregate_results')
-    plt.xticks(np.arange(len(df_stats.epoch.unique())), sorted((df_stats.epoch.unique()+1).astype(int)))
-    ax = plt.gca()
-    ax.yaxis.set_minor_locator(MultipleLocator(.01))
-    plt.grid(axis='both')
-    plt.show()
+    for metric in ['AUC', 'Accuracy', 'sensitivity', 'specificity']:
+        _do_fold_graphing(df_stats, metric)
 
 
 if __name__ == "__main__":
