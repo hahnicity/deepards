@@ -49,7 +49,11 @@ def computeMetricsFromPatientResults(df, df_stats):
     return df_stats
 
 
-def getMeanMetrics(start_times):
+def confidence_score(score, sample_size):
+    return np.round((1.96 * np.sqrt(score * (1-score) / sample_size)), 3)
+
+
+def get_metrics(start_times):
     df_patient_results_list = []
     for time in start_times:
         df = pd.read_pickle("results/{}_patient_results.pkl".format(time))
@@ -64,7 +68,7 @@ def getMeanMetrics(start_times):
     mean_df_stats[['fold', 'epoch']] = mean_df_stats[['fold', 'epoch']].astype(int)
     mean_df_stats = mean_df_stats.reset_index(drop = True)
     mean_df_stats.rename(columns = {'epoch' : 'max_epoch'}, inplace = True)
-    return mean_df_stats
+    return mean_df_stats, df_stats
 
 
 def _do_fold_graphing(df_stats, metric):
@@ -104,7 +108,7 @@ if __name__ == "__main__":
     unique_experiments = set(['_'.join(exp.split('_')[:-1]) for exp in main_experiments])
     for exp in sorted(unique_experiments):
         start_times = list(set([os.path.splitext(file_.split('_')[-1])[0] for file_ in glob(exp + '*')]))
-        mean_df_stats = getMeanMetrics(start_times)
+        mean_df_stats, all_stats = get_metrics(start_times)
 
         # get hyperparameter file
         hyperparam_file = glob('results/*{}*.pth'.format(start_times[0]))
