@@ -66,6 +66,12 @@ def misclassification_targeting(data):
     est = sm.OLS(data.target, x2)
     res = est.fit()
     print(res.summary())
+    # XXX plot out the regression target and predictions because the regression
+    # summary is pretty misleading. Also its not clear why r^2 is so low when
+    # statsmodels calculates it. But when I calc it, its much higher, which is
+    # more in line with what I'm actually seeing from my model. Yeah, I think
+    # I was doing MSE. R^2 is a bit different in its calculation
+    import IPython; IPython.embed()
 
 
 def main():
