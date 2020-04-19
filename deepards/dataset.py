@@ -36,7 +36,8 @@ class ARDSRawDataset(Dataset):
                  unpadded_downsample_factor=4.0,
                  whole_patient_super_batch=False,
                  holdout_set_type='main',
-                 train_patient_fraction=1.0):
+                 train_patient_fraction=1.0,
+                 transforms=None):
         """
         Dataset to generate sequences of data for ARDS Detection
         """
@@ -55,6 +56,7 @@ class ARDSRawDataset(Dataset):
         self.oversample = oversample_minority
         self.whole_patient_super_batch = whole_patient_super_batch
         self.train_patient_fraction = train_patient_fraction
+        self.transforms = transforms
 
         if self.oversample and self.whole_patient_super_batch:
             raise Exception('currently oversampling with whole patient super batch is not supported')
@@ -213,11 +215,12 @@ class ARDSRawDataset(Dataset):
             kfold_num=train_dataset.kfold_num,
             total_kfolds=train_dataset.total_kfolds,
             train_patient_fraction=1.0,
+            transforms=None,
         )
         return test_dataset
 
     @classmethod
-    def from_pickle(cls, data_path, oversample_minority, train_patient_fraction):
+    def from_pickle(cls, data_path, oversample_minority, train_patient_fraction, transforms):
         dataset = pd.read_pickle(data_path)
         if not isinstance(dataset, ARDSRawDataset):
             raise ValueError('The pickle file you have specified is out-of-date. Please re-process your dataset and save the new pickled dataset.')
@@ -228,6 +231,7 @@ class ARDSRawDataset(Dataset):
             dataset.scaling_factors
         except AttributeError:
             dataset.derive_scaling_factors()
+        dataset.transforms = transforms
         return dataset
 
     def set_kfold_indexes_for_fold(self, kfold_num):
@@ -675,6 +679,14 @@ class ARDSRawDataset(Dataset):
             mu, std = self.scaling_factors[self.kfold_num]
         except AttributeError:
             raise AttributeError('Scaling factors not found for dataset. You must derive them using the `derive_scaling_factors` function.')
+
+        # If we are using transforms then we can't subtract by mu because it might
+        # mess up any transform we make. I don't think this will be a big deal for the data
+        # because mu is so small anyhow.
+        if self.transforms is not None:
+            mu = 0
+            data = self.transforms(data)
+
         if 'padded_breath_by_breath' in self.dataset_type:
             padding_mask = self._get_padding_mask(data, mu)
             data = (data - padding_mask) / std

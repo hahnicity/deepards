@@ -10,7 +10,9 @@ from torch.autograd import Variable
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+from torchvision.transforms import Compose
 
+from deepards.augmentation import IEWindowWarping
 from deepards.config import Configuration
 from deepards.dataset import ARDSRawDataset, SiameseNetworkDataset
 from deepards.loss import ConfidencePenaltyLoss, FocalLoss, VacillatingLoss
@@ -148,11 +150,27 @@ class BaseTraining(object):
         if not self.args.no_print_progress:
             print("batch num: {}/{}, avg loss: {}\r".format(batch_idx, total_batches, self.results.get_meter('loss_epoch_{}'.format(epoch_num), fold_num), end=""))
 
+    def get_transforms(self):
+        if self.args.transforms is None:
+            return
+
+        transforms = []
+        if 'ie_ww' in self.args.transforms:
+            transforms.append(IEWindowWarping(.5, 2, .2))
+        return Compose(transforms)
+
     def get_base_datasets(self):
         kfold_num = None if self.args.kfolds is None else 0
+        transforms = self.get_transforms()
 
         # for holdout and kfold
         if not self.args.train_from_pickle:
+            # NOTE: the datasets themselves are storing way too much state and causes us to
+            # have to reinstantiate dataset objects in storage whenever our underlying code
+            # changes, and we also cannot use more than 1 cuda device anymore. It would be
+            # good in the future if we didn't go down this path of dataset object development.
+            # For now I think I don't want to refactor when we are close to done with the project
+            # and I can just parallelize runs across multiple GPUs.
             train_dataset = ARDSRawDataset(
                 self.args.data_path,
                 self.args.experiment_num,
@@ -166,20 +184,21 @@ class BaseTraining(object):
                 unpadded_downsample_factor=self.args.downsample_factor,
                 oversample_minority=self.args.oversample,
                 train_patient_fraction=self.args.train_pt_frac,
+                transforms=transforms,
             )
         else:
-            train_dataset = ARDSRawDataset.from_pickle(self.args.train_from_pickle, self.args.oversample, self.args.train_pt_frac)
+            train_dataset = ARDSRawDataset.from_pickle(self.args.train_from_pickle, self.args.oversample, self.args.train_pt_frac, transforms)
 
         self.n_sub_batches = train_dataset.n_sub_batches
         if not self.args.test_from_pickle and (self.args.kfolds is not None):
             test_dataset = ARDSRawDataset.make_test_dataset_if_kfold(train_dataset)
         elif self.args.test_from_pickle:
-            test_dataset = ARDSRawDataset.from_pickle(self.args.test_from_pickle, False, 1.0)
+            test_dataset = ARDSRawDataset.from_pickle(self.args.test_from_pickle, False, 1.0, None)
         else:  # holdout, no pickle, no kfold
             # there is a really bizarre bug where my default arg is being overwritten by
             # the state of the train_dataset obj. I checked pointer references and there was
-            # nothing. I might be able to do a deepcopy, but it might be easier to just supply
-            # a blank list instead of relying on default
+            # nothing. I might be able to do a deepcopy, but it is easier to just supply
+            # a blank list instead of relying on default for all_sequences var.
             test_dataset = ARDSRawDataset(
                 self.args.data_path,
                 self.args.experiment_num,
@@ -192,6 +211,7 @@ class BaseTraining(object):
                 unpadded_downsample_factor=self.args.downsample_factor,
                 holdout_set_type=self.args.holdout_set_type,
                 train_patient_fraction=1.0,
+                transforms=None,
             )
 
         return train_dataset, test_dataset
@@ -1024,6 +1044,7 @@ def main():
     parser.add_argument('--perform-dtw-preprocessing', action='store_true', help='perform DTW preprocessing actions even if we dont want to visualize DTW', default=None)
     parser.add_argument('--train-pt-frac', type=float, help='Fraction of random training patients to use')
     parser.add_argument('--cuda-device', type=int, help='number of cuda device you want to use')
+    parser.add_argument('--transforms', choices=['ie_ww'], nargs='*')
     args = parser.parse_args()
     args = Configuration(args)
 
