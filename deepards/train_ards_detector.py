@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torchvision.transforms import Compose
 
-from deepards.augmentation import IEWindowWarping
+from deepards.augmentation import IEWindowWarping, NaiveWindowWarping
 from deepards.config import Configuration
 from deepards.dataset import ARDSRawDataset, SiameseNetworkDataset
 from deepards.loss import ConfidencePenaltyLoss, FocalLoss, VacillatingLoss
@@ -157,6 +157,8 @@ class BaseTraining(object):
         transforms = []
         if 'ie_ww' in self.args.transforms:
             transforms.append(IEWindowWarping(.5, 2, .2))
+        if 'naive_ww' in self.args.transforms:
+            transforms.append(NaiveWindowWarping(.5, 2, .2))
         return Compose(transforms)
 
     def get_base_datasets(self):
@@ -1044,7 +1046,7 @@ def main():
     parser.add_argument('--perform-dtw-preprocessing', action='store_true', help='perform DTW preprocessing actions even if we dont want to visualize DTW', default=None)
     parser.add_argument('--train-pt-frac', type=float, help='Fraction of random training patients to use')
     parser.add_argument('--cuda-device', type=int, help='number of cuda device you want to use')
-    parser.add_argument('--transforms', choices=['ie_ww'], nargs='*')
+    parser.add_argument('--transforms', choices=['ie_ww', 'naive_ww'], nargs='*')
     args = parser.parse_args()
     args = Configuration(args)
 

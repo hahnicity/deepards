@@ -5,6 +5,49 @@ from scipy.signal import resample
 from ventmap.SAM import find_x0s_multi_algorithms, x0_heuristic
 
 
+class NaiveWindowWarping(object):
+    def __init__(self, rate_lower_bound, rate_upper_bound, probability):
+        """
+        Window Warmping as covered by Le Guennec 2016. No special actions done otherwise.
+
+        :param rate_lower_bound: Minimum rate to warp either insp or expiratory time
+        :param rate_upper_bound: Maximum rate to warp either insp or expiratory time
+        :param probability: probability of this transform being applied to a batch
+        """
+        self.rate_lower_bound = rate_lower_bound
+        self.rate_upper_bound = rate_upper_bound
+        self.probability = probability
+        if self.probability < 0 or self.probability > 1:
+            raise Exception('Probability bounding needs to be between 0 and 1.')
+        self.min_size = 10
+        # warped sequence size shouldn't take up more than half the total waveform
+        self.max_size = 224 / 2 / self.rate_upper_bound
+
+    def __call__(self, sub_batch):
+        if np.random.rand() > self.probability:
+            return sub_batch
+
+        breaths_insts, chans, seq_len = sub_batch.shape
+        dt = 0.02
+        # modify each breath instance in the sub batch
+        for b_idx, inst in enumerate(sub_batch):
+
+            warping_ratio = np.random.uniform(self.rate_lower_bound, self.rate_upper_bound)
+            slice_len = np.random.randint(self.min_size, self.max_size)
+            start = np.random.randint(0, seq_len-1-slice_len)
+            end = start + slice_len
+            chunk = inst[0][start:end]
+            new_size = int(math.floor(slice_len*warping_ratio))
+            new_chunk = resample(chunk, new_size)
+            new_inst = np.concatenate((inst[0][:start], new_chunk, inst[0][end:]))
+            if len(new_inst) >= seq_len:
+                sub_batch[b_idx] = new_inst[:seq_len].reshape((1, seq_len))
+            elif len(new_inst) < seq_len:
+                sub_batch[b_idx] = resample(new_inst, seq_len).reshape((1, seq_len))
+
+        return sub_batch
+
+
 class IEWindowWarping(object):
     def __init__(self, rate_lower_bound, rate_upper_bound, probability):
         """
