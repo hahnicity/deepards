@@ -65,7 +65,7 @@ class IEWindowWarpingBase(object):
         if self.probability < 0 or self.probability > 1:
             raise Exception('Probability bounding needs to be between 0 and 1.')
 
-    def warp(self, i_or_e_choices):
+    def warp(self, sub_batch, i_or_e_choices):
         """
         :param i_or_e_choices: array of 1/0s or True/False vals on whether to use insp or exp lim.
                                True (1) for insp, False (0) for exp.
@@ -142,8 +142,8 @@ class IEWindowWarpingIEProgrammable(IEWindowWarpingBase):
 
     def __call__(self, sub_batch):
         b_insts, _, __ = sub_batch.shape
-        i_or_e_choices = [use_i for _ in range(b_insts)]
-        return self.warp(i_or_e_choices)
+        i_or_e_choices = [self.use_i for _ in range(b_insts)]
+        return self.warp(sub_batch, i_or_e_choices)
 
 
 class IEWindowWarping(IEWindowWarpingBase):
@@ -161,4 +161,4 @@ class IEWindowWarping(IEWindowWarpingBase):
     def __call__(self, sub_batch):
         b_insts, _, __ = sub_batch.shape
         i_or_e_choices = np.random.choice([True, False], size=b_insts)
-        return self.warp(i_or_e_choices)
+        return self.warp(sub_batch, i_or_e_choices)
