@@ -3,8 +3,8 @@ import subprocess
 import time
 
 
-def run_experiment(dry_run, experiment_name_prefix, cuda_arg, config_override, cuda_devices, n_times_each_experiment):
-    experiment_name = "{}_{}".format(experiment_name_prefix, config_override.split('.yml')[0].replace('/', '_'))
+def run_experiment(dry_run, cuda_arg, config_override, cuda_devices, n_times_each_experiment):
+    experiment_name = config_override.split('.yml')[0].replace('/', '_')
     commands = [[str(i) for i in [
         'ts', 'python', 'train_ards_detector.py', '-co', config_override,
         '--no-print-progress', '-exp', experiment_name,
@@ -33,13 +33,12 @@ def run_experiment(dry_run, experiment_name_prefix, cuda_arg, config_override, c
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dry-run', action='store_true')
-    parser.add_argument('-e', '--experiment-name', required=True)
     parser.add_argument('--cuda-devices', help="cuda device you wish to use. Can use + to split work across different devices. E.g. 0+1", required=True)
     parser.add_argument('-co', '--config-override', required=True, help='Path to config override file you set for the experiment')
     parser.add_argument('--n-runs', type=int, help='Times to run each experiment', default=10)
     args = parser.parse_args()
 
-    run_experiment(args.dry_run, args.experiment_name, '--cuda-no-dp', args.config_override, args.cuda_devices, args.n_runs)
+    run_experiment(args.dry_run, '--cuda-no-dp', args.config_override, args.cuda_devices, args.n_runs)
 
 
 if __name__ == "__main__":
