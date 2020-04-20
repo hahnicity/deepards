@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torchvision.transforms import Compose
 
-from deepards.augmentation import IEWindowWarping, NaiveWindowWarping
+from deepards.augmentation import IEWindowWarping, IEWindowWarpingIEProgrammable,  NaiveWindowWarping
 from deepards.config import Configuration
 from deepards.dataset import ARDSRawDataset, SiameseNetworkDataset
 from deepards.loss import ConfidencePenaltyLoss, FocalLoss, VacillatingLoss
@@ -146,6 +146,8 @@ class BaseTraining(object):
             transforms.append(IEWindowWarping(.5, 2, self.args.transform_probability))
         if 'naive_ww' in self.args.transforms:
             transforms.append(NaiveWindowWarping(.5, 2, self.args.transform_probability))
+        if 'ie_ww_i_or_e' in self.args.transforms:
+            transforms.append(IEWindowWarpingIEProgrammable(.5, 2, self.args.transform_probability, self.args.use_i))
         return Compose(transforms)
 
     def get_base_datasets(self):
@@ -1033,8 +1035,15 @@ def main():
     parser.add_argument('--perform-dtw-preprocessing', action='store_true', help='perform DTW preprocessing actions even if we dont want to visualize DTW', default=None)
     parser.add_argument('--train-pt-frac', type=float, help='Fraction of random training patients to use')
     parser.add_argument('--cuda-device', type=int, help='number of cuda device you want to use')
-    parser.add_argument('--transforms', choices=['ie_ww', 'naive_ww'], nargs='*')
-    parser.add_argument('-tp', '--transform-probability', type=float, default=.2, help='Probability that a modifying transform will be activated for a sub-batch')
+    parser.add_argument('--transforms', choices=['ie_ww', 'naive_ww', 'ie_ww_i_or_e'], nargs='*', help="""
+        Option to determine which kinds of data augmentations to use with our modeling
+
+        naive_ww: Naive window warping done under standard Le Guennec 2016 instructions
+        ie_ww: I/E window warping
+        ie_ww_i_or_e: I/E window warping but with choice of using either I or E all the time
+    """)
+    parser.add_argument('-tp', '--transform-probability', type=float, help='Probability that a modifying transform will be activated for a sub-batch')
+    parser.add_argument('--use-i', help='Argument only used if ie_ww_i_or_e transform is triggered. If you set this arg on CLI then insp lim will only be used. Otherwise exp. lim is used.', action='store_true', default=None)
     args = parser.parse_args()
     args = Configuration(args)
 

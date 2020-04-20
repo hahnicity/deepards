@@ -39,6 +39,9 @@ transformer_blocks: 2
 stop_thresh: 1.5
 stop_after_epoch: 1
 
+# augmentation options
+transform_probability: .2
+
 # other options
 holdout_set_type: main
 train_pt_frac: 1.0
