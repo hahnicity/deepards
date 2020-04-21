@@ -97,6 +97,17 @@ def do_fold_graphing(start_times):
         _do_fold_graphing(df_stats, metric)
 
 
+def get_hyperparams(start_time):
+    # search for legacy format
+    hyperparam_file = glob('results/*{}*.pth'.format(start_time))
+    hyperparams = torch.load(hyperparam_file[0])
+    if 'dataset_type' in hyperparams:
+        tmp = hyperparams
+    else:
+        tmp = hyperparams['conf']
+    return tmp
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('-e', '--experiment-name', default='main_experiment')
@@ -109,10 +120,8 @@ if __name__ == "__main__":
     for exp in sorted(unique_experiments):
         start_times = list(set([os.path.splitext(file_.split('_')[-1])[0] for file_ in glob(exp + '*')]))
         mean_df_stats, all_stats = get_metrics(start_times)
-
+        hyperparams = get_hyperparams(start_times[0])
         # get hyperparameter file
-        hyperparam_file = glob('results/*{}*.pth'.format(start_times[0]))
-        hyperparams = torch.load(hyperparam_file[0])
         dataset_type = hyperparams['dataset_type']
         network_type = hyperparams['network']
         base_net = hyperparams['base_network']
