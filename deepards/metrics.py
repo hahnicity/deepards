@@ -359,6 +359,11 @@ class DeepARDSResults(object):
         print(self.reporting.meters[meter_name])
 
     def process_pred_to_hour_for_dtw(self, test_dataset):
+        """
+        So the whole point of this function is to ensure that we have a timestamp
+        associated with every single breath. It may not have this in cases where
+        we are performing sub-batch-level predictions.
+        """
         copy_pred_to_hour = self.pred_to_hour_frame.copy()
         gt = test_dataset.get_ground_truth_df()
         idx_pt = gt.patient.unique()[0]
@@ -368,6 +373,7 @@ class DeepARDSResults(object):
         # in this case we aare doing breath window preds and must duplicate our indexing
         if pt_gt == pt_preds:
             repeat_n = test_dataset.all_sequences[0][1].shape[0]
+            # expand out predictions by the sub-batch size
             copy_pred_to_hour = copy_pred_to_hour.loc[copy_pred_to_hour.index.repeat(repeat_n)]
 
             hour_arr = [None] * len(copy_pred_to_hour)
@@ -375,7 +381,8 @@ class DeepARDSResults(object):
             for pt, pt_rows in gt.groupby('patient'):
                 pt_gt = gt[gt.patient == pt]
                 for idx in gt_index:
-                    hour_arr[idx] = test_dataset.all_sequences[idx][-1]
+                    # -1 is the index where hours are located
+                    hour_arr[idx*repeat_n:idx*repeat_n+repeat_n] = test_dataset.all_sequences[idx][-1]
             copy_pred_to_hour['hour'] = hour_arr
 
         return copy_pred_to_hour
