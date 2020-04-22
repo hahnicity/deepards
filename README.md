@@ -53,6 +53,39 @@ This will allow the results reporting to understand that you wish to compare dif
     python train_ards_detector.py -lr .0001 --kfolds 5 -exp test_learning_rate_changes
     python train_ards_detector.py -lr .00001 --kfolds 5 -exp test_learning_rate_changes
 
+## Running with Config File
+
+Because it can be frustrating to remember the arguments that you used for a specific experiment we
+allow the creation of experiment configuration files to allow override of default parameters. Default
+parameters are kept in `defaults.yml`. If you want to override the defaults create a new YAML file in
+the `experiment_files` directory.  There are a number of examples in this directory but we will go through one.
+
+If we open `experiment_files/train_frac25.yml` we will see some of the arguments.
+
+    kfolds: 5
+    dataset_type: unpadded_centered_sequences
+    n_sub_batches: 20
+    train_from_pickle: unpadded_centered_sequences-nb20.pkl
+    train_pt_frac: .25
+    clip_grad: true
+    clip_val: 0.01
+    network: cnn_linear
+
+Here we see we are setting a variety of different parameters. Note that we can set boolean parameters
+as well by setting the variable names to true/false. Variable names in these files will mirror CLI
+variable names. So if the CLI variable name is `--tranform-probability`, then the variable name will
+be `transform_probability`. If there is a shorthand CLI name like `-dp` it will *NOT* be recognized, instead
+you need to use the full variable name: so `data_path` would be the correct usage.
+
+Finally once you have completed a config override file you can specify it on the CLI path using
+
+    python train_ards_detector.py -co experiment_files/my_experiment.yml
+
+Because you have already set all of your arguments in your experiment file, you will not have to set
+them on the command line. If you still want to override an argument in the experiment file you can
+just by using the command line. The command line will *always* override any argument set in
+an experiment file.
+
 ## Dataset Types
 
 You may have noticed the `-dt` flag we specified above. This stands for `--dataset-type`. Different
