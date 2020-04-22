@@ -99,6 +99,7 @@ all use relatively the same data, but in a variety of different ways. As of 2019
 * **padded_breath_by_breath_with_full_bm_target** - Utilizes the padded breath by breath method, but sets breath metadata as its target instead of an ARDS/no ARDS classification. This is used for pretraining a CNN and then later you can apply it to ARDS detection.
 * **padded_breath_by_breath_with_limited_bm_target** - Utilizes the padded breath by breath method, but sets a limited set of breath metadata as its target instead of an ARDS/no ARDS classification. This is used for pretraining a CNN and then later you can apply it to ARDS detection.
 * **padded_breath_by_breath_with_flow_time_features** - Utilizes the padded breath by breath method, and adds breath metadata so the model can use that for classification decisions as well.
+* **unpadded_centered_sequences** - Like unpadded sequences, but always starts with the beginning of a new breath. This helps correct for translational variability in CNN.
 
 I understand that this might be a bit to understand in writing so I have also added images to help visualize how data is being processed.
 
@@ -112,11 +113,23 @@ Note that the spaced padding is zoomed so you can see what's happening.
 ![](img/unpadded_sequences.png)
 
 ### Best Performers
-Currently its unclear if unpadded_sequences or padded_breath_by_breath performs best. I have been using padded_breath_by_breath more
-consistently because it was just the first thing I coded and it was unclear if unpadded_sequences hurt performance
-or not. More experiments will need to be done however to validate which performs best. A further possible advantage
-of padded_breath_by_breath is that you can pretrain CNNs using breath metadata regressors and then apply it to ARDS detection.
-I will discuss this in a later section.
+We have found that `unpadded_centered_sequences` performs best across all of the datasets. We are currently investigating why.
+
+## Only Using A Fraction of Total Available Training Patients
+If you only want to use a fraction of the training patients available for experimentation then you
+should use the `--train-pt-frac` argument to set the fraction of patients in your dataset you want
+to use.
+Normally the number of patients in a training kfold is 80, so for instance if you set `--train-pt-frac 0.1`,
+then this would only take 10% of the available training patients. Doing this you would randomly select
+8 patients for use in training. We split evenly by pathophysiology, so you'd get 4 non-ARDS and 4 ARDS
+patients in training.
+
+Example of usage on CLI:
+
+    python train_ards_detector.py --train-pt-frac 0.25
+
+Assuming you have a training dataset of 80 patients again, asking for 25% of your patients would
+give you a training dataset of 20 patients to use.
 
 ## Visualizing Results
 Now that you've run everything you will want to visualize your results in an informative way. You can do so using the `visualize_results.py` script. You can use this
