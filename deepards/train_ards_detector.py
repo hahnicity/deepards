@@ -339,11 +339,11 @@ class BaseTraining(object):
     def perform_plotting(self, test_dataset):
         # just using hard-coded argument for now.
         dtw_cache_dir = 'dtw_cache'
-        if self.args.plot_dtw_with_disease or self.args.plot_dtw_by_minute or self.args.perform_dtw_preprocessing:
+        if self.args.plot_dtw_with_disease or self.args.plot_pt_dtw_by_minute or self.args.perform_dtw_preprocessing:
             self.results.perform_dtw_preprocessing(test_dataset, dtw_cache_dir)
 
-        if self.args.plot_dtw_by_minute:
-            self.results.plot_dtw_by_minute(self.args.plot_dtw_by_minute, test_dataset, dtw_cache_dir)
+        if self.args.plot_pt_dtw_by_minute:
+            self.results.plot_dtw_by_minute(self.args.plot_pt_dtw_by_minute, test_dataset, dtw_cache_dir)
 
         if self.args.plot_dtw_with_disease and not self.args.plot_tiled_disease_evol:
             self.results.perform_hourly_patient_plot_with_dtw(test_dataset, dtw_cache_dir)
@@ -1031,7 +1031,7 @@ def main():
     parser.add_argument('--plot-untiled-disease-evol', action='store_true', help='Plot the our ARDS/non-ARDS predictions by hour', default=None)
     parser.add_argument('--plot-tiled-disease-evol', action='store_true', help='Plot the our ARDS/non-ARDS predictions by hour but in tiled format grouped by TPs/TNs/FPs/FNs', default=None)
     parser.add_argument('--plot-dtw-with-disease', action='store_true', help='Plot DTW with ARDS/non-ARDS predictions by hour', default=None)
-    parser.add_argument('--plot-dtw-by-minute', help='Plot DTW and predictions by minute for a single patient')
+    parser.add_argument('--plot-pt-dtw-by-minute', help='Plot DTW and predictions by minute for a single patient.')
     parser.add_argument('--perform-dtw-preprocessing', action='store_true', help='perform DTW preprocessing actions even if we dont want to visualize DTW', default=None)
     parser.add_argument('--train-pt-frac', type=float, help='Fraction of random training patients to use')
     parser.add_argument('--cuda-device', type=int, help='number of cuda device you want to use')
