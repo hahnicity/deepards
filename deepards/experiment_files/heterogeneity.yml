@@ -11,9 +11,10 @@ base_network: densenet18
 network: cnn_linear
 batch_size: 16
 no_train: true
-#plot_dtw_with_disease: true
+plot_dtw_with_disease: true
 cuda_no_dp: true
 load_checkpoint: saved_models/unpadded_centered_sequences-nb20-holdout.pth
+#save_model: saved_models/unpadded_centered_sequences-nb20-holdout.pth
 plot_tiled_disease_evol: true
 perform_dtw_preprocessing: true
 epochs: 1
