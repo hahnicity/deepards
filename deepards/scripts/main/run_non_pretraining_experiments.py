@@ -4,9 +4,9 @@ import time
 
 
 def run_experiment(dry_run, cuda_arg, config_override, cuda_devices, n_times_each_experiment):
-    experiment_name = config_override.split('.yml')[0].replace('/', '_')
+    experiment_name = config_override.split('.yml')[0].split('/')[1]
     commands = [[str(i) for i in [
-        'ts', 'python', 'train_ards_detector.py', '-co', config_override,
+        'python', 'train_ards_detector.py', '-co', config_override,
         '--no-print-progress', '-exp', experiment_name,
         '--oversample', '--clip-grad', cuda_arg,
         '--cuda-device', dev,

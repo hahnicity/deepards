@@ -1,0 +1,12 @@
+data_path: /home/bhargav/deepards-data-finetuning/ardsdetection_data_anon_non_consent_filtered
+cohort_file: /home/bhargav/deepards-data-finetuning/ardsdetection_data_anon_non_consent_filtered/cohort-description.csv
+kfolds: 5
+dataset_type: unpadded_centered_sequences
+n_sub_batches: 20
+loader_threads: 0
+train_to_pickle: /home/bhargav/deepards-data-finetuning/picked-data/non-pretrained-100.pkl
+train_pt_frac: 1
+clip_val: 0.01
+base_network: densenet18
+network: cnn_linear
+batch_size: 16
