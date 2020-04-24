@@ -31,6 +31,15 @@ python train_ards_detector.py -n cnn_regressor --base-network densenet18 --cuda 
 Model 11: 1583466505
 python train_ards_detector.py -n cnn_regressor --base-network densenet18 --cuda --save-model pretrained-model-11.pth  -dt padded_breath_by_breath_with_custom_bm_target --bm-features mean_flow_from_pef -dp ~/deepards-data-pretraining/new_bm_dataset_c50_b500 --train-to-pickle ~/deepards-data-pretraining/pickled-data/model_11_train_data.pkl --test-to-pickle ~/deepards-data-pretraining/pickled-data/model_11_test_data.pkl
 
+PT_2A: 1585691749
+python train_ards_detector.py -n cnn_regressor --base-network densenet18 --cuda --save-model PT_2A.pth  -dt padded_breath_by_breath_with_custom_bm_target --bm-features inst_RR mean_flow_from_pef -dp ~/deepards-data-pretraining/new_bm_dataset_c50_b500 --train-to-pickle ~/deepards-data-pretraining/pickled-data/PT_2A_train_data.pkl --test-to-pickle ~/deepards-data-pretraining/pickled-data/PT_2A_test_data.pklRun start time: 1585691749
 
+PT_3A: 1585691995
+python train_ards_detector.py -n cnn_regressor --base-network densenet18 --cuda --save-model PT_3A.pth  -dt padded_breath_by_breath_with_custom_bm_target --bm-features inst_RR iTime mean_flow_from_pef -dp ~/deepards-data-pretraining/new_bm_dataset_c50_b500 --train-to-pickle ~/deepards-data-pretraining/pickled-data/PT_3A_train_data.pkl --test-to-pickle ~/deepards-data-pretraining/pickled-data/PT_3A_test_data.pkl
 
+PT_4A: 1585692139
+python train_ards_detector.py -n cnn_regressor --base-network densenet18 --cuda --save-model PT_4A.pth  -dt padded_breath_by_breath_with_custom_bm_target --bm-features inst_RR iTime eTime mean_flow_from_pef -dp ~/deepards-data-pretraining/new_bm_dataset_c50_b500 --train-to-pickle ~/deepards-data-pretraining/pickled-data/PT_4A_train_data.pkl --test-to-pickle ~/deepards-data-pretraining/pickled-data/PT_4A_test_data.pkl
+
+PT_5A: 1585692278
+python train_ards_detector.py -n cnn_regressor --base-network densenet18 --cuda --save-model PT_5A.pth  -dt padded_breath_by_breath_with_custom_bm_target --bm-features inst_RR iTime eTime mean_flow_from_pef I:E_ratio -dp ~/deepards-data-pretraining/new_bm_dataset_c50_b500 --train-to-pickle ~/deepards-data-pretraining/pickled-data/PT_5A_train_data.pkl --test-to-pickle ~/deepards-data-pretraining/pickled-data/PT_5A_test_data.pkl
 
