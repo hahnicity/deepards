@@ -4,7 +4,6 @@ dataset_type: unpadded_centered_sequences
 n_sub_batches: 20
 loader_threads: 0
 train_to_pickle: /home/bhargav/deepards-data-pretraining/picked-data/pretraining_siamese.pkl
-train_pt_frac: 1
 clip_val: 0.01
 base_network: densenet18
 network: siamese_cnn_linear
