@@ -69,6 +69,8 @@ class ARDSRawDataset(Dataset):
             data_subdir = 'prototrain' if train else 'prototest'
         elif kfold_num is None and holdout_set_type == 'main':
             data_subdir = 'training' if train else 'testing'
+        elif kfold_num is None and holdout_set_type == 'random':
+            data_subdir = 'randomtrain' if train else 'randomval'
         else:
             data_subdir = 'all_data'
 

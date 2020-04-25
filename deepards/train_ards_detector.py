@@ -176,6 +176,7 @@ class BaseTraining(object):
                 oversample_minority=self.args.oversample,
                 train_patient_fraction=self.args.train_pt_frac,
                 transforms=transforms,
+                holdout_set_type=self.args.holdout_set_type,
             )
         else:
             train_dataset = ARDSRawDataset.from_pickle(self.args.train_from_pickle, self.args.oversample, self.args.train_pt_frac, transforms)
@@ -1027,7 +1028,7 @@ def main():
     parser.add_argument('--stop-after-epoch', type=int)
     parser.add_argument('--clip-grad', action='store_true', default=None)
     parser.add_argument('--clip-val', type=float)
-    parser.add_argument('--holdout-set-type', choices=['main', 'proto'], help='Choose whether or not you want to use the main train/test holdout split or the proto split (which can be pretty random and is used for prototyping)')
+    parser.add_argument('--holdout-set-type', choices=['main', 'proto', 'random'], help='Choose whether or not you want to use the main train/test holdout split or the proto split (which can be pretty random and is used for prototyping)')
     parser.add_argument('--plot-untiled-disease-evol', action='store_true', help='Plot the our ARDS/non-ARDS predictions by hour', default=None)
     parser.add_argument('--plot-tiled-disease-evol', action='store_true', help='Plot the our ARDS/non-ARDS predictions by hour but in tiled format grouped by TPs/TNs/FPs/FNs', default=None)
     parser.add_argument('--plot-dtw-with-disease', action='store_true', help='Plot DTW with ARDS/non-ARDS predictions by hour', default=None)
