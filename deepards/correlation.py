@@ -72,13 +72,19 @@ def autocorrelate_by_pred(model_data):
         # a ton of engineering effort to work out the corner cases but I don't have time
         # and its not useful energy spent. So I will work on my basic algo
         r2 = get_auto_corr_r2(seq)
+        #if .98 <= r2 <= 1.0:
+        #    import IPython; IPython.embed()
+        #elif .00 <= r2 <= .02:
+        #    import IPython; IPython.embed()
 
         pred = model_data['pred'][i]
         actual = model_data['actual'][i]
+        patient = model_data['patient'][i]
+
         cls_map[pred]['pred'].append(r2)
         cls_map[actual]['actual'].append(r2)
-        #cls_map[pred]['pred_pt'].append(model_data['patient'][i])
-        #cls_map[actual]['actual_pt'].append(model_data['patient'][i])
+        cls_map[pred]['pred_pt'].append(patient)
+        cls_map[actual]['actual_pt'].append(patient)
 
     for cls in cls_map:
         name = cls_map[cls]['name']
@@ -86,6 +92,36 @@ def autocorrelate_by_pred(model_data):
         sns.distplot(cls_map[cls]['pred'], kde=False, label='{}-pred'.format(name), bins=100, hist_kws={'alpha': 0.4})
         plt.legend()
         plt.show()
+
+    for cls in cls_map:
+        data = cls_map[cls]['actual']
+        data_pt = [float(i[:4]) for i in cls_map[cls]['actual_pt']]
+        act = np.array(data).reshape((len(data), 1))
+        act_pt = np.array(data_pt).reshape((len(data_pt), 1))
+        arr = np.append(act, act_pt, axis=1)
+        arr = arr[arr[:, 0] < .2]
+        # XXX TODO I wanted to look at what specific classes were doing with synchronous data
+        # and which patients had it versus which didnt, and then to tell if we were
+        # misclassifying it
+
+    misclassified = []
+    misclassified_ards = []
+    misclassified_other = []
+    for i, seq in enumerate(model_data['seqs']):
+        if model_data['actual'][i] != model_data['pred'][i]:
+            r2 = get_auto_corr_r2(seq)
+            misclassified.append(r2)
+
+            if model_data['actual'][i] == 1:
+                misclassified_ards.append(r2)
+            else:
+                misclassified_other.append(r2)
+
+    sns.distplot(misclassified, kde=False, bins=100, label='all misclassified')
+    sns.distplot(misclassified_other, kde=False, bins=100, label='other misclassified', hist_kws={'alpha': .5})
+    sns.distplot(misclassified_ards, kde=False, bins=100, label='ards misclassified')
+    plt.legend()
+    plt.show()
 
 
 def cross_correlations(model_data, cc_samp_size):
@@ -136,13 +172,16 @@ def run_entire_model(test_dataset_path, model_path):
 
     with torch.no_grad():
         for data in DataLoader(test_dataset, batch_size=bs):
-            patient = data[0]
+            # add patient data
+            for idx in data[0]:
+                model_data['patient'].append(test_dataset.all_sequences[idx][0])
+
+            # work on test predictions
             seq = data[1]
             target = data[3].argmax(dim=1)
             cuda_seq = seq.float().cuda()
             output = model(cuda_seq, None)
             batch_predictions = softmax(output).argmax(dim=1)
-            model_data['patient'].extend(patient)
             model_data['seqs'].extend(seq.view(seq.shape[0], -1).numpy())
             model_data['pred'].extend(batch_predictions.tolist())
             model_data['actual'].extend(target.tolist())
