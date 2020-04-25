@@ -1,4 +1,5 @@
 import argparse
+import math
 import os
 import shutil
 import subprocess
@@ -16,7 +17,7 @@ ards_test = ['0127RPI0120160124', '0411RPI5820170119', '0261RPI1220160617',
        '0558RPI0820180104']
 
 other_test = ['0443RPI1620170319', '0410RPI4120170118', '0380RPI3920161212',
-       '0606RPI1920180416', '0135RPI1420160203', '0231RPI1220160424',
+       '0745RPI1900000000', '0135RPI1420160203', '0231RPI1220160424',
        '0137RPI1920160202', '0315RPI2720160910', '0132RPI1720160127',
        '0225RPI2520160416']
 
@@ -123,78 +124,84 @@ aim1_test = ['0411RPI5820170119',
  '0145RPI1120160212']
 
 
-def perform_random_split(dataset_path, split_ratio, cohort_path):
-    cohort = pd.read_csv(cohort_path)
-    cohort['Patient Unique Identifier'] = cohort['Patient Unique Identifier'].astype(str)
-    ards_pts = cohort[cohort.Pathophysiology == 'ARDS']['Patient Unique Identifier'].to_list()
-    other_pts = cohort[cohort.Pathophysiology != 'ARDS']["Patient Unique Identifier"].to_list()
+class Splitting(object):
+    def __init__(self, dataset_path):
+        self.dataset_path = dataset_path
+        self.all_data_dir = os.path.join(self.dataset_path, 'experiment1/all_data')
+        self.all_data_raw_dir = os.path.join(self.all_data_dir, 'raw')
+        self.all_data_meta_dir = os.path.join(self.all_data_dir, 'meta')
+
+    def create_split(self, pts, main_dirname):
+
+        dir = os.path.join(self.dataset_path, 'experiment1', main_dirname)
+        try:
+            shutil.rmtree(dir)
+        except OSError:
+            pass
+        os.mkdir(dir)
+        raw_dir = os.path.join(dir, 'raw')
+        meta_dir = os.path.join(dir, 'meta')
+        os.mkdir(raw_dir)
+        os.mkdir(meta_dir)
+
+        for pt in pts:
+            proc = subprocess.Popen(['ln', '-s', os.path.join(self.all_data_raw_dir, pt), raw_dir])
+            proc.communicate()
+            proc = subprocess.Popen(['ln', '-s', os.path.join(self.all_data_meta_dir, pt), meta_dir])
+            proc.communicate()
+
+
+def perform_random_split(dataset_path, split_ratio, validation_ratio):
+    ards_pts = ards_train + ards_test
+    other_pts = other_train + other_test
     all_pts = ards_pts + other_pts
     len_patho_test_pts = int((len(all_pts) * split_ratio) / 2)
     other_test_pts = list(np.random.choice(other_pts, size=len_patho_test_pts, replace=False))
     ards_test_pts = list(np.random.choice(ards_pts, size=len_patho_test_pts, replace=False))
     test_pts = other_test_pts + ards_test_pts
     train_pts = set(all_pts).difference(set(test_pts))
-    perform_split(dataset_path, train_pts, test_pts)
+
+    splitter = Splitting(dataset_path)
+    splitter.create_split(train_pts, 'randomtrain')
+
+    val_n = int(math.ceil(len(test_pts) * validation_ratio))
+    ards_val_pts = np.random.choice(ards_test_pts, size=val_n/2, replace=False)
+    other_val_pts = np.random.choice(other_test_pts, size=val_n/2, replace=False)
+    val_pts = list(ards_val_pts) + list(other_val_pts)
+    splitter.create_split(val_pts, 'randomval')
+    splitter.create_split(list(set(test_pts).difference(val_pts)), 'randomtest')
 
 
 def perform_preset_proto_split(dataset_path):
-    perform_split(dataset_path, ards_train + other_train, ards_test + other_test)
+    splitter = Splitting(dataset_path)
+    splitter.create_split(ards_train+other_train, 'prototrain')
+    splitter.create_split(ards_test+other_test, 'prototest')
 
 
 def perform_preset_aim1_split(dataset_path):
-    perform_split(dataset_path, aim1_train, aim1_test)
-
-
-def perform_split(dataset_path, train_pts, test_pts):
-    all_data_dir = os.path.join(dataset_path, 'experiment1/all_data')
-    train_dir = os.path.join(dataset_path, 'experiment1/prototrain')
-    test_dir = os.path.join(dataset_path, 'experiment1/prototest')
-    try:
-        shutil.rmtree(train_dir)
-    except OSError:
-        pass
-    try:
-        shutil.rmtree(test_dir)
-    except OSError:
-        pass
-    os.mkdir(train_dir)
-    os.mkdir(test_dir)
-    all_data_raw_dir = os.path.join(all_data_dir, 'raw')
-    train_raw_dir = os.path.join(train_dir, 'raw')
-    train_meta_dir = os.path.join(train_dir, 'meta')
-    all_data_meta_dir = os.path.join(all_data_dir, 'meta')
-    test_raw_dir = os.path.join(test_dir, 'raw')
-    test_meta_dir = os.path.join(test_dir, 'meta')
-    os.mkdir(train_raw_dir)
-    os.mkdir(train_meta_dir)
-    os.mkdir(test_raw_dir)
-    os.mkdir(test_meta_dir)
-
-    for pt in train_pts:
-        proc = subprocess.Popen(['ln', '-s', os.path.join(all_data_raw_dir, pt), train_raw_dir])
-        proc.communicate()
-        proc = subprocess.Popen(['ln', '-s', os.path.join(all_data_meta_dir, pt), train_meta_dir])
-        proc.communicate()
-
-    for pt in test_pts:
-        proc = subprocess.Popen(['ln', '-s', os.path.join(all_data_raw_dir, pt), test_raw_dir])
-        proc.communicate()
-        proc = subprocess.Popen(['ln', '-s', os.path.join(all_data_meta_dir, pt), test_meta_dir])
-        proc.communicate()
+    splitter = Splitting(dataset_path)
+    splitter.create_split(aim1_train, 'training')
+    splitter.create_split(aim1_test, 'testing')
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-dp', '--dataset-path', required=True)
-    parser.add_argument('set_type', choices=['preset_proto', 'preset_aim1', 'random'])
-    parser.add_argument('-sr', '--split-ratio', type=float, default=.2)
-    parser.add_argument('-c', '--cohort-path', default='cohort-description.csv')
+    parser.add_argument('set_type', choices=['preset_proto', 'preset_aim1', 'random'], help="""
+        Split your data in a specific format:
+
+        *preset_proto:* Utilize the proto train/test split. As it implies, used for prototyping purposes and shouldn't be used for result reporting
+        *preset_aim1:* Use the preset holdout split we used for initial Aim 1 paper.
+        *random:* Use a random split of the patients with a validation set.
+    """)
+    parser.add_argument('-sr', '--split-ratio', type=float, default=.3)
+    parser.add_argument('-vr', '--validation-ratio', type=float, default=1/3.0, help='Ratio of the testing set to split into the validation set. Only used for the random split type.')
     args = parser.parse_args()
 
     if args.set_type == 'preset_proto':
         perform_preset_proto_split(args.dataset_path)
     elif args.set_type == 'random':
-        perform_random_split(args.dataset_path, args.split_ratio, args.cohort_path)
+        perform_random_split(args.dataset_path, args.split_ratio, args.validation_ratio)
     elif args.set_type == 'preset_aim1':
         perform_preset_aim1_split(args.dataset_path)
 
