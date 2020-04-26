@@ -1,0 +1,14 @@
+data_path: /fastdata/ardsdetection/
+dataset_type: unpadded_centered_sequences
+n_sub_batches: 20
+loader_threads: 0
+train_from_pickle: /fastdata/deepards/unpadded_centered_sequences-nb20-kfold.pkl
+clip_val: 0.01
+base_network: densenet18
+network: cnn_linear
+batch_size: 16
+cuda_no_dp: true
+save_model: saved_models/unpadded_centered_sequences-nb20-kfold.pth
+epochs: 10
+kfolds: 5
+holdout_set_type: random

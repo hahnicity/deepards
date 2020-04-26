@@ -37,7 +37,8 @@ class ARDSRawDataset(Dataset):
                  whole_patient_super_batch=False,
                  holdout_set_type='main',
                  train_patient_fraction=1.0,
-                 transforms=None):
+                 transforms=None,
+                 final_validation_set=False):
         """
         Dataset to generate sequences of data for ARDS Detection
         """
@@ -70,7 +71,12 @@ class ARDSRawDataset(Dataset):
         elif kfold_num is None and holdout_set_type == 'main':
             data_subdir = 'training' if train else 'testing'
         elif kfold_num is None and holdout_set_type == 'random':
-            data_subdir = 'randomtrain' if train else 'randomval'
+            if train:
+                data_subdir = 'randomtrain'
+            elif not train and not final_validation_set:
+                data_subdir = 'randomval'
+            else:
+                data_subdir = 'randomtest'
         else:
             data_subdir = 'all_data'
 

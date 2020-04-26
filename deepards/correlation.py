@@ -34,7 +34,8 @@ def get_auto_corr_r2(seq):
     # What's a good sigma? maybe something a bit higher try 10 for now
     ac = gaussian_filter(ac, 10)
     peak_func = lambda x: [v for i, v in enumerate(x[1:-1]) if x[i] < v > x[i+2] and v > 0]
-    filt = peak_func(ac)
+    filt = [ac[0]] + peak_func(ac) + [ac[-1]]
+
     x = pd.DataFrame(np.arange(len(filt)).reshape((len(filt), 1)))
     x = sm.add_constant(x)
     est = sm.OLS(pd.Series(filt), x, hasconst=True)
@@ -72,9 +73,9 @@ def autocorrelate_by_pred(model_data):
         # a ton of engineering effort to work out the corner cases but I don't have time
         # and its not useful energy spent. So I will work on my basic algo
         r2 = get_auto_corr_r2(seq)
-        #if .98 <= r2 <= 1.0:
+        #if .999 <= r2 <= 1.0:
         #    import IPython; IPython.embed()
-        #elif .00 <= r2 <= .02:
+        #if .00 <= r2 <= .002:
         #    import IPython; IPython.embed()
 
         pred = model_data['pred'][i]
@@ -164,7 +165,7 @@ def cross_correlations(model_data, cc_samp_size):
 def run_entire_model(test_dataset_path, model_path):
     test_dataset = pd.read_pickle(test_dataset_path)
     test_dataset.transforms = None
-    model = torch.load(model_path)
+    model = torch.load(model_path).cuda(0)
     model_data = {'patient': [], 'seqs': [], 'pred': [], 'actual': [], 'pred_prob': []}
     softmax = nn.Softmax()
     # use 256 because its a big number or something like that

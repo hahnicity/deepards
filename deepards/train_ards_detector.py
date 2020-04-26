@@ -245,7 +245,7 @@ class BaseTraining(object):
                     self.run_test_epoch(epoch_num, model, test_dataset, test_loader, fold_num)
 
             if self.args.save_model:
-                model_path = self.args.save_model.replace('.pth', '') + "-fold-{}.pth".format(fold_num) if self.n_kfolds > 1 else self.args.save_model
+                model_path = self.args.save_model.replace('.pth', "-fold-{}.pth".format(fold_num)) if self.n_kfolds > 1 else self.args.save_model
                 torch.save(model, model_path)
 
         self.perform_post_modeling_actions()
