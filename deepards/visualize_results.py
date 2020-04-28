@@ -169,7 +169,8 @@ def visualize_results_for_experiment(experiment_name, filter_by_base_network, sa
         if 'n_sub_batches' not in exp_data:
             exp_data['n_sub_batches'] = np.nan
 
-    experiment_data = sorted(experiment_data, key=lambda x: (x['start_time'], x['base_network']))
+    #experiment_data = sorted(experiment_data, key=lambda x: (x['start_time'], x['base_network']))
+    experiment_data = sorted(experiment_data, key=lambda x: x['start_time'])
     if filter_by_base_network:
         tmp = []
         for exp_data in experiment_data:
@@ -180,10 +181,10 @@ def visualize_results_for_experiment(experiment_name, filter_by_base_network, sa
     if len(experiment_data) == 0:
         raise Exception('no experiments found with name: {}'.format(experiment_name))
 
-    if experiment_data[0]['network'] not in ['cnn_regressor']:
-        metrics = ['auc', 'patient_accuracy', 'f1_ards', 'f1_other']
-    else:
-        metrics = ['test_mae']
+    #if experiment_data[0]['network'] not in ['cnn_regressor']:
+    metrics = ['auc', 'patient_accuracy', 'f1_ards', 'f1_other']
+    #else:
+        #metrics = ['test_mae']
 
     for i, exp_data in enumerate(experiment_data):
         print('Run {}. Params: {}'.format(i, exp_data))
