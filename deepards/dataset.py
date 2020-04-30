@@ -15,6 +15,7 @@ from ventmap.raw_utils import extract_raw, read_processed_file
 # We will mainline all the experimental work after publication. Probably rename it as well.
 from algorithms.breath_meta import get_experimental_breath_meta
 from algorithms.constants import EXPERIMENTAL_META_HEADER
+import deepards.correlation
 
 
 class ARDSRawDataset(Dataset):
@@ -38,7 +39,8 @@ class ARDSRawDataset(Dataset):
                  holdout_set_type='main',
                  train_patient_fraction=1.0,
                  transforms=None,
-                 final_validation_set=False):
+                 final_validation_set=False,
+                 drop_if_under_r2=0.0):
         """
         Dataset to generate sequences of data for ARDS Detection
         """
@@ -58,6 +60,13 @@ class ARDSRawDataset(Dataset):
         self.whole_patient_super_batch = whole_patient_super_batch
         self.train_patient_fraction = train_patient_fraction
         self.transforms = transforms
+        self.drop_if_under_r2 = drop_if_under_r2
+        if self.drop_if_under_r2 and 'unpadded' not in dataset_type:
+            raise Exception('Non-unpadded datasets are not supported currently with drop_if_under_r2')
+
+        if self.drop_if_under_r2 and kfold_num is not None:
+            raise Exception('kfold are not supported currently with drop_if_under_r2')
+        self.auto = deepards.correlation.AutoCorrelation()
 
         if self.oversample and self.whole_patient_super_batch:
             raise Exception('currently oversampling with whole patient super batch is not supported')
@@ -212,6 +221,8 @@ class ARDSRawDataset(Dataset):
 
     @classmethod
     def make_test_dataset_if_kfold(self, train_dataset):
+        if train_dataset.drop_if_under_r2 > 0:
+            raise Exception('drop if under r2 is not supported in kfold yet!')
         test_dataset = ARDSRawDataset(
             None,
             None,
@@ -224,6 +235,8 @@ class ARDSRawDataset(Dataset):
             total_kfolds=train_dataset.total_kfolds,
             train_patient_fraction=1.0,
             transforms=None,
+            oversample_minority=False,
+            drop_if_under_r2=0.0,
         )
         return test_dataset
 
@@ -329,10 +342,7 @@ class ARDSRawDataset(Dataset):
                 # will ever learn anything useful from them. 21 is chosen because the mean
                 # number of unpadded obs we have in our train set is 138.78 and the std
                 # is 38.23. So 21 is < mu - 3*std and is divisible with 7.
-                try:
-                    breath_time = pd.to_datetime(breath['abs_bs'], format='%Y-%m-%d %H-%M-%S.%f')
-                except:
-                    breath_time = pd.to_datetime(breath['abs_bs'], format='%Y-%m-%d %H:%M:%S.%f')
+                breath_time = self.get_abs_bs_dt(breath)
                 if breath_time < start_time or breath_time > start_time + pd.Timedelta(hours=24):
                     continue
                 if len(breath['flow']) < 21:
@@ -367,7 +377,7 @@ class ARDSRawDataset(Dataset):
                 batch_seq_hours.append(seq_hour)
 
                 if len(batch_arr) == self.n_sub_batches:
-                    if not self._should_we_drop_frame(seq_vent_bns, patient_id):
+                    if not self._should_we_drop_frame(None, seq_vent_bns, patient_id):
                         target = np.zeros(2)
                         target[patho] = 1
                         self.all_sequences.append([patient_id, np.array(batch_arr).reshape((self.n_sub_batches, 1, self.seq_len)), np.array(meta_arr), target, batch_seq_hours])
@@ -460,11 +470,8 @@ class ARDSRawDataset(Dataset):
                 # is 38.23. So 21 is < mu - 3*std and is divisible with 7.
                 if len(breath['flow']) < 21:
                     continue
-                try:
-                    breath_time = pd.to_datetime(breath['abs_bs'], format='%Y-%m-%d %H-%M-%S.%f')
-                except:
-                    breath_time = pd.to_datetime(breath['abs_bs'], format='%Y-%m-%d %H:%M:%S.%f')
 
+                breath_time = self.get_abs_bs_dt(breath)
                 if breath_time < start_time:
                     continue
                 elif breath_time > start_time + pd.Timedelta(hours=24):
@@ -478,7 +485,7 @@ class ARDSRawDataset(Dataset):
                 batch_seq_hours.append(seq_hour)
 
                 if len(batch_arr) == self.n_sub_batches:
-                    if not self._should_we_drop_frame(seq_vent_bns, patient_id):
+                    if not self._should_we_drop_frame(None, seq_vent_bns, patient_id):
                         breath_window = np.array(batch_arr).reshape((self.n_sub_batches, 1, self.seq_len))
                         if self.whole_patient_super_batch:
                             super_batch_tmp_arr.append(breath_window)
@@ -515,11 +522,8 @@ class ARDSRawDataset(Dataset):
                 # is 38.23. So 21 is < mu - 3*std and is divisible with 7.
                 if len(breath['flow']) < 21:
                     continue
-                try:
-                    breath_time = pd.to_datetime(breath['abs_bs'], format='%Y-%m-%d %H-%M-%S.%f')
-                except:
-                    breath_time = pd.to_datetime(breath['abs_bs'], format='%Y-%m-%d %H:%M:%S.%f')
 
+                breath_time = self.get_abs_bs_dt(breath)
                 if breath_time < start_time:
                     continue
                 elif breath_time > start_time + pd.Timedelta(hours=24):
@@ -533,14 +537,15 @@ class ARDSRawDataset(Dataset):
                 batch_arr, breath_arr = processing_func(breath['flow'], breath_arr, batch_arr)
 
                 if len(batch_arr) == self.n_sub_batches:
-                    if self._should_we_drop_frame(seq_vent_bns, patient_id):
+                    raw_data = np.array(batch_arr)
+                    if self._should_we_drop_frame(raw_data.ravel(), seq_vent_bns, patient_id):
                         # drop breath arr to be safe
                         breath_arr = []
                         batch_arr = []
                         seq_vent_bns = []
                         batch_seq_hours = []
                         continue
-                    breath_window = np.array(batch_arr).reshape((self.n_sub_batches, 1, self.seq_len))
+                    breath_window = raw_data.reshape((self.n_sub_batches, 1, self.seq_len))
                     if self.whole_patient_super_batch:
                         super_batch_tmp_arr.append(breath_window)
                     else:
@@ -652,7 +657,7 @@ class ARDSRawDataset(Dataset):
         except:
             raise ValueError('could not find patient id in file: {}'.format(filename))
 
-    def _should_we_drop_frame(self, seq_vent_bns, patient_id):
+    def _should_we_drop_frame(self, seq, seq_vent_bns, patient_id):
         seq_vent_bns = np.array(seq_vent_bns)
         diffs = seq_vent_bns[:-1] + 1 - seq_vent_bns[1:]
         # do not include the stack if it is discontiguous to too large a degree
@@ -666,6 +671,12 @@ class ARDSRawDataset(Dataset):
                 else:
                     self.frames_dropped[patient_id] += 1
                 return True
+
+        if seq is not None and self.drop_if_under_r2:
+            r2 = self.auto.get_auto_corr_r2(seq)
+            if r2 < self.drop_if_under_r2:
+                return True
+
         return False
 
     def __getitem__(self, index):
@@ -740,6 +751,13 @@ class ARDSRawDataset(Dataset):
                 patient, _, __, target, hrs = seq
             rows.append([patient, np.argmax(target, axis=0)])
         return pd.DataFrame(rows, columns=['patient', 'y'], index=self.kfold_indexes)
+
+    def get_abs_bs_dt(self, breath):
+        try:
+            breath_time = pd.to_datetime(breath['abs_bs'], format='%Y-%m-%d %H-%M-%S.%f')
+        except:
+            breath_time = pd.to_datetime(breath['abs_bs'], format='%Y-%m-%d %H:%M:%S.%f')
+        return breath_time
 
 
 class SiameseNetworkDataset(ARDSRawDataset):

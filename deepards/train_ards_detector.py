@@ -177,6 +177,7 @@ class BaseTraining(object):
                 train_patient_fraction=self.args.train_pt_frac,
                 transforms=transforms,
                 holdout_set_type=self.args.holdout_set_type,
+                drop_if_under_r2=self.args.drop_if_under_r2,
             )
         else:
             train_dataset = ARDSRawDataset.from_pickle(self.args.train_from_pickle, self.args.oversample, self.args.train_pt_frac, transforms)
@@ -1045,6 +1046,7 @@ def main():
     """)
     parser.add_argument('-tp', '--transform-probability', type=float, help='Probability that a modifying transform will be activated for a sub-batch')
     parser.add_argument('--use-i', help='Argument only used if ie_ww_i_or_e transform is triggered. If you set this arg on CLI then insp lim will only be used. Otherwise exp. lim is used.', action='store_true', default=None)
+    parser.add_argument('-r2', '--drop-if-under-r2', type=float)
     args = parser.parse_args()
     args = Configuration(args)
 
