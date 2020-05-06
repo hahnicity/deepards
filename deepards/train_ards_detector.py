@@ -205,6 +205,7 @@ class BaseTraining(object):
                 holdout_set_type=self.args.holdout_set_type,
                 train_patient_fraction=1.0,
                 transforms=None,
+                final_validation_set=self.args.final_validation,
             )
 
         return train_dataset, test_dataset
@@ -1029,7 +1030,13 @@ def main():
     parser.add_argument('--stop-after-epoch', type=int)
     parser.add_argument('--clip-grad', action='store_true', default=None)
     parser.add_argument('--clip-val', type=float)
-    parser.add_argument('--holdout-set-type', choices=['main', 'proto', 'random'], help='Choose whether or not you want to use the main train/test holdout split or the proto split (which can be pretty random and is used for prototyping)')
+    parser.add_argument('--holdout-set-type', help="""Choose which holdout set to use:
+        main: regular train/test holdout split
+        proto: holdout set that is used for prototyping
+        random: a random split of data
+        <custom named>: A customly named split that was made.
+    """)
+    parser.add_argument('--final-validation', action='store_true', help='Ensure you dont use validation set, but rather testing set. argument that is only used for random holdout sets.', default=None)
     parser.add_argument('--plot-untiled-disease-evol', action='store_true', help='Plot the our ARDS/non-ARDS predictions by hour', default=None)
     parser.add_argument('--plot-tiled-disease-evol', action='store_true', help='Plot the our ARDS/non-ARDS predictions by hour but in tiled format grouped by TPs/TNs/FPs/FNs', default=None)
     parser.add_argument('--plot-dtw-with-disease', action='store_true', help='Plot DTW with ARDS/non-ARDS predictions by hour', default=None)

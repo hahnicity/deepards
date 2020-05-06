@@ -7,6 +7,7 @@ tell us anything about the data involved. From what I could see, cross-correlati
 didn't tell us anything.
 """
 import argparse
+import os
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -18,7 +19,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
-from deepards.dataset import ARDSRawDataset
+import deepards.dataset
 
 
 class AutoCorrelation(object):
@@ -54,13 +55,14 @@ class AutoCorrelation(object):
         for i, seq in enumerate(model_data['seqs']):
             model_data['r2'].append(self.get_auto_corr_r2(seq))
 
-        for cls, name in {0: "Non-ARDS", 1: 'ARDS'}.items():
-            cls_preds = [model_data['r2'][idx] for idx, pred in enumerate(model_data['pred']) if model_data['pred'][idx] == cls]
-            cls_actuals = [model_data['r2'][idx] for idx, actual in enumerate(model_data['actual']) if model_data['actual'][idx] == cls]
-            sns.distplot(cls_actuals, kde=False, label='{}-true'.format(name), bins=100)
-            sns.distplot(cls_preds, kde=False, label='{}-pred'.format(name), bins=100, hist_kws={'alpha': 0.4})
-            plt.legend()
-            plt.show()
+        # XXX find way to remove this plotting func into other place
+#        for cls, name in {0: "Non-ARDS", 1: 'ARDS'}.items():
+#            cls_preds = [model_data['r2'][idx] for idx, pred in enumerate(model_data['pred']) if model_data['pred'][idx] == cls]
+#            cls_actuals = [model_data['r2'][idx] for idx, actual in enumerate(model_data['actual']) if model_data['actual'][idx] == cls]
+#            sns.distplot(cls_actuals, kde=False, label='{}-true'.format(name), bins=100)
+#            sns.distplot(cls_preds, kde=False, label='{}-pred'.format(name), bins=100, hist_kws={'alpha': 0.4})
+#            plt.legend()
+#            plt.show()
 
         misclassified = {'all': [], 1: [], 0: []}
         for i, seq in enumerate(model_data['seqs']):
@@ -70,18 +72,24 @@ class AutoCorrelation(object):
                 misclassified['all'].append(r2)
                 misclassified[actual].append(r2)
 
-        sns.distplot(misclassified['all'], kde=False, bins=100, label='all misclassified')
-        sns.distplot(misclassified[0], kde=False, bins=100, label='other misclassified', hist_kws={'alpha': .5})
-        sns.distplot(misclassified[1], kde=False, bins=100, label='ards misclassified')
-        plt.legend()
-        plt.show()
+        return misclassified
+
+    def format_r2_for_bar_chart(self, arr):
+        arr = np.array(sorted(arr))
+        interval = .01
+        counts = []
+        x = np.arange(0, 1, interval)
+        for lower in x:
+            upper = lower + interval
+            counts.append(len(arr[np.logical_and(lower < arr, arr <= upper)]))
+        return np.round(x, 2), np.array(counts)
 
 
 def run_entire_model(test_dataset_path, model_path, kfold_num):
     test_dataset = pd.read_pickle(test_dataset_path)
     test_dataset.transforms = None
     if kfold_num is not None:
-        test_dataset = ARDSRawDataset.make_test_dataset_if_kfold(test_dataset)
+        test_dataset = deepards.dataset.ARDSRawDataset.make_test_dataset_if_kfold(test_dataset)
         test_dataset.set_kfold_indexes_for_fold(kfold_num)
     model = torch.load(model_path).cuda(0)
     model_data = {'patient': [], 'seqs': [], 'pred': [], 'actual': [], 'pred_prob': []}
@@ -106,7 +114,28 @@ def run_entire_model(test_dataset_path, model_path, kfold_num):
             model_data['actual'].extend(target.tolist())
             model_data['pred_prob'].extend([arr[batch_predictions[i]] for i, arr in enumerate(softmax(output))])
 
+    model_data['model_name'] = os.path.splitext(os.path.basename(model_path))[0]
     return model_data
+
+
+def plot_misclassified_data(model_data):
+    auto = AutoCorrelation()
+    misclassified = auto.autocorrelate_by_pred(model_data)
+    sns.distplot(misclassified[0], kde=True, bins=100, label='other misclassified', hist_kws={'alpha': .5}, hist=False)
+    sns.distplot(misclassified[1], kde=True, bins=100, label='ards misclassified', hist=False)
+    plt.title(model_data['model_name'])
+    plt.legend()
+    plt.show()
+
+    every_fifth = lambda x: x % 5 == 0
+    x, other = auto.format_r2_for_bar_chart(misclassified[0])
+    x, ards = auto.format_r2_for_bar_chart(misclassified[1])
+    plt.bar(range(len(other)), other, label='other misclassified')
+    plt.bar(range(len(ards)), ards, bottom=other, label='ards misclassified')
+    plt.xticks(filter(every_fifth, range(len(ards))), filter(every_fifth, x), rotation=45, fontsize='xx-small')
+    plt.title(model_data['model_name'])
+    plt.legend()
+    plt.show()
 
 
 def main():
@@ -127,8 +156,7 @@ def main():
     if args.save_model_data:
         pd.to_pickle(model_data, args.save_model_data)
 
-    auto = AutoCorrelation()
-    auto.autocorrelate_by_pred(model_data)
+    plot_misclassified_data(model_data)
 
 
 if __name__ == "__main__":

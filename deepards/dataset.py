@@ -75,19 +75,28 @@ class ARDSRawDataset(Dataset):
         self.cohort = self.cohort.rename(columns={'Patient Unique Identifier': 'patient_id'})
         self.cohort['patient_id'] = self.cohort['patient_id'].astype(str)
 
-        if kfold_num is None and holdout_set_type == 'proto':
+        if kfold_num is not None:
+            data_subdir = 'all_data'
+        elif holdout_set_type == 'proto':
             data_subdir = 'prototrain' if train else 'prototest'
-        elif kfold_num is None and holdout_set_type == 'main':
+        elif holdout_set_type == 'main':
             data_subdir = 'training' if train else 'testing'
-        elif kfold_num is None and holdout_set_type == 'random':
+        elif holdout_set_type == 'random':
             if train:
                 data_subdir = 'randomtrain'
             elif not train and not final_validation_set:
                 data_subdir = 'randomval'
             else:
                 data_subdir = 'randomtest'
+        elif (holdout_set_type is not None) and (holdout_set_type not in ['main', 'proto', 'random']):
+            if train:
+                data_subdir = '{}train'.format(holdout_set_type)
+            elif not train and not final_validation_set:
+                data_subdir = '{}val'.format(holdout_set_type)
+            else:
+                data_subdir = '{}test'.format(holdout_set_type)
         else:
-            data_subdir = 'all_data'
+            raise Exception('You must choose to either use kfold or a holdout set!')
 
         self.flow_time_bm_mu = [
             -1.12003803e+01,  2.27065158e+01,  5.41515510e+01,  2.68864330e+01,

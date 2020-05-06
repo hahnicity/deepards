@@ -151,7 +151,7 @@ class Splitting(object):
             proc.communicate()
 
 
-def perform_random_split(dataset_path, split_ratio, validation_ratio):
+def perform_random_split(dataset_path, split_ratio, validation_ratio, out_dir_prefix):
     ards_pts = ards_train + ards_test
     other_pts = other_train + other_test
     all_pts = ards_pts + other_pts
@@ -160,16 +160,20 @@ def perform_random_split(dataset_path, split_ratio, validation_ratio):
     ards_test_pts = list(np.random.choice(ards_pts, size=len_patho_test_pts, replace=False))
     test_pts = other_test_pts + ards_test_pts
     train_pts = set(all_pts).difference(set(test_pts))
+    dir_prefix = out_dir_prefix if out_dir_prefix is not None else 'random'
+    val_n = int(math.ceil(len(test_pts) * validation_ratio))
 
     splitter = Splitting(dataset_path)
-    splitter.create_split(train_pts, 'randomtrain')
+    splitter.create_split(train_pts, '{}train'.format(dir_prefix))
 
-    val_n = int(math.ceil(len(test_pts) * validation_ratio))
-    ards_val_pts = np.random.choice(ards_test_pts, size=val_n/2, replace=False)
-    other_val_pts = np.random.choice(other_test_pts, size=val_n/2, replace=False)
-    val_pts = list(ards_val_pts) + list(other_val_pts)
-    splitter.create_split(val_pts, 'randomval')
-    splitter.create_split(list(set(test_pts).difference(val_pts)), 'randomtest')
+    if val_n > 0:
+        ards_val_pts = np.random.choice(ards_test_pts, size=val_n/2, replace=False)
+        other_val_pts = np.random.choice(other_test_pts, size=val_n/2, replace=False)
+        val_pts = list(ards_val_pts) + list(other_val_pts)
+        splitter.create_split(val_pts, '{}val'.format(dir_prefix))
+        test_pts = list(set(test_pts).difference(val_pts))
+
+    splitter.create_split(test_pts, '{}test'.format(dir_prefix))
 
 
 def perform_preset_proto_split(dataset_path):
@@ -195,13 +199,14 @@ def main():
         *random:* Use a random split of the patients with a validation set.
     """)
     parser.add_argument('-sr', '--split-ratio', type=float, default=.3)
-    parser.add_argument('-vr', '--validation-ratio', type=float, default=1/3.0, help='Ratio of the testing set to split into the validation set. Only used for the random split type.')
+    parser.add_argument('-vr', '--validation-ratio', type=float, default=1/3.0, help='Ratio of the testing set to split into the validation set. Only used for the random split type. If you dont want a validation set, set this argument to 0')
+    parser.add_argument('-o', '--out-dir', help='New directory to place train/test splits. Only used for random splits. If unset will just revert to default "random"')
     args = parser.parse_args()
 
     if args.set_type == 'preset_proto':
         perform_preset_proto_split(args.dataset_path)
     elif args.set_type == 'random':
-        perform_random_split(args.dataset_path, args.split_ratio, args.validation_ratio)
+        perform_random_split(args.dataset_path, args.split_ratio, args.validation_ratio, args.out_dir)
     elif args.set_type == 'preset_aim1':
         perform_preset_aim1_split(args.dataset_path)
 
