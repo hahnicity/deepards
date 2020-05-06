@@ -230,8 +230,11 @@ class ARDSRawDataset(Dataset):
 
     @classmethod
     def make_test_dataset_if_kfold(self, train_dataset):
-        if train_dataset.drop_if_under_r2 > 0:
-            raise Exception('drop if under r2 is not supported in kfold yet!')
+        try:
+            if train_dataset.drop_if_under_r2 > 0:
+                raise Exception('drop if under r2 is not supported in kfold yet!')
+        except AttributeError:  # in this case our dataset was created before this attr was used
+            pass
         test_dataset = ARDSRawDataset(
             None,
             None,
