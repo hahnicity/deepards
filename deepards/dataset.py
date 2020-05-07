@@ -10,6 +10,7 @@ import pandas as pd
 from scipy.signal import resample
 from sklearn.model_selection import StratifiedKFold
 from torch.utils.data import Dataset, DataLoader
+from ventmap import SAM
 from ventmap.raw_utils import extract_raw, read_processed_file
 
 # We will mainline all the experimental work after publication. Probably rename it as well.
@@ -40,7 +41,9 @@ class ARDSRawDataset(Dataset):
                  train_patient_fraction=1.0,
                  transforms=None,
                  final_validation_set=False,
-                 drop_if_under_r2=0.0):
+                 drop_if_under_r2=0.0,
+                 drop_i_lim=False,
+                 drop_e_lim=False):
         """
         Dataset to generate sequences of data for ARDS Detection
         """
@@ -61,6 +64,10 @@ class ARDSRawDataset(Dataset):
         self.train_patient_fraction = train_patient_fraction
         self.transforms = transforms
         self.drop_if_under_r2 = drop_if_under_r2
+        if drop_i_lim and drop_e_lim:
+            raise Exception('You cannot drop both I and E lims!')
+        self.drop_i_lim = drop_i_lim
+        self.drop_e_lim = drop_e_lim
         if self.drop_if_under_r2 and 'unpadded' not in dataset_type:
             raise Exception('Non-unpadded datasets are not supported currently with drop_if_under_r2')
 
@@ -487,7 +494,7 @@ class ARDSRawDataset(Dataset):
                     break
 
                 seq_hour = (breath_time - start_time).total_seconds() / 60 / 60
-                flow = np.array(breath['flow'])
+                flow = np.array(self.drop_lim(breath['flow']))
                 b_seq = process_breath_func(flow)
                 batch_arr.append(b_seq)
                 seq_vent_bns.append(breath['vent_bn'])
@@ -543,7 +550,8 @@ class ARDSRawDataset(Dataset):
 
                 if len(batch_arr) == 0 and breath_arr == []:
                     batch_seq_hours.append(seq_hour)
-                batch_arr, breath_arr = processing_func(breath['flow'], breath_arr, batch_arr)
+                flow = self.drop_lim(breath['flow'])
+                batch_arr, breath_arr = processing_func(flow, breath_arr, batch_arr)
 
                 if len(batch_arr) == self.n_sub_batches:
                     raw_data = np.array(batch_arr)
@@ -565,6 +573,16 @@ class ARDSRawDataset(Dataset):
 
                 if len(batch_arr) > 0 and breath_arr == []:
                     batch_seq_hours.append(seq_hour)
+
+    def drop_lim(self, flow):
+        if self.drop_i_lim or self.drop_e_lim:
+            dt = 0.02
+            rel_time_array = [(i+1) * dt for i in range(len(flow))]
+            x0_indices_dict = SAM.find_x0s_multi_algorithms(flow, rel_time_array, dt)
+            iTime, x0_index = SAM.x0_heuristic(x0_indices_dict, rel_time_array)
+            flow = flow[x0_index:] if self.drop_i_lim else flow[:x0_index]
+
+        return flow
 
     def _autoencoder_target(self, _):
         return np.array([np.nan, np.nan])

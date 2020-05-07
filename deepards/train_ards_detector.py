@@ -178,6 +178,8 @@ class BaseTraining(object):
                 transforms=transforms,
                 holdout_set_type=self.args.holdout_set_type,
                 drop_if_under_r2=self.args.drop_if_under_r2,
+                drop_i_lim=self.args.drop_i_lim,
+                drop_e_lim=self.args.drop_e_lim,
             )
         else:
             train_dataset = ARDSRawDataset.from_pickle(self.args.train_from_pickle, self.args.oversample, self.args.train_pt_frac, transforms)
@@ -206,6 +208,8 @@ class BaseTraining(object):
                 train_patient_fraction=1.0,
                 transforms=None,
                 final_validation_set=self.args.final_validation,
+                drop_i_lim=self.args.drop_i_lim,
+                drop_e_lim=self.args.drop_e_lim,
             )
 
         return train_dataset, test_dataset
@@ -557,6 +561,8 @@ class NestedMixin(object):
                 unpadded_downsample_factor=self.args.downsample_factor,
                 whole_patient_super_batch=True,
                 train_patient_fraction=self.args.train_pt_frac,
+                drop_i_lim=self.args.drop_i_lim,
+                drop_e_lim=self.args.drop_e_lim,
             )
         else:
             train_dataset = ARDSRawDataset.from_pickle(self.args.train_from_pickle, self.args.oversample, self.args.train_pt_frac)
@@ -580,6 +586,8 @@ class NestedMixin(object):
                 whole_patient_super_batch=True,
                 holdout_set_type=self.args.holdout_set_type,
                 train_patient_fraction=1.0,
+                drop_i_lim=self.args.drop_i_lim,
+                drop_e_lim=self.args.drop_e_lim,
             )
 
         return train_dataset, test_dataset
@@ -1054,6 +1062,8 @@ def main():
     parser.add_argument('-tp', '--transform-probability', type=float, help='Probability that a modifying transform will be activated for a sub-batch')
     parser.add_argument('--use-i', help='Argument only used if ie_ww_i_or_e transform is triggered. If you set this arg on CLI then insp lim will only be used. Otherwise exp. lim is used.', action='store_true', default=None)
     parser.add_argument('-r2', '--drop-if-under-r2', type=float)
+    parser.add_argument('--drop-i-lim', action='store_true', default=None)
+    parser.add_argument('--drop-e-lim', action='store_true', default=None)
     args = parser.parse_args()
     args = Configuration(args)
 
