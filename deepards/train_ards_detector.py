@@ -180,6 +180,7 @@ class BaseTraining(object):
                 drop_if_under_r2=self.args.drop_if_under_r2,
                 drop_i_lim=self.args.drop_i_lim,
                 drop_e_lim=self.args.drop_e_lim,
+                truncate_e_lim=self.args.truncate_e_lim,
             )
         else:
             train_dataset = ARDSRawDataset.from_pickle(self.args.train_from_pickle, self.args.oversample, self.args.train_pt_frac, transforms)
@@ -210,6 +211,7 @@ class BaseTraining(object):
                 final_validation_set=self.args.final_validation,
                 drop_i_lim=self.args.drop_i_lim,
                 drop_e_lim=self.args.drop_e_lim,
+                truncate_e_lim=self.args.truncate_e_lim,
             )
 
         return train_dataset, test_dataset
@@ -563,6 +565,7 @@ class NestedMixin(object):
                 train_patient_fraction=self.args.train_pt_frac,
                 drop_i_lim=self.args.drop_i_lim,
                 drop_e_lim=self.args.drop_e_lim,
+                truncate_e_lim=self.args.truncate_e_lim,
             )
         else:
             train_dataset = ARDSRawDataset.from_pickle(self.args.train_from_pickle, self.args.oversample, self.args.train_pt_frac)
@@ -588,6 +591,7 @@ class NestedMixin(object):
                 train_patient_fraction=1.0,
                 drop_i_lim=self.args.drop_i_lim,
                 drop_e_lim=self.args.drop_e_lim,
+                truncate_e_lim=self.args.truncate_e_lim,
             )
 
         return train_dataset, test_dataset
@@ -1064,6 +1068,7 @@ def main():
     parser.add_argument('-r2', '--drop-if-under-r2', type=float)
     parser.add_argument('--drop-i-lim', action='store_true', default=None)
     parser.add_argument('--drop-e-lim', action='store_true', default=None)
+    parser.add_argument('--truncate-e-lim', type=float, help='Number of seconds of the E lim to keep. Everything afterwards is discarded. Should be done in a number divisible by 2', default=None)
     args = parser.parse_args()
     args = Configuration(args)
 

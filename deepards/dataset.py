@@ -43,7 +43,8 @@ class ARDSRawDataset(Dataset):
                  final_validation_set=False,
                  drop_if_under_r2=0.0,
                  drop_i_lim=False,
-                 drop_e_lim=False):
+                 drop_e_lim=False,
+                 truncate_e_lim=None):
         """
         Dataset to generate sequences of data for ARDS Detection
         """
@@ -66,8 +67,13 @@ class ARDSRawDataset(Dataset):
         self.drop_if_under_r2 = drop_if_under_r2
         if drop_i_lim and drop_e_lim:
             raise Exception('You cannot drop both I and E lims!')
+        if truncate_e_lim and drop_e_lim:
+            raise Exception('You cant truncate the E lim and drop it at the same time')
+        if truncate_e_lim and round(truncate_e_lim % 0.02, 2) != 0.02:
+            raise Exception('--truncate-e-lim must be given in increments divisible by 0.02!')
         self.drop_i_lim = drop_i_lim
         self.drop_e_lim = drop_e_lim
+        self.truncate_e_lim = truncate_e_lim
         if self.drop_if_under_r2 and 'unpadded' not in dataset_type:
             raise Exception('Non-unpadded datasets are not supported currently with drop_if_under_r2')
 
@@ -497,7 +503,7 @@ class ARDSRawDataset(Dataset):
                     break
 
                 seq_hour = (breath_time - start_time).total_seconds() / 60 / 60
-                flow = np.array(self.drop_lim(breath['flow']))
+                flow = np.array(self.truncate_lim(breath['flow']))
                 b_seq = process_breath_func(flow)
                 batch_arr.append(b_seq)
                 seq_vent_bns.append(breath['vent_bn'])
@@ -553,7 +559,7 @@ class ARDSRawDataset(Dataset):
 
                 if len(batch_arr) == 0 and breath_arr == []:
                     batch_seq_hours.append(seq_hour)
-                flow = self.drop_lim(breath['flow'])
+                flow = self.truncate_lim(breath['flow'])
                 batch_arr, breath_arr = processing_func(flow, breath_arr, batch_arr)
 
                 if len(batch_arr) == self.n_sub_batches:
@@ -577,13 +583,26 @@ class ARDSRawDataset(Dataset):
                 if len(batch_arr) > 0 and breath_arr == []:
                     batch_seq_hours.append(seq_hour)
 
-    def drop_lim(self, flow):
-        if self.drop_i_lim or self.drop_e_lim:
+    def truncate_lim(self, flow):
+        if self.truncate_e_lim or self.drop_i_lim or self.drop_e_lim:
             dt = 0.02
             rel_time_array = [(i+1) * dt for i in range(len(flow))]
             x0_indices_dict = SAM.find_x0s_multi_algorithms(flow, rel_time_array, dt)
+            startpoint = 0
+            endpoint = len(flow)
+
             iTime, x0_index = SAM.x0_heuristic(x0_indices_dict, rel_time_array)
-            flow = flow[x0_index:] if self.drop_i_lim else flow[:x0_index]
+            if self.truncate_e_lim is not None:
+                # Keep only number of specified seconds of data
+                pts_to_keep = int(math.ceil(self.truncate_e_lim / dt))
+                endpoint = x0_index + pts_to_keep
+
+            if self.drop_i_lim:
+                startpoint = x0_index
+            elif self.drop_e_lim:
+                endpoint = x0_index
+
+            flow = flow[startpoint:endpoint]
 
         return flow
 
