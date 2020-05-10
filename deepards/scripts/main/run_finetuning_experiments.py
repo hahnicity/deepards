@@ -12,12 +12,12 @@ grad_clip = .01
 dataset_path_train = '~/deepards-data-finetuning/pickled-data/train.pkl'
 dataset_path_test = '~/deepards-data-finetuning/pickled-data/test.pkl'
 model_paths = [
-    'PT_siamese.pth'
+    'pretrained-model-10.pth'
 ]
 
 
 def run_experiment(dataset_path, network, pretrained_model, bs, epochs, kfolds, base_network, weight_decay, dataset_type, dry_run, experiment_name_prefix, n_sub_batches, clip_val, no_pretrain):
-    model_name = "_".join((((pretrained_model.split('/')[-1]).split('.')[0]).split('_')[1:]))
+    model_name = "_".join((((pretrained_model.split('/')[-1]).split('.')[0]).split('-')[1:]))
     experiment_name = "{}_{}_{}_{}_{}".format(experiment_name_prefix, model_name, dataset_type, network, base_network)
     if no_pretrain == False:
         command = [str(i) for i in [
