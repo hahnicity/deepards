@@ -161,9 +161,8 @@ def stats(metric, vals, folds = False):
     table.add_row(["Std"]+list(np.std(i).round(4) for i in all_means.values()))
     print(table)
 
-def visualize_results_for_experiment(experiment_name, filter_by_base_network, save, average_folds = False, num_folds = None, line_plot = False):
+def visualize_results_for_experiment(experiment_name, filter_by_base_network, save, num_folds = None, exp_name_override = None, only_runs = False):
     experiment_files = glob('results/{}_*.pth'.format(experiment_name))
-    #print(experiment_files)
     experiment_data = [torch.load(f) for f in experiment_files]
     for i, exp_data in enumerate(experiment_data):
         if 'n_sub_batches' not in exp_data:
@@ -186,18 +185,17 @@ def visualize_results_for_experiment(experiment_name, filter_by_base_network, sa
     #else:
         #metrics = ['test_mae']
 
-    for i, exp_data in enumerate(experiment_data):
-        print('Run {}. Params: {}'.format(i, exp_data))
-
     for metric in metrics:
 
         metric_data = []
         #plot over folds
-        if average_folds:
+        if not only_runs:
             start_times = []
             for i, exp_data in enumerate(experiment_data):
                 start_times.append(exp_data['start_time'])
             for fold in range(0, num_folds):
+                x = []
+                y = []
                 vals = None
                 for start_time in start_times:
                     metric_files = glob('results/*{}_fold_{}_*_{}.pt'.format(metric, fold, start_time))
@@ -206,60 +204,58 @@ def visualize_results_for_experiment(experiment_name, filter_by_base_network, sa
                         vals_temp = torch.load(f).values.numpy()
                     except:
                         continue
+
+                    for epoch, val in enumerate(vals_temp):
+                        x.append(epoch)
+                        y.append(val)
                     if vals is None:
                         vals = vals_temp
                     else:
                         vals += vals_temp
                 av = vals / len(start_times)
                 metric_data.append((fold, av))
-                plt.plot(av, label='fold {}'.format(fold))
+                averages = {'epochs': x, metric: y}
+                averages = pd.DataFrame(data=averages)
+                ax = sns.lineplot(x = 'epochs', y = metric, data = averages, label = 'fold {}'.format(fold))
             stats(metric, metric_data, folds=True)
 
         #plot over runs
-        if not average_folds:
-            for i, exp_data in enumerate(experiment_data):
-                start_time = exp_data['start_time']
+        for i, exp_data in enumerate(experiment_data):
+            start_time = exp_data['start_time']
 
-                metric_files = glob('results/*{}_fold*_{}.pt'.format(metric, start_time))
-                if len(metric_files) == 0:
-                    continue
-                vals = None
-                for f in metric_files:
-                    if vals is None:
-                        vals = torch.load(f).values.numpy()
-                    else:
-                        vals += torch.load(f).values.numpy()
-                av = vals / len(metric_files)
-                metric_data.append((i, av))
-                if not line_plot:
-                    plt.plot(av, label='run {}'.format(i))
-            stats(metric, metric_data)
-            if line_plot:
-                x = []
-                y = []
-                for data_run in metric_data:
-                    for e, data in enumerate(data_run[1]):
-                        x.append(e)
-                        y.append(data)
-                averages = {'epochs': x, metric: y}
-                averages = pd.DataFrame(data=averages)
-                #print("hello")
-                ax = sns.lineplot(x = 'epochs', y = metric, data = averages)
-            #file_name = 'plots/{}_{}_{}_{}.png'.format( experiment_name, metric, 'runs', start_time)
-            #ax.savefig(file_name)
-            #plt.savefig(file_name)
-            #plt.clf()
+            metric_files = glob('results/*{}_fold*_{}.pt'.format(metric, start_time))
+            if len(metric_files) == 0:
+                continue
+            vals = None
+            for f in metric_files:
+                if vals is None:
+                    vals = torch.load(f).values.numpy()
+                else:
+                    vals += torch.load(f).values.numpy()
+            av = vals / len(metric_files)
+            metric_data.append((i, av))
+        stats(metric, metric_data)
+        #if line_plot:
+        x = []
+        y = []
+        for data_run in metric_data:
+            for e, data in enumerate(data_run[1]):
+                x.append(e)
+                y.append(data)
+        averages = {'epochs': x, metric: y}
+        averages = pd.DataFrame(data=averages)
+        ax = sns.lineplot(x = 'epochs', y = metric, data = averages, label = 'aggregate results')
 
         plt.legend(loc='lower right', prop={'size': 8})
-        #plt.grid()
         sns.set_style('darkgrid')
+        if exp_name_override is not None:
+                experiment_name = exp_name_override
         plt.title(experiment_name.replace('_', ' '))
         plt.ylabel(metric.replace('_', ' '))
         plt.xlabel('epochs')
-        #plt.ylim((0,1))
         if save:
-            if average_folds:
-                file_name = 'plots/{}_{}_{}_{}.png'.format(experiment_name, metric, ' folds', start_time)
+            if not only_runs:
+                file_name = 'plots/{}_{}_{}_{}.png'.format(experiment_name, metric, 'agg', start_time)
             else:
                 file_name = 'plots/{}_{}_{}_{}.png'.format( experiment_name, metric, 'runs', start_time)
             plt.savefig(file_name)
@@ -275,21 +271,24 @@ def main():
     mutex.add_argument('-exp', '--experiment-name')
     parser.add_argument('--filter-by-base-net', help='filter all results by a base netwwork')
     parser.add_argument('--save', action='store_true')
-    parser.add_argument('--average-folds', type=int)
-    parser.add_argument('--line-plot', action='store_true')
+    parser.add_argument('-eno','--exp-name-override')
+    agg_or_runs = parser.add_mutually_exclusive_group(required=True)
+    agg_or_runs.add_argument('-nf','--num_folds', type = int)
+    agg_or_runs.add_argument('--only-runs', action = 'store_true')
     args = parser.parse_args()
 
     if args.start_time:
         visualize_results_for_start_time(args.start_time)
     elif args.experiment_name:
-        if args.average_folds:
-            visualize_results_for_experiment(args.experiment_name, args.filter_by_base_net,args.save, True, args.average_folds)
-        else:
-            if not args.line_plot:
+        visualize_results_for_experiment(args.experiment_name, args.filter_by_base_net,args.save, args.num_folds, args.exp_name_override, args.only_runs)
+        #if args.average_folds:
+            #visualize_results_for_experiment(args.experiment_name, args.filter_by_base_net,args.save, True, args.average_folds)
+        #else:
+            #if not args.line_plot:
                 #print("hello")
-                visualize_results_for_experiment(args.experiment_name, args.filter_by_base_net,args.save)
-            else:
-                visualize_results_for_experiment(args.experiment_name, args.filter_by_base_net,args.save, line_plot = args.line_plot)
+                #visualize_results_for_experiment(args.experiment_name, args.filter_by_base_net,args.save)
+            #else:
+                #visualize_results_for_experiment(args.experiment_name, args.filter_by_base_net,args.save, line_plot = args.line_plot)
 
 
 if __name__ == "__main__":
