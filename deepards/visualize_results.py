@@ -248,9 +248,7 @@ def visualize_results_for_experiment(experiment_name, filter_by_base_network, sa
 
         plt.legend(loc='lower right', prop={'size': 8})
         sns.set_style('darkgrid')
-        if exp_name_override is not None:
-                experiment_name = exp_name_override
-        plt.title(experiment_name.replace('_', ' '))
+        plt.title(exp_name_override.replace('_', ' '))
         plt.ylabel(metric.replace('_', ' '))
         plt.xlabel('epochs')
         if save:
