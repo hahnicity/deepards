@@ -2,6 +2,7 @@ from copy import copy
 from math import ceil, sqrt
 import os
 import csv
+import uuid
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -234,8 +235,8 @@ class DeepARDSResults(object):
         self.reporting = Reporting(self.results_dir, reporting_suffix)
         self.hyperparams = hyperparams
         self.hyperparams['start_time'] = start_time
-        self.experiment_save_filename = "{}_{}.pth".format(experiment_name, start_time) if experiment_name else start_time + ".pth"
-        self.start_time = start_time
+        self.uuid_name = uuid.uuid4()
+        self.experiment_save_filename = "{}_{}.pth".format(experiment_name, uuid_name) if experiment_name else str(uuid_name) + ".pth"
 
     def aggregate_classification_results(self):
         """
@@ -254,9 +255,9 @@ class DeepARDSResults(object):
         aggregate_stats.index = range(len(aggregate_stats))
 
         self._print_specific_results_report(aggregate_stats)
-        self.results.to_pickle('results/{}_patient_results.pkl'.format(self.start_time))
-        aggregate_stats.to_pickle('results/{}_aggregate_results.pkl'.format(self.start_time))
-        self.save_maximals('results/{}_maximal_results.pkl'.format(self.start_time), aggregate_stats)
+        self.results.to_pickle('results/{}_patient_results.pkl'.format(self.uuid_name))
+        aggregate_stats.to_pickle('results/{}_aggregate_results.pkl'.format(self.uuid_name))
+        self.save_maximals('results/{}_maximal_results.pkl'.format(self.uuid_name), aggregate_stats)
 
     def save_maximals(self, output_filename, aggregate_stats):
         maximals = None

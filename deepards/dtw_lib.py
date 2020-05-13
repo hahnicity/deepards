@@ -1,5 +1,6 @@
 from datetime import datetime
 from glob import glob
+import multiprocessing
 import os
 
 from dtwco.warping.core import dtw
@@ -8,6 +9,58 @@ import numpy as np
 import pandas as pd
 from ventmap.constants import OUT_DATETIME_FORMAT
 from ventmap.raw_utils import read_processed_file
+
+
+def multi_proc_helper(dataset, pt, df_map, pts):
+
+    i = pts.index(pt)
+    other_pts = pts[i+1:]
+    dict_ = {i: [] for i in other_pts}
+
+    for iloc, seq_info in enumerate(df_map[pt].iterrows()):
+
+        pt_seq_data = dataset.all_sequences[seq_info[0]][1].ravel()
+        for other_pt in other_pts:
+            try:
+                other_seq_info = df_map[other_pt].iloc[iloc]
+            except:
+                continue
+            other_seq_data = dataset.all_sequences[other_seq_info.name][1].ravel()
+            dict_[other_pt].append(dtw(pt_seq_data, other_seq_data))
+    return (pt, dict_)
+
+
+def func_star(args):
+    return multi_proc_helper(*args)
+
+
+def find_patient_similarity(dataset, fold_num, threads):
+    """
+    Want to find similarity between patients rather than within patients
+
+    Search space will be unreasonably large if we try to compare each sequence
+    against all other sequences. An O(n) search on DTW will take about an hour,
+    so O(n^2) will around 25000 hours. So goal here is just to compare 1st sequence
+    for each patient to all other 1st sequences, 2nd sequence to all other 2nd etc.
+    """
+    # So even if I followed this speedier calc to completion it would still take approx 4.5
+    # days to complete. This is fairly frustrating. But maybe its just something I should
+    # learn to live with. I think I can speed it up using multiprocessing tho
+    dataset.set_kfold_indexes_for_fold(fold_num)
+    gt = dataset.get_ground_truth_df().sort_index()
+    pts = list(gt.patient.unique())
+    df_map = {}
+    fold_num = fold_num
+
+    for pt in pts:
+        df_map[pt] = gt[gt.patient == pt]
+
+    pool = multiprocessing.Pool(threads)
+    results = pool.map(func_star, [(dataset, pt, df_map, pts) for pt in pts])
+    pool.close()
+    pool.join()
+    dtw_scores = {k[0]: k[1] for k in results}
+    pd.to_pickle(dtw_scores, 'dtw_cache/inter_patient_similarity-fold-{}.pkl'.format(fold_num))
 
 
 def _find_per_breath_dtw_score(prev_flow_waves, breath):
