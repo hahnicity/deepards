@@ -79,6 +79,7 @@ def _do_fold_graphing(df_stats, metric):
     plt.xticks(np.arange(len(df_stats.epoch.unique())), sorted((df_stats.epoch.unique()+1).astype(int)))
     ax = plt.gca()
     ax.yaxis.set_minor_locator(MultipleLocator(.01))
+    plt.legend(loc='lower left')
     plt.grid(axis='both')
     plt.show()
 
@@ -115,7 +116,7 @@ if __name__ == "__main__":
 
     exp_results = []
 
-    main_experiments = glob('results/{}*'.format(args.experiment_name))
+    main_experiments = glob('results/{}_1*'.format(args.experiment_name))
     unique_experiments = set(['_'.join(exp.split('_')[:-1]) for exp in main_experiments])
     for exp in sorted(unique_experiments):
         start_times = list(set([os.path.splitext(file_.split('_')[-1])[0] for file_ in glob(exp + '*')]))
