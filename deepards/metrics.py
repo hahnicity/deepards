@@ -236,7 +236,7 @@ class DeepARDSResults(object):
         self.hyperparams = hyperparams
         self.hyperparams['start_time'] = start_time
         self.uuid_name = uuid.uuid4()
-        self.experiment_save_filename = "{}_{}.pth".format(experiment_name, uuid_name) if experiment_name else str(uuid_name) + ".pth"
+        self.experiment_save_filename = "{}_{}.pth".format(experiment_name, self.uuid_name) if experiment_name else str(self.uuid_name) + ".pth"
 
     def aggregate_classification_results(self):
         """

@@ -196,8 +196,8 @@ def perform_preset_file_split(dataset_path, file_path):
     test_pts = conf['test']
     split_name = os.path.splitext(os.path.basename(file_path))[0]
     splitter = Splitting(dataset_path)
-    splitter.create_split(train_pts, split_name + '_train')
-    splitter.create_split(test_pts, split_name + '_test')
+    splitter.create_split(train_pts, split_name + 'train')
+    splitter.create_split(test_pts, split_name + 'test')
 
 
 def main():
