@@ -6,6 +6,7 @@ import subprocess
 
 import numpy as np
 import pandas as pd
+import yaml
 
 ards_train =  ['0723RPI2120190416', '0015RPI0320150401', '0021RPI0420150513', '0026RPI1020150523', '0027RPI0620150525', '0093RPI0920151212', '0098RPI1420151218', '0099RPI0120151219', '0102RPI0120151225', '0120RPI1820160118', '0129RPI1620160126', '0147RPI1220160213', '0148RPI0120160214', '0149RPI1820160212', '0153RPI0720160217', '0194RPI0320160317', '0209RPI1920160408', '0224RPI3020160414', '0243RPI0720160512', '0245RPI1420160512', '0253RPI1220160606', '0260RPI2420160617', '0265RPI2920160622', '0266RPI1720160622', '0268RPI1220160624', '0271RPI1220160630', '0372RPI2220161211', '0381RPI2320161212', '0390RPI2220161230', '0412RPI5520170121', '0484RPI4220170630', '0506RPI3720170807', '0511RPI5220170831', '0514RPI5420170905', '0527RPI0420171028', '0546RPI5120171216', '0549RPI4420171213', '0551RPI0720180102', '0569RPI0420180116', '0640RPI2820180822']
 
@@ -188,10 +189,21 @@ def perform_preset_aim1_split(dataset_path):
     splitter.create_split(aim1_test, 'testing')
 
 
+def perform_preset_file_split(dataset_path, file_path):
+    with open(file_path) as preset_file:
+        conf = yaml.load(preset_file, Loader=yaml.FullLoader)
+    train_pts = conf['train']
+    test_pts = conf['test']
+    split_name = os.path.splitext(os.path.basename(file_path))[0]
+    splitter = Splitting(dataset_path)
+    splitter.create_split(train_pts, split_name + '_train')
+    splitter.create_split(test_pts, split_name + '_test')
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-dp', '--dataset-path', required=True)
-    parser.add_argument('set_type', choices=['preset_proto', 'preset_aim1', 'random'], help="""
+    parser.add_argument('set_type', choices=['preset_proto', 'preset_aim1', 'random', 'preset_file'], help="""
         Split your data in a specific format:
 
         *preset_proto:* Utilize the proto train/test split. As it implies, used for prototyping purposes and shouldn't be used for result reporting
@@ -201,6 +213,7 @@ def main():
     parser.add_argument('-sr', '--split-ratio', type=float, default=.3)
     parser.add_argument('-vr', '--validation-ratio', type=float, default=1/3.0, help='Ratio of the testing set to split into the validation set. Only used for the random split type. If you dont want a validation set, set this argument to 0')
     parser.add_argument('-o', '--out-dir', help='New directory to place train/test splits. Only used for random splits. If unset will just revert to default "random"')
+    parser.add_argument('-f', '--preset-file', help='Path to file where we set our train/test splits')
     args = parser.parse_args()
 
     if args.set_type == 'preset_proto':
@@ -209,6 +222,10 @@ def main():
         perform_random_split(args.dataset_path, args.split_ratio, args.validation_ratio, args.out_dir)
     elif args.set_type == 'preset_aim1':
         perform_preset_aim1_split(args.dataset_path)
+    elif args.set_type == 'preset_file':
+        if args.preset_file is None:
+            raise Exception('If you are using preset_file split you must set --preset-file flag to a valid filepath')
+        perform_preset_file_split(args.dataset_path, args.preset_file)
 
 
 if __name__ == "__main__":
