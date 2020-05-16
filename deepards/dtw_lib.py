@@ -76,7 +76,7 @@ def pick_dissimilar_pts(dist_data, main_dataset, n_pts):
 
         candidate_sets.append([lower_tri[picked].sum().sum(), picked])
 
-    return sorted(candidate_sets, key=lambda x: x[0])[-1][1]
+    return sorted(sorted(candidate_sets, key=lambda x: x[0])[-1][1])
 
 
 def pick_similar_pts(dist_data, main_dataset, n_pts):
@@ -125,7 +125,7 @@ def pick_similar_pts(dist_data, main_dataset, n_pts):
         best.append((cost, best_normals+best_ards))
 
     best = sorted(best, key=lambda x: x[0])
-    return best[0][1]
+    return sorted(best[0][1])
 
 
 def mediod_process(dist_data, nclusts, main_dataset):

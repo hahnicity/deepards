@@ -1,6 +1,7 @@
 import argparse
 from glob import glob
 import os
+import re
 
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MultipleLocator
@@ -116,7 +117,10 @@ if __name__ == "__main__":
 
     exp_results = []
 
-    main_experiments = glob('results/{}_1*'.format(args.experiment_name))
+    # XXX I think regex is the proper thing to do in the future but it requires a bit
+    # more finesse than just using glob and have to work over multiple versions of the
+    # file naming. For now can punt on it
+    main_experiments = glob('results/{}_*'.format(args.experiment_name))
     unique_experiments = set(['_'.join(exp.split('_')[:-1]) for exp in main_experiments])
     for exp in sorted(unique_experiments):
         start_times = list(set([os.path.splitext(file_.split('_')[-1])[0] for file_ in glob(exp + '*')]))
@@ -130,4 +134,4 @@ if __name__ == "__main__":
         exp_results.append([dataset_type, network_type, base_net, mean_df_stats.AUC.mean()])
     exp_results = pd.DataFrame(exp_results, columns=['dataset_type', 'network', 'base_cnn', 'auc'])
     do_fold_graphing(start_times)
-    import IPython; IPython.embed()
+    # XXX need to add proper experimental results analysis in addition to the graphing
