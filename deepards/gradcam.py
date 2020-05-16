@@ -127,9 +127,9 @@ class GradCam():
         return cam
 
 
-def get_sequence(filename, ards, c):
+def get_sequence(filename, ards, c, fold):
     data = pickle.load(open(filename, "rb"))
-    data.set_kfold_indexes_for_fold(3)
+    data.set_kfold_indexes_for_fold(fold)
     data.transforms = None
     #print(len(data))
     first_seq = None
@@ -154,6 +154,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('model_path', help='path to the saved_model')
     parser.add_argument('-pdp', '--pickled-data-path', help = 'PATH to pickled data', required=True)
+    parser.add_argument('--fold', type=int, required=True)
     args = parser.parse_args()
 
     pretrained_model = torch.load(args.model_path)
@@ -173,7 +174,7 @@ if __name__ == '__main__':
     for i in range(2):
         cam_outputs = np.empty((0,7))
         for j in range(100):
-            breath_sequence = get_sequence(pickle_file_name, i , j)
+            breath_sequence = get_sequence(pickle_file_name, i , j, args.fold)
             grad_cam = GradCam(pretrained_model)
             cam = grad_cam.generate_cam(breath_sequence, target_class)
             #print(cam)
