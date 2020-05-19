@@ -73,9 +73,9 @@ def visualize_sequence(br, gradcam,patient_id,c):
     cbar.set_label("gradcam", labelpad=-1)
     plt.title(patient_id)
     if c == 1:
-        filename = 'gradcam_results' + '/ards/' + patient_id + '.png'
+        filename = 'gradcam_results_centered' + '/ards/' + patient_id + '.png'
     else:
-        filename = 'gradcam_results' + '/non_ards/' + patient_id + '.png'
+        filename = 'gradcam_results_centered' + '/non_ards/' + patient_id + '.png'
     plt.savefig(filename)
     plt.close()
     #plt.show()
@@ -87,18 +87,20 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     #add parser for pickle data
     parser.add_argument('-pd', '--pickled-data', help = 'PATH to pickled data')
+    parser.add_argument('-m','--saved-model',help = 'PATH to saved model')
     args = parser.parse_args()
     #loading the data
     data_filename = args.pickled_data
     data = pickle.load( open( data_filename, "rb" ) )
+    data = data.all_sequences
     #print(len(data))
     #print(data[0])
 
     #initializing the variables
 
     #Getting the pretrained model
-    PATH = 'densenet-linear-model--fold-3.pth'
-    pretrained_model = torch.load(PATH)
+    #PATH = 'densenet-linear-model--fold-3.pth'
+    pretrained_model = torch.load(args.saved_model)
     #0015RPI0320150401 : example for patient id
     patient_id = '0015RPI0320150401'
     
