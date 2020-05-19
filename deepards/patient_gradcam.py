@@ -1,129 +1,132 @@
-import torch
+import argparse
+import os
 import pickle
+import random
+
+import cv2
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
-import numpy as np
 import matplotlib.mlab as mlab
 import matplotlib.gridspec as gridspec
 import numpy as np
-import argparse
-import cv2
+import pandas as pd
+import torch
 
 #importing the class for calculating the cam values
 from gradcam import GradCam
 
-def get_ardsids_otherids(data):
-    ards = np.zeros(shape=(0))
-    non_ards = np.zeros(shape=(0))
-    for i in range(len(data)):
 
-        if data[i][2][1] == 1:
-            if data[i][0] not in ards:
-                ards = np.append(ards,data[i][0])
-
-        elif data[i][2][1] == 0:
-            if data[i][0] not in non_ards:
-                non_ards = np.append(non_ards,data[i][0])
-
-    return ards, non_ards
-
-def get_avgbre_camout(patient_id, data,pretrained_model):
-    #initializing variables
-    avg_breath = np.empty((0,224))
-    cam_outputs = np.empty((0,7))
-    target_class = None
-    for i in range(len(data)):
-        if patient_id == data[i][0]:
-            breath_sequence = data[i][1]
-            #concadinating the 224 breath sequences to get the avg of the patient breath
-            br1 = np.mean(breath_sequence, axis = 0)
-            avg_breath = np.append(avg_breath, br1, axis = 0)
-            #for gradcam values
-            br = torch.FloatTensor(breath_sequence).cuda()
-            grad_cam = GradCam(pretrained_model)
-            cam = grad_cam.generate_cam(br, target_class)
-            cam = np.expand_dims(cam, axis = 0)
-            #print(cam)
-            cam_outputs = np.append(cam_outputs, cam, axis = 0)
-    cam_outputs = np.mean(cam_outputs, axis = 0)   
-    cam_outputs = cv2.resize(cam_outputs,(1,224))
-    avg_breath = np.mean(avg_breath, axis = 0)
-    #print(cam_outputs)
-    #print(len(cam_outputs))
-    #print(cam_outputs.shape)
-    return avg_breath,cam_outputs
+def do_makedirs(dir):
+    try:
+        os.makedirs(dir)
+    except OSError:
+        pass
 
 
-def visualize_sequence(br, gradcam,patient_id,c):
-    #inizializing the image variable to 224 pickles with 0
-    img = np.zeros((224,1))
-    br = np.expand_dims(br, axis = 0)
-    #since the br is in 1 x 224 format we are transfering it into 224 x 1 format
-    for i in range(0,224):
-        img[i][0] = br[0][i]
-    #arranging the x-axis since the data is of 224
-    dt = 1
-    t = np.arange(0, 224, dt)
+class PatientGradCam(object):
+    def __init__(self, pretrained_model, data):
+        self.grad_cam = GradCam(pretrained_model)
+        self.data = data
+        self.gt = self.data.get_ground_truth_df()
+        self.ards, self.non_ards = self.get_ardsids_otherids()
 
-    #plotting the imageto scalar va
-    plt.scatter(t, img,c=gradcam,vmin = 0 , vmax = 255)
-    plt.plot(t,img)
-    cbar  = plt.colorbar()
-    cbar.set_label("gradcam", labelpad=-1)
-    plt.title(patient_id)
-    if c == 1:
-        filename = 'gradcam_results' + '/ards/' + patient_id + '.png'
-    else:
-        filename = 'gradcam_results' + '/non_ards/' + patient_id + '.png'
-    plt.savefig(filename)
-    plt.close()
-    #plt.show()
+    def get_ardsids_otherids(self):
+        ards = self.gt[self.gt.y == 1].patient.unique()
+        non_ards = self.gt[self.gt.y == 0].patient.unique()
+        return ards, non_ards
+
+    def get_median_patient_camout(self, patient_id):
+        #initializing variables
+        patient_idxs = self.gt[self.gt.patient == patient_id].index
+        target = self.gt.loc[patient_idxs].y.iloc[0]
+        mapping = {0: 'non_ards', 1: 'ards'}
+        dirname = os.path.join('gradcam_results', 'patient_medians', mapping[target])
+        do_makedirs(dirname)
+
+        # XXX in future make this configurable
+        batch_size = 20
+        med_breath = np.empty((0, batch_size, 1, 224))
+        cam_outputs = np.empty((0,7))
+        target_class = None
+        for i in patient_idxs:
+            breath_sequence = np.expand_dims(self.data[i][1], axis=0)
+            med_breath = np.append(med_breath, breath_sequence, axis=0)
+
+        med_breath = np.median(np.median(med_breath, axis=0), axis=0)
+        med_breath = np.expand_dims(med_breath, axis=0)
+        br = torch.FloatTensor(med_breath)[[0] * batch_size].cuda()
+        cam = self.grad_cam.generate_cam(br, target)
+        cam_outputs = cv2.resize(cam, (1,224))
+        filename = os.path.join(dirname, patient_id + '.png')
+        self.visualize_sequence(med_breath[0], cam_outputs, patient_id, target, filename)
+
+    def get_sampled_patient_sequences_camout(self, patient_id):
+        """
+        Idea is that we iterate over patient batches and sample a single sequence
+        from each batch. That sequence is fed into gradcam for a result
+        """
+        patient_idxs = self.gt[self.gt.patient == patient_id].index
+        target = self.gt.loc[patient_idxs].y.iloc[0]
+        batch_size = 20
+        mapping = {0: 'non_ards', 1: 'ards'}
+        dirname = os.path.join('gradcam_results', 'sampled_sequences', mapping[target], patient_id)
+        do_makedirs(dirname)
+
+        for i in patient_idxs:
+            rand_seq = random.choice(range(batch_size))
+            breath_sequence = np.expand_dims(self.data[i][1][rand_seq], axis=0)
+            br = torch.FloatTensor(breath_sequence)[[0] * batch_size].cuda()
+            cam = self.grad_cam.generate_cam(br, target)
+            cam_outputs = cv2.resize(cam, (1,224))
+            filename = os.path.join(dirname, 'seq-{}.png'.format(i))
+            self.visualize_sequence(breath_sequence[0], cam_outputs, patient_id, target, filename)
+
+    def visualize_sequence(self, br, cam_outputs, patient_id, c, filepath):
+        img = br.reshape((224, 1))
+        t = np.arange(0, 224, 1)
+        plt.scatter(t, img, c=cam_outputs, vmin = 0, vmax = 255)
+        plt.plot(t, img)
+        cbar  = plt.colorbar()
+        cbar.set_label("cam_outputs", labelpad=-1)
+        mapping = {0: 'Non-ARDS', 1: 'ARDS'}
+        plt.title(patient_id + ' ' + mapping[c])
+        plt.savefig(filepath)
+        plt.close()
+
+    def do_all_patient_cam_ops(self):
+        """
+        Convenience method for doing everything we can
+        """
+        for patient_id in np.append(self.ards, self.non_ards):
+            self.get_median_patient_camout(patient_id)
+            self.get_sampled_patient_sequences_camout(patient_id)
 
 
 if __name__ == '__main__':
-
-    #space for putting all the required parsers
     parser = argparse.ArgumentParser()
-    #add parser for pickle data
-    parser.add_argument('-pd', '--pickled-data', help = 'PATH to pickled data')
+    parser.add_argument('model_path', help='path to the saved_model')
+    parser.add_argument('-pdp', '--pickled-data-path', help = 'PATH to pickled data', required=True)
+    parser.add_argument('--fold', type=int, required=True)
+    parser.add_argument('--ops', choices=['all', 'medians', 'sample_seqs'], required=True)
     args = parser.parse_args()
-    #loading the data
-    data_filename = args.pickled_data
-    data = pickle.load( open( data_filename, "rb" ) )
-    #print(len(data))
-    #print(data[0])
 
-    #initializing the variables
+    data = pd.read_pickle(args.pickled_data_path)
+    data.set_kfold_indexes_for_fold(args.fold)
+    data.transforms = None
+    pretrained_model = torch.load(args.model_path)
+    # ensure that model is on same cuda device that data will be on
+    if not isinstance(pretrained_model, torch.nn.DataParallel):
+        pretrained_model = pretrained_model.to(torch.cuda.current_device())
+    else:
+        pretrained_model = pretrained_model.module
 
-    #Getting the pretrained model
-    PATH = 'densenet-linear-model--fold-3.pth'
-    pretrained_model = torch.load(PATH)
-    #0015RPI0320150401 : example for patient id
-    patient_id = '0015RPI0320150401'
-    
-    #getting all ardsids and nonards ids:
-    ards,nonards = get_ardsids_otherids(data)
-    c = 1
-    
-    #for ards patients
-    for i in range(len(ards)):
-        print(i)
-        patient_id = ards[i]
-        c = 1
-        #itterating through the data to get the sequences of all the breaths of the particular patients
-        avg_br,cam_out = get_avgbre_camout(patient_id,data,pretrained_model)
-    
-        #for visualizing the sequence for a patient id
-        visualize_sequence(avg_br,cam_out,patient_id,c)
-    
-    #for non_ards patients
-    for i in range(len(nonards)):
-        print(i)
-        patient_id = nonards[i]
-        c = 0
-        #itterating through the data to get the sequences of all the breaths of the particular patients
-        avg_br,cam_out = get_avgbre_camout(patient_id,data,pretrained_model)
-
-        #for visualizing the sequence for a patient id
-        visualize_sequence(avg_br,cam_out,patient_id,c)
+    pt_grad = PatientGradCam(pretrained_model, data)
+    if args.ops == 'all':
+        pt_grad.do_all_patient_cam_ops()
+    elif args.ops == 'medians':
+        for patient_id in np.append(pt_grad.ards, pt_grad.non_ards):
+            self.get_median_patient_camout(patient_id)
+    elif args.ops == 'sample_seqs':
+        for patient_id in np.append(pt_grad.ards, pt_grad.non_ards):
+            self.get_sampled_patient_sequences_camout(patient_id)

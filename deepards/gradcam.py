@@ -17,6 +17,7 @@ class CamExtractor():
     def __init__(self, model):
         self.model = model
         self.gradients = None
+        self.softmax = torch.nn.Softmax()
 
     def save_gradient(self, grad):
         self.gradients = grad
@@ -33,7 +34,7 @@ class CamExtractor():
                 x.register_hook(self.save_gradient)
                 conv_output = x  # Save the convolution output on that layer
         '''
-        x = self.model.module.breath_block.features(x)
+        x = self.model.breath_block.features(x)
         x.register_hook(self.save_gradient)
         conv_output = x
         return conv_output, x
@@ -47,12 +48,12 @@ class CamExtractor():
         conv_output, x = self.forward_pass_on_convolutions(x)
         #print(conv_output.shape)
         #print(x.shape)
-        x = self.model.module.breath_block.avgpool(x)
+        x = self.model.breath_block.avgpool(x)
         #print(x.shape)
         x = x.view(-1)  # Flatten
         # Forward pass on the classifier
-        x = self.model.module.linear_final(x).unsqueeze(0)
-        x = self.model.module.softmax(x)
+        x = self.model.linear_final(x).unsqueeze(0)
+        x = self.softmax(x)
         return conv_output, x
 
 
@@ -104,8 +105,8 @@ class GradCam():
         # Multiply each weight with its conv output and then, sum
         for i, w in enumerate(weights):
             cam += w * target[i,:]
-        
-        
+
+
         #cam = np.mean(cam, axis = 0)
         cam = np.maximum(cam, 0)
         cam = (cam - np.min(cam)) / (np.max(cam) - np.min(cam))  # Normalize between 0-1
@@ -126,18 +127,20 @@ class GradCam():
         return cam
 
 
-def get_sequence(filename, ards, c):
+def get_sequence(filename, ards, c, fold):
     data = pickle.load(open(filename, "rb"))
+    data.set_kfold_indexes_for_fold(fold)
+    data.transforms = None
     #print(len(data))
     first_seq = None
     count = 0
-    for i, d in enumerate(data):
+    for i, d in enumerate(data.all_sequences):
         if d[2][1] == ards:
             if count == c:
                 first_seq = d
                 break
             count = count + 1
-            continue 
+            continue
     #first_seq = data[1]
     #print(first_seq[2])
     br = first_seq[1]
@@ -146,16 +149,21 @@ def get_sequence(filename, ards, c):
     br = torch.FloatTensor(br).cuda()
     return br
 
+
 if __name__ == '__main__':
-
     parser = argparse.ArgumentParser()
-
-    #Getting the pretrained model
-    PATH = 'densenet-linear-model--fold-3.pth'
-    pretrained_model = torch.load(PATH)
-    
-    parser.add_argument('-pdp', '--pickled-data-path', help = 'PATH to pickled data')
+    parser.add_argument('model_path', help='path to the saved_model')
+    parser.add_argument('-pdp', '--pickled-data-path', help = 'PATH to pickled data', required=True)
+    parser.add_argument('--fold', type=int, required=True)
     args = parser.parse_args()
+
+    pretrained_model = torch.load(args.model_path)
+    # ensure that model is on same cuda device that data will be on
+    if not isinstance(pretrained_model, torch.nn.DataParallel):
+        pretrained_model = pretrained_model.to(torch.cuda.current_device())
+    else:
+        pretrained_model = pretrained_model.module
+
     #taking the pickle file we need to extract data from
     pickle_file_name = args.pickled_data_path
     # Get params
@@ -166,13 +174,13 @@ if __name__ == '__main__':
     for i in range(2):
         cam_outputs = np.empty((0,7))
         for j in range(100):
-            breath_sequence = get_sequence(pickle_file_name, i , j)
+            breath_sequence = get_sequence(pickle_file_name, i , j, args.fold)
             grad_cam = GradCam(pretrained_model)
             cam = grad_cam.generate_cam(breath_sequence, target_class)
             #print(cam)
             cam = np.expand_dims(cam, axis = 0)
             cam_outputs = np.append(cam_outputs, cam, axis = 0)
-        cam_outputs = np.mean(cam_outputs, axis = 0)   
+        cam_outputs = np.mean(cam_outputs, axis = 0)
         cam_outputs = cv2.resize(cam_outputs,(1,224))
         #print(cam_outputs.shape)
         outfile = None
