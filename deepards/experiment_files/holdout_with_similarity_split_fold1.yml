@@ -11,6 +11,6 @@ base_network: densenet18
 network: cnn_linear
 batch_size: 16
 cuda_no_dp: true
-epochs: 15
+epochs: 20
 holdout_set_type: fold_1_similarity_split
 final_validation: true
