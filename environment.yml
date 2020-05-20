@@ -11,5 +11,7 @@ dependencies:
   - seaborn
   - scipy
   - scikit-learn
+  - opencv
 channels:
   - pytorch
+  - conda-forge
