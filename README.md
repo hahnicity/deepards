@@ -115,6 +115,58 @@ Note that the spaced padding is zoomed so you can see what's happening.
 ### Best Performers
 We have found that `unpadded_centered_sequences` performs best across all of the datasets. We are currently investigating why.
 
+## GradCam
+Gradcam can be used for explaining model predictions. The main script that we use for this is
+the `patient_gradcam.py` script. This script requires 4 primary inputs to function properly
+
+1. model_path - the script requires a path to a save pytorch model that it can use for gradcam
+2. --pickled-data-path - The script needs a dataset of processed information to draw from to make gradcam inference
+3. --fold - Most of our datasets use kfolds. So we require the input of a kfold capable dataset with a specific fold number to analyze.
+4. --ops - Choose which operations you want to perform with gradcam. There are a number of different operations available. *all* will process all available operations. *averages* will generate the representation of an average breath and overlay gradcam on it on a per-patient basis. *medians* will generate the representation of a median breath and then process gradcam with this breath on a per-patient basis. *sample_seqs* will process gradcam for each batch by sampling a single sequence from a batch and overlaying gradcam results on it.
+
+Example Usage:
+```
+python patient_gradcam.py \
+saved_models/densenet-fold3.pth \
+--pickled-data-path /path/to/saved/dataset.pkl \
+--fold 3 \
+--ops medians
+```
+### GradCam Results
+
+Results for operations will be stored with the following directory structure starting at
+the `deepards/deepards` directory
+
+```
+gradcam_results
+|
+----patient_averages
+|   |
+|   ----ards
+|   |   |    patientXXX.png
+|   ----non_ards
+|   |   |    patientYYY.png
+|
+----patient_medians
+|   |
+|   ----ards
+|   |   |    patientXXX.png
+|   ----non_ards
+|   |   |    patientYYY.png
+|
+----sampled_sequences
+|   |
+|   ----ards
+|   |   |
+|   |   ----patientXXX
+|   |   |   |    seq-1.png
+|   |
+|   ----non_ards
+|   |   |
+|   |   ----patientYYY
+|   |   |   |    seq-2.png
+```
+
 ## Only Using A Fraction of Total Available Training Patients
 If you only want to use a fraction of the training patients available for experimentation then you
 should use the `--train-pt-frac` argument to set the fraction of patients in your dataset you want

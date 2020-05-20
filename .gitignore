@@ -9,7 +9,10 @@ results/
 *.pth
 *.DS_Store
 *.Rhistory
+
+# project specific dirs
 Data/
+gradcam_results/
 
 # C extensions
 *.so

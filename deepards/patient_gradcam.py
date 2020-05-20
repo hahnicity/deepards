@@ -61,6 +61,33 @@ class PatientGradCam(object):
         filename = os.path.join(dirname, patient_id + '.png')
         self.visualize_sequence(med_breath[0], cam_outputs, patient_id, target, filename)
 
+    def get_average_patient_camout(self, patient_id):
+        #initializing variables
+        patient_idxs = self.gt[self.gt.patient == patient_id].index
+        target = self.gt.loc[patient_idxs].y.iloc[0]
+        mapping = {0: 'non_ards', 1: 'ards'}
+        dirname = os.path.join('gradcam_results', 'patient_averages', mapping[target])
+        do_makedirs(dirname)
+
+    	avg_breath = np.empty((0,224))
+    	cam_outputs = np.empty((0,7))
+
+        for i in patient_idxs:
+            breath_sequence = data[i][1]
+            #concadinating the 224 breath sequences to get the avg of the patient breath
+            br1 = np.mean(breath_sequence, axis = 0)
+            avg_breath = np.append(avg_breath, br1, axis = 0)
+            #for gradcam values
+            br = torch.FloatTensor(breath_sequence).cuda()
+            cam = self.grad_cam.generate_cam(br, target)
+            cam = np.expand_dims(cam, axis = 0)
+            cam_outputs = np.append(cam_outputs, cam, axis = 0)
+        cam_outputs = np.mean(cam_outputs, axis = 0)
+        cam_outputs = cv2.resize(cam_outputs,(1,224))
+        avg_breath = np.mean(avg_breath, axis = 0)
+        filename = os.path.join(dirname, patient_id + '.png')
+        self.visualize_sequence(avg_breath, cam_outputs, patient_id, target, filename)
+
     def get_sampled_patient_sequences_camout(self, patient_id):
         """
         Idea is that we iterate over patient batches and sample a single sequence
@@ -101,6 +128,7 @@ class PatientGradCam(object):
         for patient_id in np.append(self.ards, self.non_ards):
             self.get_median_patient_camout(patient_id)
             self.get_sampled_patient_sequences_camout(patient_id)
+            self.get_average_patient_camout(patient_id)
 
 
 if __name__ == '__main__':
@@ -108,7 +136,7 @@ if __name__ == '__main__':
     parser.add_argument('model_path', help='path to the saved_model')
     parser.add_argument('-pdp', '--pickled-data-path', help = 'PATH to pickled data', required=True)
     parser.add_argument('--fold', type=int, required=True)
-    parser.add_argument('--ops', choices=['all', 'medians', 'sample_seqs'], required=True)
+    parser.add_argument('--ops', choices=['all', 'averages', 'medians', 'sample_seqs'], required=True)
     args = parser.parse_args()
 
     data = pd.read_pickle(args.pickled_data_path)
@@ -126,7 +154,10 @@ if __name__ == '__main__':
         pt_grad.do_all_patient_cam_ops()
     elif args.ops == 'medians':
         for patient_id in np.append(pt_grad.ards, pt_grad.non_ards):
-            self.get_median_patient_camout(patient_id)
+            pt_grad.get_median_patient_camout(patient_id)
     elif args.ops == 'sample_seqs':
         for patient_id in np.append(pt_grad.ards, pt_grad.non_ards):
-            self.get_sampled_patient_sequences_camout(patient_id)
+            pt_grad.get_sampled_patient_sequences_camout(patient_id)
+    elif args.ops == 'averages':
+        for patient_id in np.append(pt_grad.ards, pt_grad.non_ards):
+            pt_grad.get_average_patient_camout(patient_id)
