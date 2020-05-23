@@ -147,6 +147,10 @@ def mediod_process(dist_data, nclusts, main_dataset):
 
 def multi_proc_helper(dataset, pt, df_map, pts):
 
+    # a better approach might be to analyze patient data in apples-to-apples fashion
+    # so data from hour 1 is only compared to data from hour 1 from another patient.
+    # However, this idea also leads to potential problems of non-overlap of times.
+    # Which could cause us to not get a distance at all.
     i = pts.index(pt)
     other_pts = pts[i+1:]
     dict_ = {i: [] for i in other_pts}
@@ -168,7 +172,7 @@ def func_star(args):
     return multi_proc_helper(*args)
 
 
-def find_patient_similarity(dataset, fold_num, threads):
+def find_patient_similarity(dataset, threads, results_path):
     """
     Want to find similarity between patients rather than within patients
 
@@ -178,11 +182,14 @@ def find_patient_similarity(dataset, fold_num, threads):
     for each patient to all other 1st sequences, 2nd sequence to all other 2nd etc.
 
     Multiprocessing helps the speed issues as well.
+
+    :param dataset: An instance of ARDSRawDataset we want to analyze for all patients defined
+    :param threads: Number of processes to run simultaneously for analyzing patients.
+    :param results_path: Path to the results file
     """
     # So even if I followed this speedier calc to completion it would still take approx 4.5
     # days to complete. This is fairly frustrating. But maybe its just something I should
     # learn to live with. I think I can speed it up using multiprocessing tho
-    dataset.set_kfold_indexes_for_fold(fold_num)
     gt = dataset.get_ground_truth_df().sort_index()
     pts = list(gt.patient.unique())
     df_map = {}
@@ -207,7 +214,15 @@ def find_patient_similarity(dataset, fold_num, threads):
             data_dict[pt][pt2_name] = mean_
             data_dict[pt2_name][pt] = mean_
 
-    pd.to_pickle(pd.DataFrame(data_dict), 'dtw_cache/inter_patient_similarity-fold-{}.pkl'.format(fold_num))
+    pd.to_pickle(pd.DataFrame(data_dict), results_path)
+
+
+def find_patient_similarity_for_kfold(dataset, fold_num, threads, results_path):
+    """
+    Find patient similarity for patients in a kfold dataset
+    """
+    dataset.set_kfold_indexes_for_fold(fold_num)
+    find_patient_similarity(dataset, threads, results_path)
 
 
 def _find_per_breath_dtw_score(prev_flow_waves, breath):
