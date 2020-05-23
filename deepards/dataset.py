@@ -130,7 +130,6 @@ class ARDSRawDataset(Dataset):
         if not os.path.exists(raw_dir):
             raise Exception('No directory {} exists!'.format(raw_dir))
         self.raw_files = sorted(glob(os.path.join(raw_dir, '*/*.raw.npy')))
-        self.processed_files = sorted(glob(os.path.join(raw_dir, '*/*.processed.npy')))
         self.meta_files = sorted(glob(os.path.join(self.meta_dir, '*/*.csv')))
 
         flow_time_features = [
@@ -340,7 +339,7 @@ class ARDSRawDataset(Dataset):
         indices = [EXPERIMENTAL_META_HEADER.index(feature) for feature in bm_features]
 
         for fidx, filename in enumerate(self.raw_files):
-            gen = read_processed_file(filename, self.processed_files[fidx])
+            gen = read_processed_file(filename, filename.replace('.raw.npy', '.processed.npy'))
             patient_id = self._get_patient_id_from_file(filename)
             if patient_id != last_patient:
                 batch_arr = []
@@ -418,7 +417,7 @@ class ARDSRawDataset(Dataset):
             ratio_indices = []
         indices = [EXPERIMENTAL_META_HEADER.index(feature) for feature in bm_features]
         for fidx, filename in enumerate(self.raw_files):
-            gen = read_processed_file(filename, self.processed_files[fidx])
+            gen = read_processed_file(filename, filename.replace('.raw.npy', '.processed.npy'))
             patient_id = self._get_patient_id_from_file(filename)
 
             matching_meta = os.path.join(self.meta_dir, patient_id, 'breath_meta_' + os.path.basename(filename).replace('.raw.npy', '.csv'))
@@ -473,7 +472,7 @@ class ARDSRawDataset(Dataset):
         super_batch_tmp_arr = []
 
         for fidx, filename in enumerate(self.raw_files):
-            gen = read_processed_file(filename, self.processed_files[fidx])
+            gen = read_processed_file(filename, filename.replace('.raw.npy', '.processed.npy'))
             patient_id = self._get_patient_id_from_file(filename)
 
             if patient_id != last_patient:
@@ -524,7 +523,7 @@ class ARDSRawDataset(Dataset):
         last_patient = None
         super_batch_tmp_arr = []
         for fidx, filename in enumerate(self.raw_files):
-            gen = read_processed_file(filename, self.processed_files[fidx])
+            gen = read_processed_file(filename, filename.replace('.raw.npy', '.processed.npy'))
             patient_id = self._get_patient_id_from_file(filename)
 
             if patient_id != last_patient:
@@ -556,11 +555,10 @@ class ARDSRawDataset(Dataset):
 
                 seq_hour = (breath_time - start_time).total_seconds() / 60 / 60
                 seq_vent_bns.append(breath['vent_bn'])
-
-                if len(batch_arr) == 0 and breath_arr == []:
-                    batch_seq_hours.append(seq_hour)
                 flow = self.truncate_lim(breath['flow'])
-                batch_arr, breath_arr = processing_func(flow, breath_arr, batch_arr)
+                batch_arr, breath_arr, batch_seq_hours = processing_func(
+                    flow, breath_arr, batch_arr, batch_seq_hours, seq_hour
+                )
 
                 if len(batch_arr) == self.n_sub_batches:
                     raw_data = np.array(batch_arr)
@@ -660,38 +658,40 @@ class ARDSRawDataset(Dataset):
         else:
             return flow[:self.seq_len]
 
-    def _regular_unpadded_processing(self, flow, breath_arr, batch_arr):
+    def _regular_unpadded_processing(self, flow, breath_arr, batch_arr, batch_seq_hours, seq_hour):
         if (len(flow) + len(breath_arr)) < self.seq_len:
             breath_arr.extend(flow)
         else:
             remaining = self.seq_len - len(breath_arr)
             breath_arr.extend(flow[:remaining])
             batch_arr.append(np.array(breath_arr))
+            batch_seq_hours.append(seq_hour)
             if len(flow[remaining:]) > self.seq_len:
                 breath_arr = flow[remaining:remaining+self.seq_len]
             else:
                 breath_arr = flow[remaining:]
-        return batch_arr, breath_arr
+        return batch_arr, breath_arr, batch_seq_hours
 
-    def _downsampled_unpadded_processing(self, flow, breath_arr, batch_arr):
+    def _downsampled_unpadded_processing(self, flow, breath_arr, batch_arr, batch_seq_hours, seq_hour):
         new_samples = int(math.ceil(len(flow) / float(self.unpadded_downsample_factor)))
         flow = list(resample(flow, new_samples))
-        return self._regular_unpadded_processing(flow, breath_arr, batch_arr)
+        return self._regular_unpadded_processing(flow, breath_arr, batch_arr, batch_seq_hours, seq_hour)
 
-    def _unpadded_centered_processing(self, flow, breath_arr, batch_arr):
+    def _unpadded_centered_processing(self, flow, breath_arr, batch_arr, batch_seq_hours, seq_hour):
         if (len(flow) + len(breath_arr)) < self.seq_len:
             breath_arr.extend(flow)
         else:
             remaining = self.seq_len - len(breath_arr)
             breath_arr.extend(flow[:remaining])
             batch_arr.append(np.array(breath_arr))
+            batch_seq_hours.append(seq_hour)
             breath_arr = []
-        return batch_arr, breath_arr
+        return batch_arr, breath_arr, batch_seq_hours
 
-    def _downsampled_centered_processing(self, flow, breath_arr, batch_arr):
+    def _downsampled_centered_processing(self, flow, breath_arr, batch_arr, batch_seq_hours, seq_hour):
         new_samples = int(math.ceil(len(flow) / float(self.unpadded_downsample_factor)))
         flow = list(resample(flow, new_samples))
-        return self._unpadded_centered_processing(flow, breath_arr, batch_arr)
+        return self._unpadded_centered_processing(flow, breath_arr, batch_arr, batch_seq_hours, seq_hour)
 
     def _get_patient_id_from_file(self, filename):
         pt_id = filename.split('/')[-2]
@@ -830,7 +830,6 @@ class SiameseNetworkDataset(ARDSRawDataset):
         if not os.path.exists(raw_dir):
             raise Exception('No directory {} exists!'.format(raw_dir))
         self.raw_files = sorted(glob(os.path.join(raw_dir, '*/*.raw.npy')))
-        self.processed_files = sorted(glob(os.path.join(raw_dir, '*/*.processed.npy')))
 
         if self.all_sequences == [] and dataset_type == 'padded_breath_by_breath':
             self._process_padded_breath_by_breath_sequences(self._pad_breath)
@@ -871,7 +870,7 @@ class SiameseNetworkDataset(ARDSRawDataset):
         last_patient = None
 
         for fidx, filename in enumerate(self.raw_files):
-            gen = read_processed_file(filename, self.processed_files[fidx])
+            gen = read_processed_file(filename, filename.replace('.raw.npy', '.processed.npy'))
             patient_id = self._get_patient_id_from_file(filename)
             if patient_id != last_patient:
                 last_patient = patient_id
@@ -900,7 +899,7 @@ class SiameseNetworkDataset(ARDSRawDataset):
         last_patient = None
 
         for fidx, filename in enumerate(self.raw_files):
-            gen = read_processed_file(filename, self.processed_files[fidx])
+            gen = read_processed_file(filename, filename.replace('.raw.npy', '.processed.npy'))
             patient_id = self._get_patient_id_from_file(filename)
             if patient_id != last_patient:
                 last_patient = patient_id
