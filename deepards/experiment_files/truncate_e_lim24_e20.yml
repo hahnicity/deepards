@@ -5,7 +5,7 @@ dataset_type: unpadded_centered_sequences
 oversample: true
 kfolds: 5
 no_print_progress: true
-epochs: 10
+epochs: 20
 batch_size: 16
 network: cnn_linear
 train_from_pickle: unpadded_centered_sequences-kfold-nb20-truncate-e-24.pkl
