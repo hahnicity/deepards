@@ -8,10 +8,11 @@ no_print_progress: true
 epochs: 20
 batch_size: 16
 network: cnn_linear
-train_from_pickle: /fastdata/deepards/unpadded_centered_sequences-kfold-nb20-truncate-e-24.pkl
-#train_to_pickle: /fastdata/deepards/unpadded_centered_sequences-kfold-nb20-truncate-e-24.pkl
+train_from_pickle: unpadded_centered_sequences-kfold-nb20-truncate-e-24.pkl
+#train_to_pickle: unpadded_centered_sequences-kfold-nb20-truncate-e-24.pkl
 n_sub_batches: 20
 experiment_name: truncate_e_lim_24
 drop_i_lim: false
 drop_e_lim: false
 truncate_e_lim: .24
+data_path: /home/grehm/workspace/datasets/ardsdetection
