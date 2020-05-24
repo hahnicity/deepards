@@ -1,6 +1,5 @@
 import argparse
 import subprocess
-import time
 
 
 def run_experiment(dry_run, cuda_arg, config_override, cuda_devices, n_times_each_experiment):
@@ -23,10 +22,6 @@ def run_experiment(dry_run, cuda_arg, config_override, cuda_devices, n_times_eac
         else:
             proc = subprocess.Popen(to_run)
             proc.communicate()
-            # make sure to sleep 1 second in between calls because dont want multiple jobs to start
-            # at once and then overwrite results from each other. It would be more robust to change
-            # my results naming schema but this is by far the easier soln
-            time.sleep(1)
         i += 1
 
 

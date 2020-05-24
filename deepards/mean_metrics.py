@@ -1,6 +1,7 @@
 import argparse
 from glob import glob
 import os
+import re
 
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MultipleLocator
@@ -79,6 +80,7 @@ def _do_fold_graphing(df_stats, metric):
     plt.xticks(np.arange(len(df_stats.epoch.unique())), sorted((df_stats.epoch.unique()+1).astype(int)))
     ax = plt.gca()
     ax.yaxis.set_minor_locator(MultipleLocator(.01))
+    plt.legend(loc='lower left')
     plt.grid(axis='both')
     plt.show()
 
@@ -108,6 +110,32 @@ def get_hyperparams(start_time):
     return tmp
 
 
+def get_experiment_id(experiment_file):
+    # This function is basically just one large sanity check
+
+    # v1
+    if re.search('_(\d{10}).pth', experiment_file):
+        return os.path.splitext(experiment_file)[0].split('_')[-1]
+    # v2
+    elif re.search(r'_(\w{8}\-\w{4}\-\w{4}\-\w{4}\-\w{12}).pth', experiment_file):
+        return os.path.splitext(experiment_file)[0].split('_')[-1]
+    # probably some kind of error between v1 and v2
+    else:
+        raise Exception('File {} did not match any versioning spec'.format(experiment_file))
+
+
+def find_matching_experiments(experiment_name):
+    # first pass
+    first_pass = glob('results/{}_*'.format(experiment_name))
+    experiment_ids = []
+    for file in first_pass:
+        experiment_id = get_experiment_id(file)
+        candidate = os.path.basename(file).replace('_'+experiment_id+'.pth', '')
+        if candidate == experiment_name:
+            experiment_ids.append(experiment_id)
+    return experiment_ids
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('-e', '--experiment-name', default='main_experiment')
@@ -115,18 +143,16 @@ if __name__ == "__main__":
 
     exp_results = []
 
-    main_experiments = glob('results/{}*'.format(args.experiment_name))
-    unique_experiments = set(['_'.join(exp.split('_')[:-1]) for exp in main_experiments])
-    for exp in sorted(unique_experiments):
-        start_times = list(set([os.path.splitext(file_.split('_')[-1])[0] for file_ in glob(exp + '*')]))
-        mean_df_stats, all_stats = get_metrics(start_times)
-        hyperparams = get_hyperparams(start_times[0])
-        # get hyperparameter file
-        dataset_type = hyperparams['dataset_type']
-        network_type = hyperparams['network']
-        base_net = hyperparams['base_network']
+    unique_experiments = find_matching_experiments(args.experiment_name)
+    mean_df_stats, all_stats = get_metrics(unique_experiments)
+    hyperparams = get_hyperparams(unique_experiments[0])
+    # get hyperparameter file
+    dataset_type = hyperparams['dataset_type']
+    network_type = hyperparams['network']
+    base_net = hyperparams['base_network']
 
-        exp_results.append([dataset_type, network_type, base_net, mean_df_stats.AUC.mean()])
+    exp_results.append([dataset_type, network_type, base_net, mean_df_stats.AUC.mean()])
+
     exp_results = pd.DataFrame(exp_results, columns=['dataset_type', 'network', 'base_cnn', 'auc'])
-    do_fold_graphing(start_times)
-    import IPython; IPython.embed()
+    do_fold_graphing(unique_experiments)
+    # XXX analytics needed
