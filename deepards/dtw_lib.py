@@ -36,7 +36,7 @@ from deepards.mediods import KMedoids
 #
 # You can visualize the distance matrix using triangulation btw.
 
-def pick_dissimilar_pts(dist_data, main_dataset, n_pts):
+def pick_dissimilar_pts(dist_data, main_dataset, n_pts, exclude=None):
     """
     Pick set of as maximally possible dissimilar patients
 
@@ -48,10 +48,16 @@ def pick_dissimilar_pts(dist_data, main_dataset, n_pts):
     :param dist_data: pd.DataFrame of distances retrieved from find_patient_similarity
     :param main_dataset: Instance of ARDSRawDataset that we originally used
     :param n_pts: number of patients to select
+    :param exclude: exclude a list of patients from selection
     """
     gt = main_dataset.get_ground_truth_df().sort_index()
     patho = gt.groupby('patient').y.first()
     patients = gt.patient.unique()
+
+    if exclude is not None:
+        dist_data = dist_data[dist_data.columns.difference(exclude)]
+        dist_data = dist_data.loc[dist_data.index.difference(exclude)]
+        patients = list(set(patients).difference(set(exclude)))
 
     candidate_sets = []
     arr = dist_data.values
@@ -79,20 +85,26 @@ def pick_dissimilar_pts(dist_data, main_dataset, n_pts):
     return sorted(sorted(candidate_sets, key=lambda x: x[0])[-1][1])
 
 
-def pick_similar_pts(dist_data, main_dataset, n_pts):
+def pick_similar_pts(dist_data, main_dataset, n_pts, exclude=None):
     """
     Find set of most similar patients we can while preserving for pathophysiology split
 
     :param dist_data: pd.DataFrame of distances retrieved from find_patient_similarity
     :param main_dataset: Instance of ARDSRawDataset that we originally used
-    :param n_pts:
+    :param n_pts: number of patients to select
+    :param exclude: exclude a list of patients from selection
     """
     gt = main_dataset.get_ground_truth_df().sort_index()
     patho = gt.groupby('patient').y.first()
 
+    if exclude is not None:
+        dist_data = dist_data[dist_data.columns.difference(exclude)]
+        dist_data = dist_data.loc[dist_data.index.difference(exclude)]
+
     arr = dist_data.values
     candidates = []
     patho_to_select = int(n_pts / 2)
+
     for val in range(1000, int(dist_data.max().max()+1000), 1000):
         for i in range(len(dist_data.values)):
             mask = arr[i] < val
@@ -145,12 +157,22 @@ def mediod_process(dist_data, nclusts, main_dataset):
     return patho
 
 
-def multi_proc_helper(dataset, pt, df_map, pts):
+def compare_by_same_ordered_seqs(dataset, pt, df_map, pts):
+    """
+    Compare patients in accordance to their identically ordered sequences. So sequence 1
+    from patient A will be compared to sequence 1 from patient B. Sequence 2 from patient A
+    will be compared to sequence 2 from patient B, etc.
 
-    # a better approach might be to analyze patient data in apples-to-apples fashion
-    # so data from hour 1 is only compared to data from hour 1 from another patient.
-    # However, this idea also leads to potential problems of non-overlap of times.
-    # Which could cause us to not get a distance at all.
+    :param dataset: Instance of deepards.dataset.ARDSRawDataset
+    :param pt: the patient identifier
+    :param df_map: ground truth datasets but mapped to their patients eg. {'A': pd.DataFrame, 'B': pd.DataFrame, ...}
+    :param pts: list of all patients we are analyzing in sorted order.
+
+    As a note: A better approach might be to analyze patient data in apples-to-apples fashion
+    so data from hour 1 is only compared to data from hour 1 from another patient.
+    However, this idea also leads to potential problems of non-overlap of times.
+    Which could cause us to not get a distance at all.
+    """
     i = pts.index(pt)
     other_pts = pts[i+1:]
     dict_ = {i: [] for i in other_pts}
@@ -168,11 +190,45 @@ def multi_proc_helper(dataset, pt, df_map, pts):
     return (pt, dict_)
 
 
-def func_star(args):
-    return multi_proc_helper(*args)
+def compare_by_same_ordered_seqs_star(args):
+    return compare_by_same_ordered_seqs(*args)
 
 
-def find_patient_similarity(dataset, threads, results_path):
+def random_compare_seqs(dataset, pt, df_map, pts):
+    # compare 50 random sequences from one patient to another
+    n = 50
+    i = pts.index(pt)
+    other_pts = pts[i+1:]
+    dict_ = {i: [] for i in other_pts}
+
+    pt_map = df_map[pt]
+    pt_seqs = pt_map.index
+    if n > len(pt_seqs):
+        n = len(pt_seqs)
+    rand_seqs = np.random.choice(pt_seqs, n, replace=False)
+
+    for other_pt in other_pts:
+        other_pt_map = df_map[other_pt]
+        other_pt_seqs = other_pt_map.index
+        n_o = len(rand_seqs)
+        if n_o > len(other_pt_seqs):
+            n_o = len(other_pt_seqs)
+        other_pt_rand_seqs = np.random.choice(other_pt_seqs, n_o, replace=False)
+
+        # iterate on the other_pt_rand_seqs because this array len <= rand_seqs
+        for i, idx in enumerate(other_pt_rand_seqs):
+            pt_seq_data = dataset.all_sequences[rand_seqs[i]][1].ravel()
+            other_seq_data = dataset.all_sequences[idx][1].ravel()
+            dict_[other_pt].append(dtw(pt_seq_data, other_seq_data))
+
+    return (pt, dict_)
+
+
+def random_compare_seqs_star(args):
+    return random_compare_seqs(*args)
+
+
+def find_patient_similarity(dataset, threads, results_path, dist_method):
     """
     Want to find similarity between patients rather than within patients
 
@@ -186,20 +242,28 @@ def find_patient_similarity(dataset, threads, results_path):
     :param dataset: An instance of ARDSRawDataset we want to analyze for all patients defined
     :param threads: Number of processes to run simultaneously for analyzing patients.
     :param results_path: Path to the results file
+    :param dist_method: The method to compute distances between patients. Has 2 choices 'random' and 'same_ordered'
     """
     # So even if I followed this speedier calc to completion it would still take approx 4.5
     # days to complete. This is fairly frustrating. But maybe its just something I should
     # learn to live with. I think I can speed it up using multiprocessing tho
     gt = dataset.get_ground_truth_df().sort_index()
+    # make sure oversampling is false because we don't want to skew results towards resampled data
+    dataset.oversample = False
     pts = list(gt.patient.unique())
     df_map = {}
-    fold_num = fold_num
 
     for pt in pts:
         df_map[pt] = gt[gt.patient == pt]
 
     pool = multiprocessing.Pool(threads)
-    results = pool.map(func_star, [(dataset, pt, df_map, pts) for pt in pts])
+    if dist_method == 'same_ordered':
+        func = compare_by_same_ordered_seqs_star
+    elif dist_method == 'random':
+        func = random_compare_seqs_star
+    else:
+        raise Exception('Inputs to this function only accept "random" or "same_ordered" choices for dist_method.')
+    results = pool.map(func, [(dataset, pt, df_map, pts) for pt in pts])
     pool.close()
     pool.join()
 
@@ -217,12 +281,25 @@ def find_patient_similarity(dataset, threads, results_path):
     pd.to_pickle(pd.DataFrame(data_dict), results_path)
 
 
-def find_patient_similarity_for_kfold(dataset, fold_num, threads, results_path):
+def get_similarity_across_fold_files(*files):
+    dfs = [pd.read_pickle(i) for i in glob('dtw_cache/inter_patient_similarity*')]
+    dfs = pd.concat(dfs)
+    for patient in sorted(dfs.columns):
+        pt_series = dfs[patient].dropna().sort_index().drop_duplicates()
+        # since there can be mult rows for same pt, take average. Average doesn't stray
+        # far anyhow
+        pt_series = pt_series.groupby(axis='index', level=0).mean()
+        # XXX I dunno if I actually need this function anymore. I am going to be changing
+        # my distance metric slightly. However, if I do need it after that work I can
+        # revisit this
+
+
+def find_patient_similarity_for_kfold(dataset, fold_num, threads, results_path, dist_method):
     """
-    Find patient similarity for patients in a kfold dataset
+    Find patient similarity for patients in a kfold dataset. Convenience method
     """
     dataset.set_kfold_indexes_for_fold(fold_num)
-    find_patient_similarity(dataset, threads, results_path)
+    find_patient_similarity(dataset, threads, results_path, dist_method)
 
 
 def _find_per_breath_dtw_score(prev_flow_waves, breath):
