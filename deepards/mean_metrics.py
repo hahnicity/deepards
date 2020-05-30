@@ -10,6 +10,7 @@ import pandas as pd
 import seaborn as sns
 from sklearn.metrics import confusion_matrix, roc_auc_score, f1_score
 import torch
+import yaml
 
 
 def computeMetricsFromPatientResults(df, df_stats):
@@ -72,17 +73,16 @@ def get_metrics(start_times):
     return mean_df_stats, df_stats
 
 
-def _do_fold_graphing(df_stats, metric):
+def _do_fold_graphing(df_stats, metric, label='aggregate results'):
     if len(df_stats.fold.unique()) > 1:
         for k, stats in df_stats.groupby('fold'):
             sns.lineplot(x='epoch', y=metric, data=stats, label='fold {}'.format(int(k)))
-    sns.lineplot(x='epoch', y=metric, data=df_stats, label='aggregate_results')
+    sns.lineplot(x='epoch', y=metric, data=df_stats, label=label)
     plt.xticks(np.arange(len(df_stats.epoch.unique())), sorted((df_stats.epoch.unique()+1).astype(int)))
     ax = plt.gca()
     ax.yaxis.set_minor_locator(MultipleLocator(.01))
     plt.legend(loc='lower left')
     plt.grid(axis='both')
-    plt.show()
 
 
 def do_fold_graphing(start_times):
@@ -97,6 +97,7 @@ def do_fold_graphing(start_times):
 
     for metric in ['AUC', 'Accuracy', 'sensitivity', 'specificity']:
         _do_fold_graphing(df_stats, metric)
+        plt.show()
 
 
 def get_hyperparams(start_time):
@@ -136,9 +137,35 @@ def find_matching_experiments(experiment_name):
     return experiment_ids
 
 
+def analyze_similar_dissimilar_experiments(sim_dissim_file, expr_ids):
+    with open(os.path.join(os.path.dirname(__file__), sim_dissim_file)) as sds:
+        conf = yaml.load(sds, Loader=yaml.FullLoader)
+
+    df_patient_results_list = []
+    for id_ in expr_ids:
+        df = pd.read_pickle("results/{}_patient_results.pkl".format(id_))
+        df_patient_results_list.append(df)
+
+    similar_pts = conf['similar']
+    dissimilar_pts = conf['dissimilar']
+
+    df_stats_similar = pd.DataFrame(columns = ['fold','epoch','AUC', 'Accuracy', 'sensitivity', 'specificity', 'precision', 'f1'])
+    df_stats_dissimilar = pd.DataFrame(columns = ['fold','epoch','AUC', 'Accuracy', 'sensitivity', 'specificity', 'precision', 'f1'])
+    for df in df_patient_results_list:
+        similar_results = df[df.patient.isin(similar_pts)]
+        dissimilar_results = df[df.patient.isin(dissimilar_pts)]
+        df_stats_similar = computeMetricsFromPatientResults(similar_results, df_stats_similar)
+        df_stats_dissimilar = computeMetricsFromPatientResults(dissimilar_results, df_stats_dissimilar)
+    for metric in ['AUC', 'Accuracy']:
+        _do_fold_graphing(df_stats_similar, metric, label='Similar pt {}'.format(metric))
+        _do_fold_graphing(df_stats_dissimilar, metric, label='Dissimilar pt {}'.format(metric))
+        plt.show()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('-e', '--experiment-name', default='main_experiment')
+    parser.add_argument('-sds', '--sim-dissim-file', help='If we are comparing between similar and dissimilar patients in the testing cohort, then supply a yaml file which specifies which patients are similar and which are dissimilar')
     args = parser.parse_args()
 
     exp_results = []
@@ -154,5 +181,8 @@ if __name__ == "__main__":
     exp_results.append([dataset_type, network_type, base_net, mean_df_stats.AUC.mean()])
 
     exp_results = pd.DataFrame(exp_results, columns=['dataset_type', 'network', 'base_cnn', 'auc'])
-    do_fold_graphing(unique_experiments)
+    if args.sim_dissim_file:
+        analyze_similar_dissimilar_experiments(args.sim_dissim_file, unique_experiments)
+    else:
+        do_fold_graphing(unique_experiments)
     # XXX analytics needed

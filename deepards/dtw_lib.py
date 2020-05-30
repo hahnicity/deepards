@@ -13,8 +13,20 @@ from ventmap.raw_utils import read_processed_file
 from deepards.mediods import KMedoids
 
 
-# XXX So theres a few things that I need to do.
-#
+def eval_set_for_candidacy(pts, other_groups, thresh):
+    if len(other_groups) == 0:
+        return True
+
+    total = 0
+    for g in other_groups:
+        total += (float(len(set(pts).intersection(set(g)))) / len(pts))
+
+    if (total / len(other_groups)) > thresh:
+        return False
+    else:
+        return True
+
+
 # 1. Need to find cluster of like data
 # 2. need to find a cluster of patients who are totally dissimilar
 # 3. compare the clusters strategies to each other.
@@ -35,8 +47,7 @@ from deepards.mediods import KMedoids
 # Eh poop, KP wasnt meant for graph algorithms. back to mediods
 #
 # You can visualize the distance matrix using triangulation btw.
-
-def pick_dissimilar_pts(dist_data, main_dataset, n_pts, exclude=None):
+def pick_dissimilar_pts(dist_data, main_dataset, n_pts, exclude=None, retrieve_n=1, mean_similarity_thresh=.8):
     """
     Pick set of as maximally possible dissimilar patients
 
@@ -49,6 +60,8 @@ def pick_dissimilar_pts(dist_data, main_dataset, n_pts, exclude=None):
     :param main_dataset: Instance of ARDSRawDataset that we originally used
     :param n_pts: number of patients to select
     :param exclude: exclude a list of patients from selection
+    :param retrieve_n: Retrieve n possible candidate sets with a score for each
+    :param mean_similarity_thresh: only include a possible candidate set if they have a mean overlap of d fraction of patients with other candidate sets
     """
     gt = main_dataset.get_ground_truth_df().sort_index()
     patho = gt.groupby('patient').y.first()
@@ -82,10 +95,17 @@ def pick_dissimilar_pts(dist_data, main_dataset, n_pts, exclude=None):
 
         candidate_sets.append([lower_tri[picked].sum().sum(), picked])
 
-    return sorted(sorted(candidate_sets, key=lambda x: x[0])[-1][1])
+    highest_cost = sorted(candidate_sets, key=lambda x: -x[0])
+    best = []
+    for g in highest_cost:
+        if eval_set_for_candidacy(g[1], [b[1] for b in best], mean_similarity_thresh):
+            best.append(g)
+        if len(best) == retrieve_n:
+            break
+    return best
 
 
-def pick_similar_pts(dist_data, main_dataset, n_pts, exclude=None):
+def pick_similar_pts(dist_data, main_dataset, n_pts, exclude=None, retrieve_n=1, mean_similarity_thresh=.8):
     """
     Find set of most similar patients we can while preserving for pathophysiology split
 
@@ -93,7 +113,13 @@ def pick_similar_pts(dist_data, main_dataset, n_pts, exclude=None):
     :param main_dataset: Instance of ARDSRawDataset that we originally used
     :param n_pts: number of patients to select
     :param exclude: exclude a list of patients from selection
+    :param retrieve_n: Retrieve n possible candidate sets with a score for each
+    :param mean_similarity_thresh: only include a possible candidate set if they have a mean overlap of d fraction of patients with other candidate sets
     """
+    if retrieve_n < 1:
+        raise Exception('retrieve_n cannot be set < 1!')
+    if not (0 < mean_similarity_thresh <= 1):
+        raise Exception('mean_similarity_thresh must be between 0 and 1!')
     gt = main_dataset.get_ground_truth_df().sort_index()
     patho = gt.groupby('patient').y.first()
 
@@ -107,6 +133,7 @@ def pick_similar_pts(dist_data, main_dataset, n_pts, exclude=None):
 
     for val in range(1000, int(dist_data.max().max()+1000), 1000):
         for i in range(len(dist_data.values)):
+            mediod = dist_data.columns[i]
             mask = arr[i] < val
             count = len(arr[i][mask])
             if count >= n_pts:
@@ -120,24 +147,22 @@ def pick_similar_pts(dist_data, main_dataset, n_pts, exclude=None):
                     cond2 = counts[1] >= patho_to_select
                 except:
                     break
-                if cond1 and cond2:
-                    candidates.append((count, pts, dist_data.columns[i]))
 
-        if len(candidates) > 0:
+                if cond1 and cond2:
+                    normals = patho.loc[pts][patho.loc[pts] == 0].index
+                    ards = patho.loc[pts][patho.loc[pts] == 1].index
+                    best_normals = list(dist_data.loc[mediod, normals].sort_values()[:patho_to_select].index)
+                    best_ards = list(dist_data.loc[mediod, ards].sort_values()[:patho_to_select].index)
+                    cost = dist_data.loc[mediod, best_normals+best_ards].sum()
+
+                    if eval_set_for_candidacy(best_ards+best_normals, [c[1] for c in candidates], mean_similarity_thresh):
+                        candidates.append((cost, best_ards+best_normals))
+
+        if len(candidates) >= retrieve_n:
             break
 
-    best = []
-    for count, pts, mediod in candidates:
-        # perform greedy selection from mediod
-        normals = patho.loc[pts][patho.loc[pts] == 0].index
-        ards = patho.loc[pts][patho.loc[pts] == 1].index
-        best_normals = list(dist_data.loc[mediod, normals].sort_values()[:patho_to_select].index)
-        best_ards = list(dist_data.loc[mediod, ards].sort_values()[:patho_to_select].index)
-        cost = dist_data.loc[mediod, best_normals+best_ards].sum()
-        best.append((cost, best_normals+best_ards))
-
-    best = sorted(best, key=lambda x: x[0])
-    return sorted(best[0][1])
+    best = sorted(candidates, key=lambda x: x[0])
+    return best[0:retrieve_n]
 
 
 def mediod_process(dist_data, nclusts, main_dataset):

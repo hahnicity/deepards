@@ -44,10 +44,24 @@ test:
  - 0102RPI0120151225  # dissimilar cluster
  - 0122RPI1320160120  # similar cluster
  - 0253RPI1220160606  # similar cluster
- - 0260RPI2420160617  # similar cluster
+ - 0265RPI2920160622  # dissimilar cluster
  - 0411RPI5820170119  # dissimilar cluster
- - 0552RPI2520180101  # dissimilar cluster
+ - 0463RPI3220170522  # dissimilar cluster
  - 0593RPI1920180226  # dissimilar cluster
  - 0624RPI0320180708  # similar cluster
  - 0625RPI2820180628  # similar cluster
  - 0745RPI1900000000  # similar cluster
+
+similar:
+ - 0122RPI1320160120
+ - 0253RPI1220160606
+ - 0624RPI0320180708
+ - 0625RPI2820180628
+ - 0745RPI1900000000
+
+dissimilar:
+ - 0102RPI0120151225
+ - 0265RPI2920160622
+ - 0411RPI5820170119
+ - 0463RPI3220170522
+ - 0593RPI1920180226
