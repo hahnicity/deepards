@@ -1,0 +1,14 @@
+base_network: densenet18
+batch_size: 16
+clip_val: 0.01
+cuda_no_dp: true
+data_path: /home/grehm/workspace/datasets/ardsdetection
+dataset_type: unpadded_centered_sequences
+epochs: 15
+final_validation: true
+holdout_set_type: train_sim_test_sim_dissim_split_8
+loader_threads: 0
+n_sub_batches: 20
+network: cnn_linear
+test_from_pickle: /home/grehm/workspace/python/deepards/deepards/pickle_cache/unpadded_centered_sequences-nb20-test-holdout-train_sim_test_sim_dissim_split_8.pkl
+train_from_pickle: /home/grehm/workspace/python/deepards/deepards/pickle_cache/unpadded_centered_sequences-nb20-train-holdout-train_sim_test_sim_dissim_split_8.pkl

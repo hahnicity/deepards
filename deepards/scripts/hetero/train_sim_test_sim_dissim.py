@@ -12,8 +12,8 @@ import yaml
 
 from deepards.config import Configuration
 from deepards.dtw_lib import pick_similar_pts, pick_dissimilar_pts
-from deepards.perform_splitting import perform_preset_file_split
-from deepards.train_ards_detector import build_parser, BaseTraining
+from deepards.perform_data_splitting import perform_preset_file_split
+from deepards.train_ards_detector import build_parser, CNNLinearModel
 
 
 def do_split(similarity_file, pickled_dataset, n):
@@ -23,7 +23,6 @@ def do_split(similarity_file, pickled_dataset, n):
 
     train_sim_pts = pick_similar_pts(sim, a, 40, retrieve_n=10, mean_similarity_thresh=.7)[n][1]
     test_dissim_pts = pick_dissimilar_pts(sim, a, 6, exclude=train_sim_pts, retrieve_n=10, mean_similarity_thresh=.7)[n][1]
-    # XXX
     test_sim_pts = pick_similar_pts(sim, a, 6, exclude=train_sim_pts+test_dissim_pts, retrieve_n=10, mean_similarity_thresh=.7)[n][1]
     gt = a.get_ground_truth_df().sort_index()
     patho = gt.groupby('patient').y.first()
@@ -68,7 +67,7 @@ def make_base_config_file(split_name):
 
 def make_config_file_write_to_pickle(split_name):
     base = make_base_config_file(split_name)
-    save_dir = os.path.join(os.path.dirname(__file__), '../../pickle_cache')
+    save_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../pickle_cache'))
     updates = {
 		'test_to_pickle': os.path.join(save_dir, 'unpadded_centered_sequences-nb20-test-holdout-{}.pkl'.format(split_name)),
 		'train_to_pickle': os.path.join(save_dir, 'unpadded_centered_sequences-nb20-train-holdout-{}.pkl'.format(split_name)),
@@ -79,7 +78,7 @@ def make_config_file_write_to_pickle(split_name):
 
 def make_config_file_read_from_pickle(split_name):
     base = make_base_config_file(split_name)
-    save_dir = os.path.join(os.path.dirname(__file__), '../../pickle_cache')
+    save_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../pickle_cache'))
     updates = {
 		'test_from_pickle': os.path.join(save_dir, 'unpadded_centered_sequences-nb20-test-holdout-{}.pkl'.format(split_name)),
 		'train_from_pickle': os.path.join(save_dir, 'unpadded_centered_sequences-nb20-train-holdout-{}.pkl'.format(split_name)),
@@ -115,11 +114,10 @@ for n in range(args.n_splits):
         yaml.dump(make_config_file_write_to_pickle(split_name), f)
 
     # pickle data file
-    main_parser = build_parser()
-    main_parser.config_override = experimental_config_path
-    args = main_parser.parse_args()
-    config = Configuration(args)
-    cls = BaseTraining(config)
+    main_parser_args = build_parser().parse_args([])
+    main_parser_args.config_override = experimental_config_path
+    config = Configuration(main_parser_args)
+    cls = CNNLinearModel(config)
     cls.get_base_datasets()
 
     with open(experimental_config_path, 'w') as f:
@@ -127,9 +125,7 @@ for n in range(args.n_splits):
 
     # set directory back to deepards/deepards so that we can run non_pretraining experiments
     # script
-    os.chdir(os.path.join(os.dirname(__file__), '../../'))
+    script_path = os.path.join(os.path.dirname(__file__), '..', 'main', 'run_non_pretraining_experiments.py')
     experimental_config_path = os.path.join('experiment_files', '{}.yml'.format(split_name))
-    # debug for now
-    proc = subprocess.Popen(['python', 'scripts/main/run_non_pretraining_experiments.py', '-co', experimental_config_path, '--cuda-devices', '0+1+2+3', '--debug'])
+    proc = subprocess.Popen(['python', script_path, '-co', experimental_config_path, '--cuda-devices', '0+1+2+3'])
     proc.communicate()
-    # XXX run benchmarking process
