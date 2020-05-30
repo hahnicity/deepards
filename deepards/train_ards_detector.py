@@ -971,7 +971,7 @@ network_map = {
 }
 
 
-def main():
+def build_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('-co', '--config-override', help='path to yml file that overrides elements of defaults.yml')
     parser.add_argument('-dp', '--data-path', help='Path to ARDS detection dataset')
@@ -1069,7 +1069,11 @@ def main():
     parser.add_argument('--drop-i-lim', action='store_true', default=None)
     parser.add_argument('--drop-e-lim', action='store_true', default=None)
     parser.add_argument('--truncate-e-lim', type=float, help='Number of seconds of the E lim to keep. Everything afterwards is discarded. Should be done in a number divisible by 2', default=None)
-    args = parser.parse_args()
+    return parser
+
+
+def main():
+    args = build_parser().parse_args()
     args = Configuration(args)
 
     # convenience code
