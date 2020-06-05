@@ -159,6 +159,16 @@ def analyze_similar_dissimilar_experiments(sim_dissim_file, expr_ids):
     for metric in ['AUC', 'Accuracy']:
         _do_fold_graphing(df_stats_similar, metric, label='Similar pt {}'.format(metric))
         _do_fold_graphing(df_stats_dissimilar, metric, label='Dissimilar pt {}'.format(metric))
+        ax = plt.gca()
+        line1 = ax.lines[0].get_data()[1]
+        line2 = ax.lines[1].get_data()[1]
+        f1 = 2 * (line1*line2) / (line1+line2)
+        plt.plot(f1, label='harmonic mean')
+        max_x = np.argmax(f1)
+        sim = round(line1[max_x], 2)
+        dissim = round(line2[max_x], 2)
+        plt.annotate('max sim: {}, dissim: {}'.format(sim, dissim), xy=(max_x, f1[max_x]))
+        plt.legend()
         plt.show()
 
 
