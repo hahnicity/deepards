@@ -58,7 +58,7 @@ def confidence_score(score, sample_size):
 def get_metrics(start_times):
     df_patient_results_list = []
     for time in start_times:
-        df = pd.read_pickle("results/{}_patient_results.pkl".format(time))
+        df = pd.read_pickle(os.path.join(os.path.dirname(__file__), "results", "{}_patient_results.pkl".format(time)))
         df_patient_results_list.append(df)
     df_stats = pd.DataFrame(columns = ['fold','epoch','AUC', 'Accuracy', 'sensitivity', 'specificity', 'precision', 'f1'])
     for df in df_patient_results_list:

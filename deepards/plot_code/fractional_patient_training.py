@@ -8,16 +8,17 @@ import pandas as pd
 from deepards.mean_metrics import confidence_score, get_metrics
 
 
+results_path = lambda x: os.path.join(os.path.dirname(__file__), '..', 'results', x)
 experiment_prefixes = [
-    (100, "results/q1_cnn_linear_benchmark_unpadded_centered_sequences_cnn_linear_densenet18" ),
-    (75, "results/fractional_dataset_training75_"),  # 75%
-    (50, "results/fractional_dataset_training50_"),  # 50%
-    (25, "results/fractional_dataset_training25_"),  # 25%
-    (12.5, "results/fractional_dataset_training125_"),  # 12.5%
-    (10, "results/fractional_dataset_training1_"),  # 10%
-    (7.5, "results/fractional_dataset_training075_"),  # 7.5%
-    (5, "results/fractional_dataset_training05_"),  # 5%
-    (2.5, "results/fractional_dataset_training025_"),  # 2.5%
+    (100, results_path("q1_cnn_linear_benchmark_unpadded_centered_sequences_cnn_linear_densenet18")),
+    (75, results_path("fractional_dataset_training75_")),  # 75%
+    (50, results_path("fractional_dataset_training50_")),  # 50%
+    (25, results_path("fractional_dataset_training25_")),  # 25%
+    (12.5, results_path("fractional_dataset_training125_")),  # 12.5%
+    (10, results_path("fractional_dataset_training1_")),  # 10%
+    (7.5, results_path("fractional_dataset_training075_")),  # 7.5%
+    (5, results_path("fractional_dataset_training05_")),  # 5%
+    (2.5, results_path("fractional_dataset_training025_")),  # 2.5%
 ]
 
 stats = dict()
@@ -59,6 +60,8 @@ acc_fill_y1 = rf_results.loc['accuracy'] + acc_confidence
 acc_fill_y2 = rf_results.loc['accuracy'] - acc_confidence
 plt.plot(x_rf, rf_results.loc['accuracy'], color='orange', label='RF')
 plt.fill_between(x_rf, acc_fill_y1, acc_fill_y2, alpha=.2, color='orange')
+fig = plt.gcf()
+fig.set_size_inches(20, 10)
 
 plt.ylabel('Mean Accuracy')
 plt.xlabel('N Training Patients')
@@ -77,6 +80,8 @@ rf_auc = rf_results.loc['auc']
 rf_conf = 1.96 * np.sqrt(rf_results.loc['auc'] * (1-rf_results.loc['auc']) / 100)
 plt.plot(x_rf, rf_auc, label='RF', color='orange')
 plt.fill_between(x_rf, rf_auc+rf_conf, rf_auc-rf_conf, alpha=.2, color='orange')
+fig = plt.gcf()
+fig.set_size_inches(20, 10)
 plt.ylabel('Mean AUC')
 plt.xlabel('N Training Patients')
 plt.xticks(x_rf)
