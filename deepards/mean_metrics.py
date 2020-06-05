@@ -127,7 +127,7 @@ def get_experiment_id(experiment_file):
 
 def find_matching_experiments(experiment_name):
     # first pass
-    first_pass = glob('results/{}_*'.format(experiment_name))
+    first_pass = glob(os.path.join(os.path.dirname(__file__), 'results/{}_*'.format(experiment_name)))
     experiment_ids = []
     for file in first_pass:
         experiment_id = get_experiment_id(file)
