@@ -37,11 +37,11 @@ class SillyPlottingClass(object):
         epoch_to_auc = [(ep, roc_auc_score(frame.patho, frame.pred_frac)) for ep, frame in df.groupby('epoch_num')]
         best_epoch = sorted(epoch_to_auc, key=lambda x: x[1])[-1][0]
         df = df[df.epoch_num == best_epoch]
-        self.plot_results(df, 'orange', 'goldenrod', 'Deep Learning')
+        self.plot_results(df, 'steelblue', 'steelblue', 'Deep Learning')
 
     def plot_reg_ml_results(self):
         """Convenience method"""
-        self.plot_results(self.reg_ml_results, 'forestgreen', 'lightgreen', 'Random Forest')
+        self.plot_results(self.reg_ml_results, 'sandybrown', 'sandybrown', 'Random Forest')
 
     def plot_results(self, results, line_color, std_color, type_roc):
         # I might be able to find confidence std using p(1-p). Nah. we actually cant do
@@ -70,7 +70,7 @@ class SillyPlottingClass(object):
         auc_ci = (1.96 * np.sqrt(mean_auc * (1-mean_auc) / uniq_pts)).round(3)
         plt.plot(mean_fpr, mean_tpr, color=line_color,
                  label=r'%s ROC (AUC = %0.2f$\pm$%0.3f)' % (type_roc, mean_auc, auc_ci),
-                 lw=2.0, alpha=.8)
+                 lw=1.5, alpha=.8)
 
         std_tpr = np.std(tprs, axis=0)
         tprs_upper = np.minimum(mean_tpr + std_tpr, 1)
@@ -78,10 +78,10 @@ class SillyPlottingClass(object):
         plt.fill_between(mean_fpr, tprs_lower, tprs_upper, color=std_color, alpha=.2,
                          label=r'{} 1 std. dev.'.format(type_roc))
 
-        plt.xlim([-0.05, 1.05])
-        plt.ylim([-0.05, 1.05])
-        plt.xlabel('False Positive Rate')
-        plt.ylabel('True Positive Rate')
+        plt.xlim([-0.025, 1.025])
+        plt.ylim([-0.025, 1.025])
+        plt.xlabel('False Positive Rate', fontsize=12)
+        plt.ylabel('True Positive Rate', fontsize=12)
         #plt.show()
 
 
@@ -89,12 +89,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('reg_ml_results_file')
     parser.add_argument('dl_experiment_name')
+    parser.add_argument('-o', '--output', default='roc-dl-ml.png')
     args = parser.parse_args()
     cls = SillyPlottingClass(args.reg_ml_results_file, args.dl_experiment_name)
     cls.plot_reg_ml_results()
     cls.plot_dl_results()
     plt.legend(loc="lower right")
-    plt.savefig('/home/greg/ardsresearch/paper_imgs/roc-dl-ml.png', dpi=400, bbox_inches='tight')
+    plt.savefig(args.output, dpi=400, bbox_inches='tight')
 
 
 if __name__ == "__main__":

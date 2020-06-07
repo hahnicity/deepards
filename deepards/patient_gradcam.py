@@ -106,7 +106,7 @@ class PatientGradCam(object):
             br = torch.FloatTensor(breath_sequence)[[0] * batch_size].cuda()
             cam = self.grad_cam.generate_cam(br, target)
             cam_outputs = cv2.resize(cam, (1,224))
-            filename = os.path.join(dirname, 'seq-{}.png'.format(i))
+            filename = os.path.join(dirname, 'seq-{}-{}.png'.format(i, rand_seq))
             self.visualize_sequence(breath_sequence[0], cam_outputs, patient_id, target, filename)
 
     def visualize_sequence(self, br, cam_outputs, patient_id, c, filepath):
