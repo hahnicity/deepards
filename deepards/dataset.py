@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 from scipy.signal import resample
 from sklearn.model_selection import StratifiedKFold
+from torch.nn.utils.rnn import pack_padded_sequence
 from torch.utils.data import Dataset, DataLoader
 from ventmap import SAM
 from ventmap.raw_utils import extract_raw, read_processed_file
@@ -742,6 +743,7 @@ class ARDSRawDataset(Dataset):
         elif len(seq) == 5:
             _, data, meta, target, seq_hours = seq
 
+        # XXX pack_padded_sequence
         self.seq_hours[index] = seq_hours
         try:
             mu, std = self.scaling_factors[self.kfold_num]

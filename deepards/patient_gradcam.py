@@ -1,14 +1,14 @@
 import argparse
+import math
 import os
 import pickle
 import random
 
 import cv2
-import matplotlib.pyplot as plt
-import matplotlib.image as mpimg
-import matplotlib.pyplot as plt
-import matplotlib.mlab as mlab
 import matplotlib.gridspec as gridspec
+import matplotlib.image as mpimg
+import matplotlib.mlab as mlab
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
@@ -93,6 +93,8 @@ class PatientGradCam(object):
         Idea is that we iterate over patient batches and sample a single sequence
         from each batch. That sequence is fed into gradcam for a result
         """
+        # XXX this line is failing us we need to adjust indexes to be a continuous range
+        # instead of a potentially discontinuous one
         patient_idxs = self.gt[self.gt.patient == patient_id].index
         target = self.gt.loc[patient_idxs].y.iloc[0]
         batch_size = 20
@@ -109,17 +111,64 @@ class PatientGradCam(object):
             filename = os.path.join(dirname, 'seq-{}-{}.png'.format(i, rand_seq))
             self.visualize_sequence(breath_sequence[0], cam_outputs, patient_id, target, filename)
 
-    def visualize_sequence(self, br, cam_outputs, patient_id, c, filepath):
+    def plot_sequence(self, br, cam_outputs):
         img = br.reshape((224, 1))
         t = np.arange(0, 224, 1)
         plt.scatter(t, img, c=cam_outputs, vmin = 0, vmax = 255)
         plt.plot(t, img)
+
+    def visualize_sequence(self, br, cam_outputs, patient_id, c, filepath):
+        self.plot_sequence(br, cam_outputs)
         cbar  = plt.colorbar()
         cbar.set_label("cam_outputs", labelpad=-1)
         mapping = {0: 'Non-ARDS', 1: 'ARDS'}
         plt.title(patient_id + ' ' + mapping[c])
         plt.savefig(filepath)
         plt.close()
+
+    def _do_patho_rand_sample(self, patho, filename):
+        items_per_frame = 16
+        batch_size = 20
+        idxs = len(self.data)
+        counter = 0
+        target = {'ards': 1, 'non_ards': 0}[patho]
+        self.gt.index = range(len(self.gt))
+        patho_idxs = self.gt[self.gt.y == target].index
+        for j in range(items_per_frame):
+            seq_idx = random.choice(patho_idxs)
+            br_idx = random.randint(0, batch_size-1)
+            item = self.data[seq_idx]
+            br = np.expand_dims(item[1][br_idx], axis=0)
+            br = torch.FloatTensor(br)[[0] * batch_size].cuda()
+            cam = self.grad_cam.generate_cam(br, target)
+            cam_outputs = cv2.resize(cam, (1,224))
+            plt.subplot(int(math.sqrt(items_per_frame)), int(math.sqrt(items_per_frame)), j+1)
+            self.plot_sequence(br[0].cpu().numpy(), cam_outputs)
+            plt.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
+            plt.yticks(fontsize='x-small')
+
+        fig = plt.gcf()
+        for ax in fig.axes:
+            sm = ax.pcolormesh(np.random.random((0, 0)), vmin=0, vmax=255)
+        fig.set_size_inches(20, 10)
+        fig.subplots_adjust(right=.8)
+        cbar_ax = fig.add_axes((0.85, 0.15, 0.025, 0.7))
+        cbar = fig.colorbar(sm, cax=cbar_ax)
+        cbar.set_label("Intensity")
+        plt.suptitle("Random Sample {} Grad-Cam".format({'non_ards': 'Non-ARDS', 'ards': 'ARDS'}[patho]))
+        plt.savefig(filename, dpi=400)
+        plt.close()
+
+    def rand_sample(self):
+        dirname = os.path.join('gradcam_results', 'rand_sample')
+        do_makedirs(dirname)
+        for i in range(3):
+            filename = os.path.join(dirname, "ards-rand-samp-{}.png".format(i))
+            self._do_patho_rand_sample('ards', filename)
+
+        for j in range(3):
+            filename = os.path.join(dirname, "non-ards-rand-samp-{}.png".format(j))
+            self._do_patho_rand_sample('non_ards', filename)
 
     def do_all_patient_cam_ops(self):
         """
@@ -136,7 +185,7 @@ if __name__ == '__main__':
     parser.add_argument('model_path', help='path to the saved_model')
     parser.add_argument('-pdp', '--pickled-data-path', help = 'PATH to pickled data', required=True)
     parser.add_argument('--fold', type=int, required=True)
-    parser.add_argument('--ops', choices=['all', 'averages', 'medians', 'sample_seqs'], required=True)
+    parser.add_argument('--ops', choices=['all', 'averages', 'medians', 'sample_seqs', 'rand_sample'], required=True)
     args = parser.parse_args()
 
     data = pd.read_pickle(args.pickled_data_path)
@@ -161,3 +210,5 @@ if __name__ == '__main__':
     elif args.ops == 'averages':
         for patient_id in np.append(pt_grad.ards, pt_grad.non_ards):
             pt_grad.get_average_patient_camout(patient_id)
+    elif args.ops == 'rand_sample':
+        pt_grad.rand_sample()
