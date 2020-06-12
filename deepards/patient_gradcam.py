@@ -26,7 +26,7 @@ def do_makedirs(dir):
 
 class PatientGradCam(object):
     def __init__(self, pretrained_model, data):
-        self.grad_cam = GradCam(pretrained_model)
+        self.grad_cam = GradCam(pretrained_model.cuda())
         self.data = data
         self.gt = self.data.get_ground_truth_df()
         self.ards, self.non_ards = self.get_ardsids_otherids()
@@ -104,10 +104,7 @@ class PatientGradCam(object):
 
         for i in patient_idxs:
             rand_seq = random.choice(range(batch_size))
-            breath_sequence = np.expand_dims(self.data[i][1][rand_seq], axis=0)
-            br = torch.FloatTensor(breath_sequence)[[0] * batch_size].cuda()
-            cam = self.grad_cam.generate_cam(br, target)
-            cam_outputs = cv2.resize(cam, (1,224))
+            cam_outputs, br = self.get_single_sequence_grad_cam(i, rand_seq, target)
             filename = os.path.join(dirname, 'seq-{}-{}.png'.format(i, rand_seq))
             self.visualize_sequence(breath_sequence[0], cam_outputs, patient_id, target, filename)
 
@@ -126,6 +123,15 @@ class PatientGradCam(object):
         plt.savefig(filepath)
         plt.close()
 
+    def get_single_sequence_grad_cam(self, seq_idx, batch_idx, target):
+        item = self.data[seq_idx]
+        batch_size = item[1].shape[0]
+        br = np.expand_dims(item[1][batch_idx], axis=0)
+        br = torch.FloatTensor(br)[[0] * batch_size].cuda()
+        cam = self.grad_cam.generate_cam(br, target)
+        cam_outputs = cv2.resize(cam, (1,224))
+        return cam_outputs, br.cpu().numpy()
+
     def _do_patho_rand_sample(self, patho, filename):
         items_per_frame = 16
         batch_size = 20
@@ -137,19 +143,14 @@ class PatientGradCam(object):
         for j in range(items_per_frame):
             seq_idx = random.choice(patho_idxs)
             br_idx = random.randint(0, batch_size-1)
-            item = self.data[seq_idx]
-            br = np.expand_dims(item[1][br_idx], axis=0)
-            br = torch.FloatTensor(br)[[0] * batch_size].cuda()
-            cam = self.grad_cam.generate_cam(br, target)
-            cam_outputs = cv2.resize(cam, (1,224))
             plt.subplot(int(math.sqrt(items_per_frame)), int(math.sqrt(items_per_frame)), j+1)
+            cam_outputs, br = self.get_single_sequence_grad_cam(seq_idx, br_idx, target)
             self.plot_sequence(br[0].cpu().numpy(), cam_outputs)
             plt.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
             plt.yticks(fontsize='x-small')
 
         fig = plt.gcf()
-        for ax in fig.axes:
-            sm = ax.pcolormesh(np.random.random((0, 0)), vmin=0, vmax=255)
+        sm = fig.axes[0].pcolormesh(np.random.random((0, 0)), vmin=0, vmax=255)
         fig.set_size_inches(20, 10)
         fig.subplots_adjust(right=.8)
         cbar_ax = fig.add_axes((0.85, 0.15, 0.025, 0.7))
@@ -178,6 +179,7 @@ class PatientGradCam(object):
             self.get_median_patient_camout(patient_id)
             self.get_sampled_patient_sequences_camout(patient_id)
             self.get_average_patient_camout(patient_id)
+        self.rand_sample()
 
 
 if __name__ == '__main__':
