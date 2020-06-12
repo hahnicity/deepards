@@ -22,7 +22,7 @@ from deepards.models.autoencoder_network import AutoencoderNetwork
 from deepards.models.cnn_to_nested_layer import CNNToNestedLSTMNetwork, CNNToNestedRNNNetwork, CNNToNestedTransformerNetwork
 from deepards.models.cnn_transformer import CNNTransformerNetwork
 from deepards.models.densenet import densenet18, densenet121, densenet161, densenet169, densenet201
-from deepards.models.lstm_only import DoubleLSTMNetwork, LSTMOnlyNetwork
+from deepards.models.lstm_only import DoubleLSTMNetwork, LSTMOnlyNetwork, LSTMOnlyWithPacking
 from deepards.models.resnet import resnet18, resnet50, resnet101, resnet152
 from deepards.models.senet import senet18, senet154, se_resnet18, se_resnet50, se_resnet101, se_resnet152, se_resnext50_32x4d, se_resnext101_32x4d
 from deepards.models.siamese import SiameseARDSClassifier, SiameseCNNLinearNetwork, SiameseCNNLSTMNetwork, SiameseCNNTransformerNetwork
@@ -852,6 +852,25 @@ class LSTMOnlyModel(BaseTraining, PatientClassifierMixin):
         return LSTMOnlyNetwork(self.args.time_series_hidden_units, self.args.n_sub_batches)
 
 
+class LSTMOnlyWithPackingModel(BaseTraining, PatientClassifierMixin):
+    clip_odd_batches = True
+
+    def __init__(self, args):
+        super(LSTMOnlyWithPackingModel, self).__init__(args)
+
+    def calc_loss(self, outputs, target, inputs):
+        return self.criterion(outputs, target)
+
+    def _process_test_batch_results(self, outputs, target, inputs, fold_num):
+        batch_preds = outputs.argmax(dim=-1).cpu()
+        target = target.argmax(dim=-1).cpu()
+        self.record_testing_results(target, batch_preds, fold_num)
+        return batch_preds.tolist()
+
+    def get_network(self, _):
+        return LSTMOnlyWithPacking(self.args.time_series_hidden_units, self.args.n_sub_batches)
+
+
 class DoubleLSTMModel(BaseTraining, PatientClassifierMixin):
     clip_odd_batches = True
 
@@ -963,6 +982,7 @@ network_map = {
     'cnn_double_linear': CNNDoubleLinearModel,
     'cnn_single_breath_linear': CNNSingleBreathLinearModel,
     'lstm_only': LSTMOnlyModel,
+    'lstm_only_with_packing': LSTMOnlyWithPackingModel,
     'double_lstm': DoubleLSTMModel,
     'cnn_to_nested_rnn': CNNToNestedRNNModel,
     'cnn_to_nested_lstm': CNNToNestedLSTMModel,
