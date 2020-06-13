@@ -109,8 +109,8 @@ class PatientGradCam(object):
             self.visualize_sequence(breath_sequence[0], cam_outputs, patient_id, target, filename)
 
     def plot_sequence(self, br, cam_outputs):
-        img = br.reshape((224, 1))
-        t = np.arange(0, 224, 1)
+        img = br.reshape((len(br), 1))
+        t = np.arange(0, len(br), 1)
         plt.scatter(t, img, c=cam_outputs, vmin = 0, vmax = 255)
         plt.plot(t, img)
 
