@@ -123,13 +123,21 @@ class PatientGradCam(object):
         plt.savefig(filepath)
         plt.close()
 
-    def get_single_sequence_grad_cam(self, seq_idx, batch_idx, target):
-        item = self.data[seq_idx]
-        br = np.expand_dims(item[1][batch_idx], axis=0)
+    def get_camout_for_breath(self, br, target):
+        if len(br.shape) == 1:
+            br = np.expand_dims(np.expand_dims(br, axis=0), axis=0)
+        elif len(br.shape) == 2:
+            br = np.expand_dims(br, axis=0)
+
         br = torch.FloatTensor(br)[[0] * self.batch_size].cuda()
         cam = self.grad_cam.generate_cam(br, target)
         cam_outputs = cv2.resize(cam, (1,224))
         return cam_outputs, br.cpu().numpy()
+
+    def get_single_sequence_grad_cam(self, seq_idx, batch_idx, target):
+        item = self.data[seq_idx]
+        br = np.expand_dims(item[1][batch_idx], axis=0)
+        return self.get_camout_for_breath(br, target)
 
     def _plot_single_random_sequence(self, patho):
         target = {'ards': 1, 'non_ards': 0}[patho]
