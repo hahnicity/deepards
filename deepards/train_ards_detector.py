@@ -1,6 +1,7 @@
 from __future__ import print_function
 import argparse
 from datetime import datetime
+import os
 
 import numpy as np
 import pandas as pd
@@ -57,6 +58,7 @@ base_networks = {
     'vgg11': vgg11_bn,
     'vgg13': vgg13_bn,
 }
+saved_models_dir = os.path.join(os.path.dirname(__file__), 'saved_models')
 
 
 class BaseTraining(object):
@@ -251,9 +253,25 @@ class BaseTraining(object):
 
                 if not self.args.no_test_after_epochs or epoch_num == self.args.epochs - 1:
                     self.run_test_epoch(epoch_num, model, test_dataset, test_loader, fold_num)
+                if self.args.save_model_per_epoch:
+                    model_path = os.path.join(
+                        saved_models_dir,
+                        os.path.basename(
+                            os.path.splitext(self.args.save_model)[0] +
+                            '-epoch{}'.format(epoch_num) +
+                            ('-fold{}.pth'.format(fold_num) if self.n_kfolds > 1 else '.pth')
+                        )
+                    )
+                    torch.save(model, model_path)
 
             if self.args.save_model:
-                model_path = self.args.save_model.replace('.pth', "-fold-{}.pth".format(fold_num)) if self.n_kfolds > 1 else self.args.save_model
+                model_path = os.path.join(
+                    saved_models_dir,
+                    os.path.basename(
+                        os.path.splitext(self.args.save_model)[0] +
+                        ('-fold{}.pth'.format(fold_num) if self.n_kfolds > 1 else '.pth')
+                    )
+                )
                 torch.save(model, model_path)
 
         self.perform_post_modeling_actions()
@@ -993,6 +1011,9 @@ network_map = {
 
 def build_parser():
     parser = argparse.ArgumentParser()
+    true_false_flag = lambda flag, help: parser.add_argument(
+        flag, action='store_true', help=help, default=None
+    )
     parser.add_argument('-co', '--config-override', help='path to yml file that overrides elements of defaults.yml')
     parser.add_argument('-dp', '--data-path', help='Path to ARDS detection dataset')
     parser.add_argument('-en', '--experiment-num', type=int)
@@ -1003,8 +1024,8 @@ def build_parser():
     parser.add_argument('--train-to-pickle')
     parser.add_argument('--test-from-pickle')
     parser.add_argument('--test-to-pickle')
-    parser.add_argument('--cuda', action='store_true', default=None)
-    parser.add_argument('--cuda-no-dp', action='store_true', default=None)
+    true_false_flag('--cuda', '')
+    true_false_flag('--cuda-no-dp', '')
     parser.add_argument('-b', '--batch-size', type=int)
     parser.add_argument('--base-network', choices=base_networks)
     parser.add_argument('-lc', '--loss-calc', choices=['all_breaths', 'last_breath'])
@@ -1013,12 +1034,12 @@ def build_parser():
         "meanings for different dataset types. For breath_by_breath this means the "
         "number of individual breaths in each breath frame. For unpadded_sequences "
         "this means the number of contiguous flow measurements in each frame."))
-    parser.add_argument('--no-print-progress', action='store_true', default=None)
+    true_false_flag('--no-print-progress', '')
     parser.add_argument('--kfolds', type=int)
     parser.add_argument('-rip', '--initial-planes', type=int)
     parser.add_argument('-rfpt', '--resnet-first-pool-type', choices=['max', 'avg'])
-    parser.add_argument('--no-test-after-epochs', action='store_true', default=None)
-    parser.add_argument('--debug', action='store_true', help='debug code and dont train', default=None)
+    true_false_flag('--no-test-after-epochs', '')
+    true_false_flag('--debug', 'debug code and dont train')
     parser.add_argument('--optimizer', choices=['adam', 'sgd'])
     parser.add_argument('-dt', '--dataset-type', choices=[
         'padded_breath_by_breath',
@@ -1037,11 +1058,12 @@ def build_parser():
     parser.add_argument('-lr', '--learning-rate', type=float)
     parser.add_argument('--loader-threads', type=int, help='specify how many threads we should use to load data. Sometimes the threads fail to shutdown correctly though and this can cause memory errors. If this happens a restart works well')
     parser.add_argument('--save-model', help='save the model to a specific file')
+    true_false_flag('--save-model-per-epoch', 'save the model at the end of each epoch')
     parser.add_argument('--load-base-network', help='load base network only from a saved model')
     parser.add_argument('--load-checkpoint', help='load a checkpoint of the model for further training or inference')
-    parser.add_argument('--no-train', action='store_true', help='Dont train model, just evaluate for inference', default=None)
-    parser.add_argument('-rdc','--resnet-double-conv', action='store_true', default=None)
-    parser.add_argument('--bm-to-linear', action='store_true', default=None)
+    true_false_flag('--no-train', 'Dont train model, just evaluate for inference')
+    true_false_flag('--resnet-double-conv', '')
+    true_false_flag('--bm-to-linear', '')
     parser.add_argument('-exp', '--experiment-name')
     parser.add_argument('--downsample-factor', type=float)
     parser.add_argument('-wd', '--weight-decay', type=float)
@@ -1050,17 +1072,17 @@ def build_parser():
     parser.add_argument('--conf-beta', type=float, default=1.0, help='Modifier to the intensity of the confidence penalty')
     parser.add_argument('--time-series-hidden-units', type=int)
     parser.add_argument('--transformer-blocks', type=int)
-    parser.add_argument('--unshuffled', action='store_true', help='dont shuffle data for lstm processing', default=None)
+    true_false_flag('--unshuffled', 'dont shuffle data for lstm processing')
     parser.add_argument('--load-siamese', help='load a siamese network pretrained model')
     parser.add_argument('--fl-gamma', type=float, default=2.0)
     parser.add_argument('--fl-alpha', type=float, default=.9)
-    parser.add_argument('--oversample', action='store_true', default=None)
-    parser.add_argument('--reshuffle-oversample-per-epoch', action='store_true', default=None)
-    parser.add_argument('--freeze-base-network', action='store_true', default=None)
-    parser.add_argument('--stop-on-loss', action='store_true', default=None)
+    true_false_flag('--oversample', '')
+    true_false_flag('--reshuffle-oversample-per-epoch', '')
+    true_false_flag('--freeze-base-network', '')
+    true_false_flag('--stop-on-loss', '')
     parser.add_argument('--stop-thresh', type=float)
     parser.add_argument('--stop-after-epoch', type=int)
-    parser.add_argument('--clip-grad', action='store_true', default=None)
+    true_false_flag('--clip-grad', '')
     parser.add_argument('--clip-val', type=float)
     parser.add_argument('--holdout-set-type', help="""Choose which holdout set to use:
         main: regular train/test holdout split
@@ -1068,12 +1090,12 @@ def build_parser():
         random: a random split of data
         <custom named>: A customly named split that was made.
     """)
-    parser.add_argument('--final-validation', action='store_true', help='Ensure you dont use validation set, but rather testing set. argument that is only used for random holdout sets.', default=None)
-    parser.add_argument('--plot-untiled-disease-evol', action='store_true', help='Plot the our ARDS/non-ARDS predictions by hour', default=None)
-    parser.add_argument('--plot-tiled-disease-evol', action='store_true', help='Plot the our ARDS/non-ARDS predictions by hour but in tiled format grouped by TPs/TNs/FPs/FNs', default=None)
-    parser.add_argument('--plot-dtw-with-disease', action='store_true', help='Plot DTW with ARDS/non-ARDS predictions by hour', default=None)
+    true_false_flag('--final-validation', 'Ensure you dont use validation set, but rather testing set. argument that is only used for random holdout sets.')
+    true_false_flag('--plot-untiled-disease-evol', 'Plot the our ARDS/non-ARDS predictions by hour')
+    true_false_flag('--plot-tiled-disease-evol', 'Plot the our ARDS/non-ARDS predictions by hour but in tiled format grouped by TPs/TNs/FPs/FNs')
+    true_false_flag('--plot-dtw-with-disease', 'Plot DTW with ARDS/non-ARDS predictions by hour')
     parser.add_argument('--plot-pt-dtw-by-minute', help='Plot DTW and predictions by minute for a single patient.')
-    parser.add_argument('--perform-dtw-preprocessing', action='store_true', help='perform DTW preprocessing actions even if we dont want to visualize DTW', default=None)
+    true_false_flag('--perform-dtw-preprocessing', 'perform DTW preprocessing actions even if we dont want to visualize DTW')
     parser.add_argument('--train-pt-frac', type=float, help='Fraction of random training patients to use')
     parser.add_argument('--cuda-device', type=int, help='number of cuda device you want to use')
     parser.add_argument('--transforms', choices=['ie_ww', 'naive_ww', 'ie_ww_i_or_e'], nargs='*', help="""
@@ -1084,10 +1106,10 @@ def build_parser():
         ie_ww_i_or_e: I/E window warping but with choice of using either I or E all the time
     """)
     parser.add_argument('-tp', '--transform-probability', type=float, help='Probability that a modifying transform will be activated for a sub-batch')
-    parser.add_argument('--use-i', help='Argument only used if ie_ww_i_or_e transform is triggered. If you set this arg on CLI then insp lim will only be used. Otherwise exp. lim is used.', action='store_true', default=None)
+    true_false_flag('--use-i', 'Argument only used if ie_ww_i_or_e transform is triggered. If you set this arg on CLI then insp lim will only be used. Otherwise exp. lim is used.')
     parser.add_argument('-r2', '--drop-if-under-r2', type=float)
-    parser.add_argument('--drop-i-lim', action='store_true', default=None)
-    parser.add_argument('--drop-e-lim', action='store_true', default=None)
+    true_false_flag('--drop-i-lim', '')
+    true_false_flag('--drop-e-lim', '')
     parser.add_argument('--truncate-e-lim', type=float, help='Number of seconds of the E lim to keep. Everything afterwards is discarded. Should be done in a number divisible by 2', default=None)
     return parser
 
@@ -1102,6 +1124,9 @@ def main():
 
     if args.fl_alpha > 1 or args.fl_alpha < 0:
         raise Exception('Focal loss alpha must be between 0 and 1')
+
+    if args.save_model_per_epoch and not args.save_model:
+        raise Exception('Must specify a filename to save your model using --save-model')
     cls = network_map[args.network](args)
     cls.train_and_test()
 
