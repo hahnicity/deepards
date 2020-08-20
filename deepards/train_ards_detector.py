@@ -505,8 +505,6 @@ class SiameseMixin(object):
                     break
 
     def run_test_epoch(self, epoch_num, model, test_dataset, test_loader, fold_num):
-        self.preds = []
-        self.pred_idx = []
         with torch.no_grad():
             for batch_idx, (seq, pos_compr, neg_compr) in enumerate(test_loader):
                 #obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)

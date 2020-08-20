@@ -608,4 +608,5 @@ class DeepARDSResults(object):
                 self.pred_to_hour_frame.loc[idx, 'hour'] = hrs[0]
             else:
                 self.pred_to_hour_frame.loc[idx, 'hour'] = hrs
+
         self.pred_to_hour_frame = self.pred_to_hour_frame.merge(y_test, left_index=True, right_index=True)

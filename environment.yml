@@ -12,6 +12,7 @@ dependencies:
   - scipy
   - scikit-learn
   - opencv
+  - pathlib
 channels:
   - pytorch
   - conda-forge
