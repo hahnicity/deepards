@@ -2,6 +2,7 @@ from copy import copy
 from glob import glob
 import math
 import os
+from pathlib import Path
 import re
 
 from imblearn.over_sampling import RandomOverSampler
@@ -17,7 +18,53 @@ from ventmap.raw_utils import extract_raw, read_processed_file
 # We will mainline all the experimental work after publication. Probably rename it as well.
 from algorithms.breath_meta import get_experimental_breath_meta
 from algorithms.constants import EXPERIMENTAL_META_HEADER
+import deepards
 import deepards.correlation
+
+
+class HomogeneityUndersampler(object):
+    def __init__(self, undersample_factor):
+        saved_results_path = Path(__file__).parent.joinpath('dtw_cache/patient_score_map.pkl')
+        self.score_map = pd.read_pickle(str(saved_results_path))
+        if not 0 <= undersample_factor < 1:
+            raise Exception('Must set an undersampling factor in [0, 1)')
+        self.undersample_factor = undersample_factor
+
+    def fit(self, x, gt):
+        """
+        :param x:
+        :param gt: pandas dataframe of ground truth data
+        """
+        if len(x) !=  len(gt):
+            raise Exception('You must pass in a ground truth that matches len of x')
+        if not len(set(['patient', 'y']).intersection(gt.columns)) == 2:
+            raise Exception('Must pass a ground truth df with patient and y columns')
+
+        all_scores = []
+        gt['dtw'] = np.nan
+        # match dtw_scores with actual data
+        for pt in gt.patient.unique():
+            all_scores.extend(self.score_map[pt])
+            scores = [0] + self.score_map[pt]
+            # XXX make sure you arent inputting an oversampled dataset, otherwise
+            # this line will fail.
+            gt.loc[gt.patient == pt, 'dtw'] = scores
+
+        global_median = np.median(all_scores)
+        global_std = np.std(all_scores)
+        gt['usamp_factor'] = 1
+        gt.loc[(gt.dtw <= global_median+global_std) &
+               (gt.dtw >= global_median-global_std), 'usamp_factor'] = self.undersample_factor
+
+    def fit_resample(self, x, gt):
+        self.fit(x, gt)
+        if not isinstance(x, np.ndarray):
+            x = np.array(x)
+        usamps = gt.loc[gt.usamp_factor != 1]
+        gt['sample'] = 1
+        mask = np.random.rand(len(usamps)) >= self.undersample_factor
+        gt.loc[usamps.loc[mask].index, 'sample'] = 0
+        return x[gt['sample'].astype(bool)], gt[gt['sample'] == 1]
 
 
 class ARDSRawDataset(Dataset):
@@ -45,7 +92,8 @@ class ARDSRawDataset(Dataset):
                  drop_if_under_r2=0.0,
                  drop_i_lim=False,
                  drop_e_lim=False,
-                 truncate_e_lim=None):
+                 truncate_e_lim=None,
+                 undersample_factor=None):
         """
         Dataset to generate sequences of data for ARDS Detection
         """
@@ -62,6 +110,7 @@ class ARDSRawDataset(Dataset):
         self.unpadded_downsample_factor = unpadded_downsample_factor
         self.cohort_file = cohort_file
         self.oversample = oversample_minority
+        self.undersample_factor = undersample_factor
         self.whole_patient_super_batch = whole_patient_super_batch
         self.train_patient_fraction = train_patient_fraction
         self.transforms = transforms
@@ -84,6 +133,9 @@ class ARDSRawDataset(Dataset):
 
         if self.oversample and self.whole_patient_super_batch:
             raise Exception('currently oversampling with whole patient super batch is not supported')
+
+        if self.oversample and undersample_factor is not None:
+            raise Exception('Cannot oversample and undersample at the same time')
 
         self.cohort = pd.read_csv(cohort_file)
         self.cohort = self.cohort.rename(columns={'Patient Unique Identifier': 'patient_id'})
@@ -190,13 +242,25 @@ class ARDSRawDataset(Dataset):
             return
 
         if self.total_kfolds:
-            x = self.non_oversampled_kfold_indexes
+            x = self.non_resampled_kfold_indexes
             y = [self.all_sequences[idx][-2].argmax() for idx in x]
             ros = RandomOverSampler()
             x_resampled, y_resampled = ros.fit_resample(np.array(x).reshape(-1, 1), y)
             self.kfold_indexes = x_resampled.ravel()
         else:
             raise NotImplementedError('We havent implemented oversampling for holdout sets yet')
+
+    def set_undersampling_indices(self):
+        if not self.train:
+            return
+
+        if self.undersample_factor is None:
+            return
+
+        undersampler = HomogeneityUndersampler(self.undersample_factor)
+        x = self.non_resampled_kfold_indexes
+        gt = self.get_ground_truth_df()
+        self.kfold_indexes, _ = undersampler.fit_resample(x, gt)
 
     def set_indices_by_patient(self):
         if self.train_patient_fraction == 1.0:
@@ -266,9 +330,9 @@ class ARDSRawDataset(Dataset):
         return test_dataset
 
     @classmethod
-    def from_pickle(cls, data_path, oversample_minority, train_patient_fraction, transforms):
+    def from_pickle(cls, data_path, oversample_minority, train_patient_fraction, transforms, undersample_factor):
         dataset = pd.read_pickle(data_path)
-        if not isinstance(dataset, ARDSRawDataset):
+        if not isinstance(dataset, ARDSRawDataset) and not isinstance(dataset, deepards.dataset.ARDSRawDataset):
             raise ValueError('The pickle file you have specified is out-of-date. Please re-process your dataset and save the new pickled dataset.')
         dataset.oversample = oversample_minority
         dataset.train_patient_fraction = train_patient_fraction
@@ -278,14 +342,19 @@ class ARDSRawDataset(Dataset):
         except AttributeError:
             dataset.derive_scaling_factors()
         dataset.transforms = transforms
+        if dataset.oversample and undersample_factor is not None:
+            raise Exception('Cannot oversample and undersample at the same time')
+        dataset.undersample_factor = undersample_factor
         return dataset
 
     def set_kfold_indexes_for_fold(self, kfold_num):
         self.kfold_num = kfold_num
         self.kfold_indexes = self.get_kfold_indexes_for_fold(kfold_num)
         self.set_indices_by_patient()
-        self.non_oversampled_kfold_indexes = copy(list(self.kfold_indexes))
+        self.non_resampled_kfold_indexes = copy(list(self.kfold_indexes))
+        # XXX set undersampling
         self.set_oversampling_indices()
+        self.set_undersampling_indices()
 
     def get_kfold_indexes_for_fold(self, kfold_num):
         ground_truth = self._get_all_sequence_ground_truth()

@@ -33,9 +33,9 @@ class LSTMDTW(object):
         self.epoch2, self.fold2 = map(int, match2.groups())
 
     def infer(self):
-        self.test_dataset = ARDSRawDataset.make_test_dataset_if_kfold(self.dataset)
-        self.test_dataset.set_kfold_indexes_for_fold(self.fold1)
-        test_loader = DataLoader(self.test_dataset, 16, True, pin_memory=True)
+        test_dataset = ARDSRawDataset.make_test_dataset_if_kfold(self.dataset)
+        test_dataset.set_kfold_indexes_for_fold(self.fold1)
+        test_loader = DataLoader(test_dataset, 16, True, pin_memory=True)
 
         config_override = Path(__file__).parent.joinpath(
             'experiment_files/unpadded_20_len_sub_batch_cnn_lsm.yml'
@@ -44,14 +44,13 @@ class LSTMDTW(object):
         args.config_override = str(config_override)
         args = Configuration(args)
         cls = CNNLSTMModel(args)
-        cls.run_test_epoch(self.epoch1, self.model1, self.test_dataset, test_loader, self.fold1)
+        cls.run_test_epoch(self.epoch1, self.model1, test_dataset, test_loader, self.fold1)
 
         import IPython; IPython.embed()
         test_dataset.set_kfold_indexes_for_fold(self.fold2)
-        test_loader = DataLoader(self.test_dataset, 16, True, pin_memory=True)
-        cls.run_test_epoch(self.epoch2, self.model2, self.test_dataset, test_loader, self.fold2)
+        test_loader = DataLoader(test_dataset, 16, True, pin_memory=True)
+        cls.run_test_epoch(self.epoch2, self.model2, test_dataset, test_loader, self.fold2)
         import IPython; IPython.embed()
-        pass
 
 
 def main():

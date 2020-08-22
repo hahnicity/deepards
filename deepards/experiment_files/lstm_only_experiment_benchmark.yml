@@ -10,3 +10,5 @@ batch_size: 16
 network: lstm_only
 train_from_pickle: /fastdata/deepards/unpadded_centered_sequences-nb20-kfold.pkl
 n_sub_batches: 20
+save_model: unpadded_centered-nb20-kfold_lstm_only.pth
+save_model_per_epoch: true
