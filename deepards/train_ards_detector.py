@@ -106,6 +106,7 @@ class BaseTraining(object):
         print('Run start time: {}'.format(self.start_time))
 
     def run_train_epoch(self, model, train_loader, optimizer, epoch_num, fold_num):
+        print('train instances: {}'.format(len(train_loader)))
         with torch.enable_grad():
             print("\nrun epoch {}\n".format(epoch_num))
             for idx, (obs_idx, seq, metadata, target) in enumerate(train_loader):
@@ -183,15 +184,19 @@ class BaseTraining(object):
                 drop_i_lim=self.args.drop_i_lim,
                 drop_e_lim=self.args.drop_e_lim,
                 truncate_e_lim=self.args.truncate_e_lim,
+                undersample_factor=self.args.undersample_factor,
+                undersample_std_factor=self.args.undersample_std_factor,
             )
         else:
-            train_dataset = ARDSRawDataset.from_pickle(self.args.train_from_pickle, self.args.oversample, self.args.train_pt_frac, transforms)
+            train_dataset = ARDSRawDataset.from_pickle(
+                self.args.train_from_pickle, self.args.oversample, self.args.train_pt_frac, transforms, self.args.undersample_factor, self.args.undersample_std_factor
+            )
 
         self.n_sub_batches = train_dataset.n_sub_batches
         if not self.args.test_from_pickle and (self.args.kfolds is not None):
             test_dataset = ARDSRawDataset.make_test_dataset_if_kfold(train_dataset)
         elif self.args.test_from_pickle:
-            test_dataset = ARDSRawDataset.from_pickle(self.args.test_from_pickle, False, 1.0, None)
+            test_dataset = ARDSRawDataset.from_pickle(self.args.test_from_pickle, False, 1.0, None, -1)
         else:  # holdout, no pickle, no kfold
             # there is a really bizarre bug where my default arg is being overwritten by
             # the state of the train_dataset obj. I checked pointer references and there was
@@ -214,6 +219,7 @@ class BaseTraining(object):
                 drop_i_lim=self.args.drop_i_lim,
                 drop_e_lim=self.args.drop_e_lim,
                 truncate_e_lim=self.args.truncate_e_lim,
+                undersample_factor=-1,
             )
 
         return train_dataset, test_dataset
@@ -478,6 +484,7 @@ class SiameseMixin(object):
         return train_dataset, test_dataset
 
     def run_train_epoch(self, model, train_loader, optimizer, epoch_num, fold_num):
+        print('train instances: {}'.format(len(train_loader)))
         with torch.enable_grad():
             print("\nrun epoch {}\n".format(epoch_num))
             for batch_idx, (seq, pos_compr, neg_compr) in enumerate(train_loader):
@@ -582,9 +589,11 @@ class NestedMixin(object):
                 drop_i_lim=self.args.drop_i_lim,
                 drop_e_lim=self.args.drop_e_lim,
                 truncate_e_lim=self.args.truncate_e_lim,
+                undersample_factor=self.args.undersample_factor,
+                undersample_std_factor=self.args.undersample_std_factor,
             )
         else:
-            train_dataset = ARDSRawDataset.from_pickle(self.args.train_from_pickle, self.args.oversample, self.args.train_pt_frac)
+            train_dataset = ARDSRawDataset.from_pickle(self.args.train_from_pickle, self.args.oversample, self.args.train_pt_frac, self.args.undersample_factor, self.args.undersample_std_factor)
 
         self.n_sub_batches = train_dataset.n_sub_batches
         if not self.args.test_from_pickle and self.args.kfolds is not None:
@@ -608,6 +617,7 @@ class NestedMixin(object):
                 drop_i_lim=self.args.drop_i_lim,
                 drop_e_lim=self.args.drop_e_lim,
                 truncate_e_lim=self.args.truncate_e_lim,
+                undersample_factor=-1,
             )
 
         return train_dataset, test_dataset
@@ -692,6 +702,7 @@ class CNNLSTMModel(PerBreathClassifierMixin, BaseTraining, PatientClassifierMixi
 
     def run_train_epoch(self, model, train_loader, optimizer, epoch_num, fold_num):
         print("\nrun epoch {}\n".format(epoch_num))
+        print('train instances: {}'.format(len(train_loader)))
         gt_df = train_loader.dataset.get_ground_truth_df()
         last_pt = None
         with torch.enable_grad():
@@ -1075,6 +1086,8 @@ def build_parser():
     parser.add_argument('--fl-gamma', type=float, default=2.0)
     parser.add_argument('--fl-alpha', type=float, default=.9)
     true_false_flag('--oversample', '')
+    parser.add_argument('-usf', '--undersample-factor', type=float)
+    parser.add_argument('-usdf', '--undersample-std-factor', type=float)
     true_false_flag('--reshuffle-oversample-per-epoch', '')
     true_false_flag('--freeze-base-network', '')
     true_false_flag('--stop-on-loss', '')

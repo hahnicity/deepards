@@ -22,7 +22,7 @@ import deepards
 import deepards.correlation
 
 
-class HomogeneityUndersampler(object):
+class GenericHomogeneityUndersampler(object):
     def __init__(self, undersample_factor):
         saved_results_path = Path(__file__).parent.joinpath('dtw_cache/patient_score_map.pkl')
         self.score_map = pd.read_pickle(str(saved_results_path))
@@ -46,8 +46,6 @@ class HomogeneityUndersampler(object):
         for pt in gt.patient.unique():
             all_scores.extend(self.score_map[pt])
             scores = [0] + self.score_map[pt]
-            # XXX make sure you arent inputting an oversampled dataset, otherwise
-            # this line will fail.
             gt.loc[gt.patient == pt, 'dtw'] = scores
 
         global_median = np.median(all_scores)
@@ -65,6 +63,38 @@ class HomogeneityUndersampler(object):
         mask = np.random.rand(len(usamps)) >= self.undersample_factor
         gt.loc[usamps.loc[mask].index, 'sample'] = 0
         return x[gt['sample'].astype(bool)], gt[gt['sample'] == 1]
+
+
+class PatientLevelHomogeneityUndersampler(GenericHomogeneityUndersampler):
+    def __init__(self, undersample_factor, std_factor):
+        super(PatientLevelHomogeneityUndersampler, self).__init__(undersample_factor)
+        self.std_factor = std_factor
+
+    def fit(self, x, gt):
+        """
+        :param x:
+        :param gt: pandas dataframe of ground truth data
+        """
+        if len(x) !=  len(gt):
+            raise Exception('You must pass in a ground truth that matches len of x')
+        if not len(set(['patient', 'y']).intersection(gt.columns)) == 2:
+            raise Exception('Must pass a ground truth df with patient and y columns')
+
+        all_scores = []
+        gt['dtw'] = np.nan
+        # match dtw_scores with actual data
+        for pt in gt.patient.unique():
+            all_scores.extend(self.score_map[pt])
+            scores = [0] + self.score_map[pt]
+            mask = gt.patient == pt
+            gt.loc[mask, 'dtw'] = scores
+            gt.loc[mask, 'pt_dtw_median'] = np.median(scores)
+            gt.loc[mask, 'pt_dtw_std'] = np.std(scores)
+
+        global_std = np.std(all_scores)
+        gt['usamp_factor'] = 1
+        gt.loc[(gt.dtw <= gt.pt_dtw_median+(gt.pt_dtw_std*self.std_factor)) &
+               (gt.dtw >= gt.pt_dtw_median-(gt.pt_dtw_std*self.std_factor)), 'usamp_factor'] = self.undersample_factor
 
 
 class ARDSRawDataset(Dataset):
@@ -93,7 +123,8 @@ class ARDSRawDataset(Dataset):
                  drop_i_lim=False,
                  drop_e_lim=False,
                  truncate_e_lim=None,
-                 undersample_factor=None):
+                 undersample_factor=-1,
+                 undersample_std_factor=0.2):
         """
         Dataset to generate sequences of data for ARDS Detection
         """
@@ -111,6 +142,7 @@ class ARDSRawDataset(Dataset):
         self.cohort_file = cohort_file
         self.oversample = oversample_minority
         self.undersample_factor = undersample_factor
+        self.undersample_std_factor = undersample_std_factor
         self.whole_patient_super_batch = whole_patient_super_batch
         self.train_patient_fraction = train_patient_fraction
         self.transforms = transforms
@@ -134,7 +166,7 @@ class ARDSRawDataset(Dataset):
         if self.oversample and self.whole_patient_super_batch:
             raise Exception('currently oversampling with whole patient super batch is not supported')
 
-        if self.oversample and undersample_factor is not None:
+        if self.oversample and undersample_factor != -1:
             raise Exception('Cannot oversample and undersample at the same time')
 
         self.cohort = pd.read_csv(cohort_file)
@@ -254,10 +286,10 @@ class ARDSRawDataset(Dataset):
         if not self.train:
             return
 
-        if self.undersample_factor is None:
+        if self.undersample_factor == -1:
             return
 
-        undersampler = HomogeneityUndersampler(self.undersample_factor)
+        undersampler = PatientLevelHomogeneityUndersampler(self.undersample_factor, self.undersample_std_factor)
         x = self.non_resampled_kfold_indexes
         gt = self.get_ground_truth_df()
         self.kfold_indexes, _ = undersampler.fit_resample(x, gt)
@@ -326,11 +358,12 @@ class ARDSRawDataset(Dataset):
             transforms=None,
             oversample_minority=False,
             drop_if_under_r2=0.0,
+            undersample_factor=-1,
         )
         return test_dataset
 
     @classmethod
-    def from_pickle(cls, data_path, oversample_minority, train_patient_fraction, transforms, undersample_factor):
+    def from_pickle(cls, data_path, oversample_minority, train_patient_fraction, transforms, undersample_factor, undersample_std_factor):
         dataset = pd.read_pickle(data_path)
         if not isinstance(dataset, ARDSRawDataset) and not isinstance(dataset, deepards.dataset.ARDSRawDataset):
             raise ValueError('The pickle file you have specified is out-of-date. Please re-process your dataset and save the new pickled dataset.')
@@ -342,9 +375,10 @@ class ARDSRawDataset(Dataset):
         except AttributeError:
             dataset.derive_scaling_factors()
         dataset.transforms = transforms
-        if dataset.oversample and undersample_factor is not None:
+        if dataset.oversample and undersample_factor != -1:
             raise Exception('Cannot oversample and undersample at the same time')
         dataset.undersample_factor = undersample_factor
+        dataset.undersample_std_factor = undersample_std_factor
         return dataset
 
     def set_kfold_indexes_for_fold(self, kfold_num):

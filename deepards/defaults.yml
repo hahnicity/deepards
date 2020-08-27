@@ -48,3 +48,5 @@ train_pt_frac: 1.0
 downsample_factor: 4.0
 cuda_device: 0
 drop_if_under_r2: 0
+undersample_factor: -1
+undersample_std_factor: 0.2
