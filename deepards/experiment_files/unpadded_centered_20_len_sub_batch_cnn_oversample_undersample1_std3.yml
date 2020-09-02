@@ -13,5 +13,5 @@ train_from_pickle: /fastdata/deepards/unpadded_centered_sequences-nb20-kfold.pkl
 n_sub_batches: 20
 data_path: /fastdata/ardsdetection
 undersample_factor: .1
-undersample_std_factor: 0.2
+undersample_std_factor: 0.3
 oversample: true

@@ -166,9 +166,6 @@ class ARDSRawDataset(Dataset):
         if self.oversample and self.whole_patient_super_batch:
             raise Exception('currently oversampling with whole patient super batch is not supported')
 
-        if self.oversample and undersample_factor != -1:
-            raise Exception('Cannot oversample and undersample at the same time')
-
         self.cohort = pd.read_csv(cohort_file)
         self.cohort = self.cohort.rename(columns={'Patient Unique Identifier': 'patient_id'})
         self.cohort['patient_id'] = self.cohort['patient_id'].astype(str)
@@ -274,7 +271,7 @@ class ARDSRawDataset(Dataset):
             return
 
         if self.total_kfolds:
-            x = self.non_resampled_kfold_indexes
+            x = copy(self.kfold_indexes)
             y = [self.all_sequences[idx][-2].argmax() for idx in x]
             ros = RandomOverSampler()
             x_resampled, y_resampled = ros.fit_resample(np.array(x).reshape(-1, 1), y)
@@ -290,19 +287,26 @@ class ARDSRawDataset(Dataset):
             return
 
         undersampler = PatientLevelHomogeneityUndersampler(self.undersample_factor, self.undersample_std_factor)
-        x = self.non_resampled_kfold_indexes
+        x = copy(self.kfold_indexes)
         gt = self.get_ground_truth_df()
         self.kfold_indexes, _ = undersampler.fit_resample(x, gt)
 
-    def set_indices_by_patient(self):
+    def handle_fractional_patient_dataset(self):
+        """
+        If we are using a partial training dataset, then this function selects
+        data that we want to use.
+        """
         if self.train_patient_fraction == 1.0:
             return
 
         if self.total_kfolds:
+            # get unique patients in kfold
             uniq_patients = set()
             for i in self.kfold_indexes:
                 uniq_patients.add(self.all_sequences[i][0])
+            # get data on patients from cohort file
             patient_data = self.cohort[self.cohort.patient_id.isin(list(uniq_patients)) & (self.cohort.experiment_group == self.experiment_num)]
+            # Get ARDS+OTHER patients
             ards_patients = patient_data[patient_data.Pathophysiology == 'ARDS'].patient_id
             other_patients = patient_data[patient_data.Pathophysiology != 'ARDS'].patient_id
             # divide by 2 because then we have equal numbers patients in each classification
@@ -375,8 +379,6 @@ class ARDSRawDataset(Dataset):
         except AttributeError:
             dataset.derive_scaling_factors()
         dataset.transforms = transforms
-        if dataset.oversample and undersample_factor != -1:
-            raise Exception('Cannot oversample and undersample at the same time')
         dataset.undersample_factor = undersample_factor
         dataset.undersample_std_factor = undersample_std_factor
         return dataset
@@ -384,11 +386,11 @@ class ARDSRawDataset(Dataset):
     def set_kfold_indexes_for_fold(self, kfold_num):
         self.kfold_num = kfold_num
         self.kfold_indexes = self.get_kfold_indexes_for_fold(kfold_num)
-        self.set_indices_by_patient()
-        self.non_resampled_kfold_indexes = copy(list(self.kfold_indexes))
-        # XXX set undersampling
-        self.set_oversampling_indices()
+        self.handle_fractional_patient_dataset()
+        # undersample before oversampling because undersampling was built without
+        # assumption that we would ever oversample
         self.set_undersampling_indices()
+        self.set_oversampling_indices()
 
     def get_kfold_indexes_for_fold(self, kfold_num):
         ground_truth = self._get_all_sequence_ground_truth()

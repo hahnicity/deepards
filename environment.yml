@@ -1,4 +1,4 @@
-name: deepards
+name: deepardsdev
 dependencies:
   - python=2.7
   - cython
