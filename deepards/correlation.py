@@ -7,6 +7,7 @@ tell us anything about the data involved. From what I could see, cross-correlati
 didn't tell us anything.
 """
 import argparse
+from copy import copy
 import os
 
 import matplotlib.pyplot as plt
@@ -118,7 +119,21 @@ def run_entire_model(test_dataset_path, model_path, kfold_num):
     return model_data
 
 
-def plot_misclassified_data(model_data):
+def plot_misclassified_data(model_data, patient):
+    if patient is not None:
+        patient_idxs = [i for i, pt in enumerate(model_data['patient']) if pt==patient]
+        keys = model_data.keys()
+        for k in keys:
+            idxs = copy(patient_idxs)
+            new_dat = []
+            for i, val in enumerate(model_data[k]):
+                if len(idxs) == 0:
+                    break
+                if i == idxs[0]:
+                    new_dat.append(val)
+                    idxs.pop(0)
+            model_data[k] = new_dat
+
     auto = AutoCorrelation()
     misclassified = auto.autocorrelate_by_pred(model_data)
     sns.distplot(misclassified[0], kde=True, bins=100, label='other misclassified', hist_kws={'alpha': .5}, hist=False)
@@ -146,6 +161,7 @@ def main():
     parser.add_argument('-sm', '--save-model-data')
     parser.add_argument('-lm', '--load-model-data')
     parser.add_argument('-k', '--kfold-num', type=int, help='kfold number if you are using kfold dataset. Fold nums should start at 0. so 0,1,2,3,4...etc.')
+    parser.add_argument('--only-patient')
     args = parser.parse_args()
 
     if not args.load_model_data:
@@ -156,7 +172,7 @@ def main():
     if args.save_model_data:
         pd.to_pickle(model_data, args.save_model_data)
 
-    plot_misclassified_data(model_data)
+    plot_misclassified_data(model_data, args.only_patient)
 
 
 if __name__ == "__main__":

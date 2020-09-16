@@ -237,6 +237,8 @@ class DeepARDSResults(object):
         self.hyperparams['start_time'] = start_time
         self.uuid_name = uuid.uuid4()
         self.experiment_save_filename = "{}_{}.pth".format(experiment_name, self.uuid_name) if experiment_name else str(self.uuid_name) + ".pth"
+        self.results_save_filename = "{}_results_{}.pkl".format(experiment_name, self.uuid_name) if experiment_name else str(self.uuid_name) + ".pth"
+        self.all_pred_to_hour = pd.DataFrame([], columns=['pred', 'hour', 'patient', 'y', 'epoch', 'fold'])
 
     def aggregate_classification_results(self):
         """
@@ -591,8 +593,9 @@ class DeepARDSResults(object):
     def save_all(self):
         self.reporting.save_all()
         torch.save(self.hyperparams, os.path.join(self.results_dir, self.experiment_save_filename))
+        pd.to_pickle(self, os.path.join(self.results_dir, self.results_save_filename))
 
-    def save_predictions_by_hour(self, y_test, predictions, pred_hour):
+    def save_predictions_by_hour(self, y_test, predictions, pred_hour, epoch_num, fold_num):
         """
         Save predictions that we make by the hour (after study inclusion) that they were made.
 
@@ -610,3 +613,7 @@ class DeepARDSResults(object):
                 self.pred_to_hour_frame.loc[idx, 'hour'] = hrs
 
         self.pred_to_hour_frame = self.pred_to_hour_frame.merge(y_test, left_index=True, right_index=True)
+        tmp = self.pred_to_hour_frame.copy()
+        tmp['epoch'] = epoch_num
+        tmp['fold'] = fold_num
+        self.all_pred_to_hour = self.all_pred_to_hour.append(tmp, ignore_index=True)

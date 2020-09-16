@@ -397,7 +397,7 @@ class PatientClassifierMixin(object):
         self.preds = self.preds.sort_index()
         y_test = test_dataset.get_ground_truth_df()
         self.results.perform_patient_predictions(y_test, self.preds, fold_num, epoch_num)
-        self.results.save_predictions_by_hour(y_test, self.preds, test_dataset.seq_hours)
+        self.results.save_predictions_by_hour(y_test, self.preds, test_dataset.seq_hours, epoch_num, fold_num)
 
     def set_loss_criterion(self):
         if self.args.loss_func == 'vacillating':
@@ -635,7 +635,7 @@ class NestedMixin(object):
         self.preds = self.preds.sort_index()
         y_test = test_dataset.get_ground_truth_df()
         self.results.perform_patient_predictions(y_test, self.preds, fold_num, epoch_num)
-        self.save_predictions_by_hour(y_test, self.preds, test_dataset.seq_hours)
+        self.save_predictions_by_hour(y_test, self.preds, test_dataset.seq_hours, epoch_num, fold_num)
 
     def transform_obs_idx(self, obs_idx, outputs):
         # XXX add last_breath / all_breaths split
@@ -1062,7 +1062,8 @@ def build_parser():
         'padded_breath_by_breath_with_limited_bm_target',
         'padded_breath_by_breath_with_experimental_bm_target',
         'padded_breath_by_breath_with_flow_time_features',
-        'unpadded_downsampled_autoencoder_sequences'
+        'unpadded_downsampled_autoencoder_sequences',
+        'unpadded_centered_with_bm',
     ])
     parser.add_argument('-lr', '--learning-rate', type=float)
     parser.add_argument('--loader-threads', type=int, help='specify how many threads we should use to load data. Sometimes the threads fail to shutdown correctly though and this can cause memory errors. If this happens a restart works well')

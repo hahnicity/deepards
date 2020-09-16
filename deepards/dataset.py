@@ -48,7 +48,7 @@ class GenericHomogeneityUndersampler(object):
             scores = [0] + self.score_map[pt]
             gt.loc[gt.patient == pt, 'dtw'] = scores
 
-        global_median = np.median(all_scores)
+        global_median = np.nanmedian(all_scores)
         global_std = np.std(all_scores)
         gt['usamp_factor'] = 1
         gt.loc[(gt.dtw <= global_median+global_std) &
@@ -250,6 +250,8 @@ class ARDSRawDataset(Dataset):
             self._get_breath_by_breath_with_flow_time_features(self._pad_breath, flow_time_features)
         elif dataset_type == 'padded_breath_by_breath_with_experimental_bm_target':
             self._get_breath_by_breath_with_breath_meta_target(self._pad_breath, ['iTime', 'eTime', 'inst_RR', 'mean_flow_from_pef', 'I:E ratio', 'tve:tvi ratio', 'dyn_compliance'])
+        elif dataset_type == 'unpadded_centered_with_bm':
+            self.get_unpadded_sequences_dataset_with_bm_data(self._unpadded_centered_processing, self._pathophysiology_target)
         else:
             raise Exception('Unknown dataset type: {}'.format(dataset_type))
         self.finalize_dataset_create(to_pickle, kfold_num)
@@ -687,6 +689,107 @@ class ARDSRawDataset(Dataset):
                 if len(batch_arr) > 0 and breath_arr == []:
                     batch_seq_hours.append(seq_hour)
 
+    def get_unpadded_sequences_dataset_with_bm_data(self, processing_func, target_func):
+        if self.whole_patient_super_batch:
+            raise NotImplementedError('We havent implemented super batch with this data type')
+        last_patient = None
+        indices = [EXPERIMENTAL_META_HEADER.index(feature) for feature in [
+            'mean_flow_from_pef',
+            'inst_RR',
+            'slope_minF_to_zero',
+            'pef_+0.16_to_zero',
+            'iTime',
+            'eTime',
+            'I:E ratio',
+            'dyn_compliance',
+            'tve:tvi ratio',
+        ]]
+        for fidx, filename in enumerate(self.raw_files):
+            gen = read_processed_file(filename, filename.replace('.raw.npy', '.processed.npy'))
+            patient_id = self._get_patient_id_from_file(filename)
+
+            if patient_id != last_patient:
+                batch_arr = []
+                breath_arr = []
+                seq_vent_bns = []
+                breath_meta = []
+                batch_seq_hours = []
+
+            matching_meta = os.path.join(self.meta_dir, patient_id, 'breath_meta_' + os.path.basename(filename).replace('.raw.npy', '.csv'))
+            has_preprocessed_meta = False
+            if matching_meta in self.meta_files:
+                try:
+                    processed_meta = pd.read_csv(matching_meta, header=None).values
+                    has_preprocessed_meta = True
+                except pd.errors.EmptyDataError:
+                    pass
+
+            last_patient = patient_id
+            target = target_func(patient_id)
+            start_time = self._get_patient_start_time(patient_id)
+
+            for bidx, breath in enumerate(gen):
+                # cutoff breaths if they have too few points. It is unlikely ML
+                # will ever learn anything useful from them. 21 is chosen because the mean
+                # number of unpadded obs we have in our train set is 138.78 and the std
+                # is 38.23. So 21 is < mu - 3*std and is divisible with 7.
+                if len(breath['flow']) < 21:
+                    continue
+
+                breath_time = self.get_abs_bs_dt(breath)
+                if breath_time < start_time:
+                    continue
+                elif breath_time > start_time + pd.Timedelta(hours=24):
+                    break
+
+                if has_preprocessed_meta:
+                    try:
+                        meta = processed_meta[bidx]
+                    except IndexError:
+                        meta = np.array(get_experimental_breath_meta(breath))
+                    # sanity check
+                    if int(meta[0]) != breath['rel_bn'] or len(EXPERIMENTAL_META_HEADER) != len(meta):
+                        meta = np.array(get_experimental_breath_meta(breath))
+                else:
+                    meta = np.array(get_experimental_breath_meta(breath))
+                    # XXX save information to file so it can be retrieved
+
+                breath_meta.append(meta[indices])
+                seq_hour = (breath_time - start_time).total_seconds() / 60 / 60
+                seq_vent_bns.append(breath['vent_bn'])
+                flow = self.truncate_lim(breath['flow'])
+                batch_arr, breath_arr, batch_seq_hours = processing_func(
+                    flow, breath_arr, batch_arr, batch_seq_hours, seq_hour
+                )
+
+                if len(batch_arr) == self.n_sub_batches:
+                    raw_data = np.array(batch_arr)
+                    breath_meta = np.array(breath_meta).astype(float)
+                    if self._should_we_drop_frame(raw_data.ravel(), seq_vent_bns, patient_id):
+                        # drop breath arr to be safe
+                        breath_arr = []
+                        batch_arr = []
+                        seq_vent_bns = []
+                        batch_seq_hours = []
+                        breath_meta = []
+                        continue
+                    breath_window = raw_data.reshape((self.n_sub_batches, 1, self.seq_len))
+                    self.all_sequences.append([
+                        patient_id,
+                        breath_window,
+                        np.mean(breath_meta, axis=0),
+                        np.nanmedian(breath_meta, axis=0),
+                        target,
+                        batch_seq_hours,
+                    ])
+                    batch_arr = []
+                    seq_vent_bns = []
+                    batch_seq_hours = []
+                    breath_meta = []
+
+                if len(batch_arr) > 0 and breath_arr == []:
+                    batch_seq_hours.append(seq_hour)
+
     def truncate_lim(self, flow):
         if self.truncate_e_lim or self.drop_i_lim or self.drop_e_lim:
             dt = 0.02
@@ -847,6 +950,10 @@ class ARDSRawDataset(Dataset):
             meta = np.nan
         elif len(seq) == 5:
             _, data, meta, target, seq_hours = seq
+        # uses mean and median breath meta
+        elif len(seq) == 6:
+            _, data, m, mm, target, seq_hours = seq
+            meta = np.array([m, mm])
 
         # XXX pack_padded_sequence
         self.seq_hours[index] = seq_hours
@@ -894,8 +1001,11 @@ class ARDSRawDataset(Dataset):
                 patient, _, target, hrs = seq
             elif len(seq) == 5:
                 patient, _, __, target, hrs = seq
-            rows.append([patient, np.argmax(target, axis=0)])
-        return pd.DataFrame(rows, columns=['patient', 'y'])
+            # uses mean and median breath meta
+            elif len(seq) == 6:
+                patient, _, __, ___, target, hrs = seq
+            rows.append([patient, np.argmax(target, axis=0), hrs[0]])
+        return pd.DataFrame(rows, columns=['patient', 'y', 'hour'])
 
     def _get_kfold_ground_truth(self):
         rows = []
@@ -905,6 +1015,9 @@ class ARDSRawDataset(Dataset):
                 patient, _, target, hrs = seq
             elif len(seq) == 5:
                 patient, _, __, target, hrs = seq
+            # uses mean and median breath meta
+            elif len(seq) == 6:
+                patient, _, __, ___, target, hrs = seq
             rows.append([patient, np.argmax(target, axis=0)])
         return pd.DataFrame(rows, columns=['patient', 'y'], index=self.kfold_indexes)
 
