@@ -32,6 +32,7 @@ class PatientGradCam(object):
         self.gt = self.data.get_ground_truth_df()
         self.ards, self.non_ards = self.get_ardsids_otherids()
         self.batch_size = self.data.all_sequences[0][1].shape[0]
+        self.breath_len = 224
 
     def get_ardsids_otherids(self):
         ards = self.gt[self.gt.y == 1].patient.unique()
@@ -47,7 +48,11 @@ class PatientGradCam(object):
         do_makedirs(dirname)
 
         # XXX in future make this configurable
-        med_breath = np.empty((0, self.batch_size, 1, 224))
+        #
+        # Also, why do cam outputs have to be 7 long?????? XXX
+        # maybe trying to strike a balance with precision of results. Too many outputs
+        # and it becomes too noisy, too few and its not granular enough.
+        med_breath = np.empty((0, self.batch_size, 1, self.breath_len))
         cam_outputs = np.empty((0,7))
         target_class = None
         for i in patient_idxs:
@@ -58,7 +63,7 @@ class PatientGradCam(object):
         med_breath = np.expand_dims(med_breath, axis=0)
         br = torch.FloatTensor(med_breath)[[0] * self.batch_size].cuda()
         cam = self.grad_cam.generate_cam(br, target)
-        cam_outputs = cv2.resize(cam, (1,224))
+        cam_outputs = cv2.resize(cam, (1, self.breath_len))
         filename = os.path.join(dirname, patient_id + '.png')
         self.visualize_sequence(med_breath[0], cam_outputs, patient_id, target, filename)
 
@@ -70,7 +75,7 @@ class PatientGradCam(object):
         dirname = os.path.join('gradcam_results', 'patient_averages', mapping[target])
         do_makedirs(dirname)
 
-    	avg_breath = np.empty((0,224))
+    	avg_breath = np.empty((0, self.breath_len))
     	cam_outputs = np.empty((0,7))
 
         for i in patient_idxs:
@@ -84,7 +89,7 @@ class PatientGradCam(object):
             cam = np.expand_dims(cam, axis = 0)
             cam_outputs = np.append(cam_outputs, cam, axis = 0)
         cam_outputs = np.mean(cam_outputs, axis = 0)
-        cam_outputs = cv2.resize(cam_outputs,(1,224))
+        cam_outputs = cv2.resize(cam_outputs,(1, self.breath_len))
         avg_breath = np.mean(avg_breath, axis = 0)
         filename = os.path.join(dirname, patient_id + '.png')
         self.visualize_sequence(avg_breath, cam_outputs, patient_id, target, filename)
@@ -102,15 +107,16 @@ class PatientGradCam(object):
         dirname = os.path.join('gradcam_results', 'sampled_sequences', mapping[target], patient_id)
         do_makedirs(dirname)
 
-        for i in patient_idxs:
+        for abs_idx in patient_idxs:
             rand_seq = random.choice(range(self.batch_size))
-            cam_outputs, br = self.get_single_sequence_grad_cam(i, rand_seq, target)
-            filename = os.path.join(dirname, 'seq-{}-{}.png'.format(i, rand_seq))
-            self.visualize_sequence(breath_sequence[0], cam_outputs, patient_id, target, filename)
+            rel_idx = list(self.data.kfold_indexes).index(abs_idx)
+            cam_outputs, br = self.get_single_sequence_grad_cam(rel_idx, rand_seq, target)
+            filename = os.path.join(dirname, 'seq-{}-{}.png'.format(abs_idx, rand_seq))
+            self.visualize_sequence(br[0], cam_outputs, patient_id, target, filename)
 
     def plot_sequence(self, br, cam_outputs):
-        img = br.reshape((len(br), 1))
-        t = np.arange(0, len(br), 1)
+        img = br.reshape((self.breath_len, 1))
+        t = np.arange(0, self.breath_len, 1)
         plt.scatter(t, img, c=cam_outputs, vmin = 0, vmax = 255)
         plt.plot(t, img)
 
@@ -129,27 +135,35 @@ class PatientGradCam(object):
         elif len(br.shape) == 2:
             br = np.expand_dims(br, axis=0)
 
+        # make sure the breath is duplicated <batch_size> times
+        #
+        # does the duplication mess things up? thats my main worry here. I think
+        # another worry of mine is that grad cam outputs dont translate one to one
+        # with an actual input. because there are multiple inputs that are being run
+        # and then classified.
         br = torch.FloatTensor(br)[[0] * self.batch_size].cuda()
         cam = self.grad_cam.generate_cam(br, target)
-        cam_outputs = cv2.resize(cam, (1,224))
+        cam_outputs = cv2.resize(cam, (1, self.breath_len))
         return cam_outputs, br.cpu().numpy()
 
     def get_single_sequence_grad_cam(self, seq_idx, batch_idx, target):
+        # this op could be a time hog
         item = self.data[seq_idx]
         br = np.expand_dims(item[1][batch_idx], axis=0)
         return self.get_camout_for_breath(br, target)
 
     def _plot_single_random_sequence(self, patho):
         target = {'ards': 1, 'non_ards': 0}[patho]
-        self.gt.index = range(len(self.gt))
         patho_idxs = self.gt[self.gt.y == target].index
-        seq_idx = random.choice(patho_idxs)
+        abs_idx = random.choice(patho_idxs)
         br_idx = random.randint(0, self.batch_size-1)
-        cam_outputs, br = self.get_single_sequence_grad_cam(seq_idx, br_idx, target)
+
+        rel_idx = list(self.data.kfold_indexes).index(abs_idx)
+        cam_outputs, br = self.get_single_sequence_grad_cam(rel_idx, br_idx, target)
         self.plot_sequence(br[0], cam_outputs)
         plt.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
         plt.yticks(fontsize='x-small')
-        return seq_idx, br_idx
+        return abs_idx, br_idx
 
     def _finalize_multi_plot_graph(self, title):
         fig = plt.gcf()

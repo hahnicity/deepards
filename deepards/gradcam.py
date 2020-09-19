@@ -7,6 +7,7 @@ import torch
 import argparse
 import pickle
 import cv2
+import torch.nn.functional as F
 
 #from breath_visualize import visualize_sequence
 
@@ -41,19 +42,16 @@ class CamExtractor():
 
     def forward_pass(self, x):
         """
-            Does a full forward pass on the model
+        Does a full forward pass on the model
         """
         #print(x.shape)
         # Forward pass on the convolutions
         conv_output, x = self.forward_pass_on_convolutions(x)
-        #print(conv_output.shape)
-        #print(x.shape)
-        x = self.model.breath_block.avgpool(x)
-        #print(x.shape)
-        x = x.view(-1)  # Flatten
-        # Forward pass on the classifier
+        # they forgot relu when they were doing this initially. damn
+        x = F.relu(x)
+        # pool and flatten
+        x = self.model.breath_block.avgpool(x).view(-1)
         x = self.model.linear_final(x).unsqueeze(0)
-        x = self.softmax(x)
         return conv_output, x
 
 
@@ -77,53 +75,28 @@ class GradCam():
             target_class = np.argmax(model_output.cpu().data.numpy())
         # Target for backprop
         one_hot_output = torch.FloatTensor(1, model_output.size()[-1]).zero_()
-        #print(one_hot_output.shape)
         one_hot_output[0][target_class] = 1
-        # Zero grads
         self.model.zero_grad()
-        #self.model.classifier.zero_grad()
         # Backward pass with specified target
         model_output.backward(gradient=one_hot_output.cuda(), retain_graph=True)
         # Get hooked gradients
         guided_gradients = self.extractor.gradients.cpu().data.numpy()
-        #print(guided_gradients)
         # Get convolution outputs
         target = conv_output.cpu().data.numpy()
-        #print(guided_gradients.shape)
-        #print(target.shape[1:])
-        # Get weights from gradients
-        #weights = np.mean(guided_gradients, axis = 0)
-        #print(weights[0])
-        weights = np.mean(guided_gradients, axis = (0,2))
-        #print(weights[0])
-        target = np.mean(target, axis = 0)  # Take averages for each gradient
-        # Create empty numpy array for cam
+        weights = np.mean(guided_gradients, axis=(0, 2))
+        # Take averages across all breaths because of the way we are structuring
+        # our model
+        target = np.mean(target, axis=0)
         cam = np.ones(target.shape[1:], dtype=np.float32)
-        #print(weights.shape)
-        #print(target[:,1, :].shape)
-        #print(cam.shape)
         # Multiply each weight with its conv output and then, sum
         for i, w in enumerate(weights):
-            cam += w * target[i,:]
-
+            cam += w * target[i, :]
 
         #cam = np.mean(cam, axis = 0)
         cam = np.maximum(cam, 0)
         cam = (cam - np.min(cam)) / (np.max(cam) - np.min(cam))  # Normalize between 0-1
         cam = np.uint8(cam * 255)  # Scale between 0-255 to visualize
-        #print(cam)
 
-        '''
-        cam = np.uint8(Image.fromarray(cam).resize((input_image.shape[2],
-                       input_image.shape[3]), Image.ANTIALIAS))/255
-        # ^ I am extremely unhappy with this line. Originally resizing was done in cv2 which
-        # supports resizing numpy matrices with antialiasing, however,
-        # when I moved the repository to PIL, this option was out of the window.
-        # So, in order to use resizing with ANTIALIAS feature of PIL,
-        # I briefly convert matrix to PIL image and then back.
-        # If there is a more beautiful way, do not hesitate to send a PR.
-        return cam
-        '''
         return cam
 
 
