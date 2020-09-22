@@ -65,38 +65,112 @@ class GradCam():
         # Define extractor
         self.extractor = CamExtractor(self.model)
 
-    def generate_cam(self, input_image, target_class=None):
+    def generate_one_hot_grad_and_output(self, input, target):
+        return self._generate_grad_and_output(input, target, self.one_hot_model_output)
+
+    def generate_static_grad_and_output(self, input, target):
+        return self._generate_grad_and_output(input, target, self.static_model_output)
+
+    def _generate_grad_and_output(self, input, target, model_out_func):
         # Full forward pass
         # conv_output is the output of convolutions at specified layer
-        # model_output is the final output of the model (1, 1000)
-        conv_output, model_output = self.extractor.forward_pass(input_image)
-        #print(model_output)
-        if target_class is None:
-            target_class = np.argmax(model_output.cpu().data.numpy())
+        conv_output, model_output = self.extractor.forward_pass(input)
+        # this line ensures grad cam is done wrt model prediction
+        output = model_out_func(model_output, target)
         # Target for backprop
-        one_hot_output = torch.FloatTensor(1, model_output.size()[-1]).zero_()
-        one_hot_output[0][target_class] = 1
         self.model.zero_grad()
-        # Backward pass with specified target
-        model_output.backward(gradient=one_hot_output.cuda(), retain_graph=True)
+        # Backward pass wrt output
+        output.backward(retain_graph=True)
         # Get hooked gradients
         guided_gradients = self.extractor.gradients.cpu().data.numpy()
         # Get convolution outputs
-        target = conv_output.cpu().data.numpy()
-        weights = np.mean(guided_gradients, axis=(0, 2))
+        conv_output = conv_output.cpu().data.numpy()
+        return conv_output, guided_gradients, model_output
+
+    def static_model_output(self, output, target):
+        # XXX this isnt working....
+        return torch.sum(output)
+
+    def one_hot_model_output(self, output, target):
+        if target is None:
+            target = np.argmax(output.cpu().data.numpy())
+        one_hot = np.zeros((1, output.size()[-1]), dtype=np.float32)
+        one_hot[0][target] = 1
+        one_hot = torch.from_numpy(one_hot).requires_grad_(True)
+        return torch.sum(one_hot.cuda() * output)
+
+
+class MaxMinNormCam(GradCam):
+    """
+    normalize cam outputs based on max/min of just the single class output.
+    This gives us good insight into what the model is doing with just a single
+    class but the downside is that it doesnt tell us the real strength of the
+    class association wrt other classes, or even with a single class. For instance
+    the predicted prob for a class can be very low but grad-cam can still show
+    very brightly, which is a bit misleading because it implies that the network
+    focused on an area intensely, whereas the area could have just been the
+    strongest area out of many weak ones
+    """
+    def generate_read_cam(self, input, target):
+        conv_output, grad, mo = self.generate_one_hot_grad_and_output(input, target)
+        weights = np.mean(grad, axis=(2,))
+        cam = np.zeros((conv_output.shape[0], conv_output.shape[2]), dtype=np.float32)
+        for i, b in enumerate(conv_output):
+            for j, w in enumerate(weights[i,:]):
+                cam[i] += w * conv_output[i, j, :]
+            cam[i] = self.normalize(cam[i])
+        return cam
+
+    def generate_cam(self, input, target=None):
+        conv_output, grad, mo = self.generate_one_hot_grad_and_output(input, target)
+        weights = np.mean(grad, axis=(0, 2))
         # Take averages across all breaths because of the way we are structuring
-        # our model
-        target = np.mean(target, axis=0)
-        cam = np.ones(target.shape[1:], dtype=np.float32)
+        # our model. We can in the future just pick a specific breath if we want
+        # to visualize single breaths in a true breath window. currently though
+        # we are just using cloned breaths for an entire read. So really, averaging
+        # the mapping should do very little to the underlying variable.
+        conv_output = np.mean(conv_output, axis=0)
+        cam = np.zeros(conv_output.shape[1:], dtype=np.float32)
         # Multiply each weight with its conv output and then, sum
         for i, w in enumerate(weights):
-            cam += w * target[i, :]
+            cam += w * conv_output[i, :]
 
-        #cam = np.mean(cam, axis = 0)
+        return self.normalize(cam)
+
+    def normalize(self, cam):
         cam = np.maximum(cam, 0)
         cam = (cam - np.min(cam)) / (np.max(cam) - np.min(cam))  # Normalize between 0-1
         cam = np.uint8(cam * 255)  # Scale between 0-255 to visualize
+        return cam
 
+
+class FracTotalNormCam(GradCam):
+    """
+    Apparently this did not help the situation caused by max min.
+    """
+    def generate_cam(self, input, target):
+        raise NotImplementedError('Havent done this yet')
+
+    def generate_read_cam(self, input, target):
+        conv_output, grad_target, mo = self.generate_one_hot_grad_and_output(input, target)
+        _, grad_other, __ = self.generate_one_hot_grad_and_output(input, (target + 1) % 2)
+        weights_target = np.mean(grad_target, axis=(2,))
+        weights_other = np.mean(grad_other, axis=(2,))
+        cam_target = np.zeros((conv_output.shape[0], conv_output.shape[2]), dtype=np.float32)
+        cam_other = np.zeros((conv_output.shape[0], conv_output.shape[2]), dtype=np.float32)
+        cam = np.zeros((conv_output.shape[0], conv_output.shape[2]), dtype=np.float32)
+        for i, b in enumerate(conv_output):
+            for j, w in enumerate(weights_target[i,:]):
+                cam_target[i] += w * conv_output[i, j, :]
+                cam_other[i] += weights_other[i, j] * conv_output[i, j, :]
+            cam[i] = self.normalize(cam_target[i], cam_other[i])
+        return cam
+
+    def normalize(self, cam_target, cam_other):
+        cam_target = np.maximum(cam_target, 0)
+        cam_other = np.maximum(cam_other, 0)
+        cam = cam_target / (cam_other + cam_target)
+        cam = np.uint8(cam * 255)  # Scale between 0-255 to visualize
         return cam
 
 
@@ -141,7 +215,7 @@ if __name__ == '__main__':
     pickle_file_name = args.pickled_data_path
     # Get params
     #target_example = 0  # Snake
-    target_class = None
+    target = None
     file_name_to_export = 'gradcam_output.png'
 
     for i in range(2):
@@ -149,7 +223,7 @@ if __name__ == '__main__':
         for j in range(100):
             breath_sequence = get_sequence(pickle_file_name, i , j, args.fold)
             grad_cam = GradCam(pretrained_model)
-            cam = grad_cam.generate_cam(breath_sequence, target_class)
+            cam = grad_cam.generate_cam(breath_sequence, target)
             #print(cam)
             cam = np.expand_dims(cam, axis = 0)
             cam_outputs = np.append(cam_outputs, cam, axis = 0)
@@ -170,7 +244,7 @@ if __name__ == '__main__':
     # Grad cam
     #grad_cam = GradCam(pretrained_model)
     # Generate cam mask
-    #cam = grad_cam.generate_cam(breath_sequence, target_class)
+    #cam = grad_cam.generate_cam(breath_sequence, target)
     # Save mask
     #save_class_activation_images(breath_sequence, cam, file_name_to_export)
     print('Grad cam completed')

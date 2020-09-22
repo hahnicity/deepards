@@ -52,7 +52,9 @@ def main():
     results_files = list(Path(__file__).parent.joinpath('results/').glob('*' + args.experiment_name + '*.pkl'))
     assert len(results_files) == 1
     results = pd.read_pickle(results_files[0])
-    patho_n = {'other': 0, 'ards': 1}[args.patho]
+    map = {'ards': 1, 'other': 0}
+    reverse_map = {0: 'other', 1: 'ards'}
+    patho_n = map[args.patho]
     preds_df = results.all_pred_to_hour[(results.all_pred_to_hour.epoch == args.epoch) & (results.all_pred_to_hour.y == patho_n)]
     gt = dataset._get_all_sequence_ground_truth()
 
@@ -94,15 +96,19 @@ def main():
     # After separating by patho it seems that the mispredictions rougly follow
     # the distribution of data.
     for i in range(0, 9):
+        plt.subplot(3, 3, i+1)
         boot = np.random.choice(mispred_data[:, i], size=len(correct_data), replace=True)
         mask_c = np.isnan(correct_data[:, i])
         mask_b = np.isnan(boot)
         # max must be greater than min problem is caused by nans in the array
-        plt.hist(correct_data[:, i][~mask_c], bins=100, alpha=0.5, label='correct')
-        plt.hist(boot[~mask_b], bins=100, alpha=0.5, label='mispred')
-        plt.title(feature_mapping[i])
-        plt.legend()
-        plt.show()
+        plt.hist(correct_data[:, i][~mask_c], bins=100, alpha=0.5, label='correct pred')
+        plt.hist(boot[~mask_b], bins=100, alpha=0.5, label='predicted {}'.format(reverse_map[(patho_n + 1) % 2]))
+        plt.title(feature_mapping[i], fontsize=8)
+        plt.xticks(fontsize=7)
+        plt.yticks(fontsize=7)
+        plt.legend(fontsize=8)
+    plt.suptitle('Conditional Distributions for {} Reads'.format(args.patho.upper()))
+    plt.show()
 
 
 if __name__ == "__main__":

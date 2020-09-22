@@ -130,6 +130,8 @@ def find_matching_experiments(experiment_name):
     first_pass = glob(os.path.join(os.path.dirname(__file__), 'results/{}_*'.format(experiment_name)))
     experiment_ids = []
     for file in first_pass:
+        if '{}_results'.format(experiment_name) in file:
+            continue
         experiment_id = get_experiment_id(file)
         candidate = os.path.basename(file).replace('_'+experiment_id+'.pth', '')
         if candidate == experiment_name:

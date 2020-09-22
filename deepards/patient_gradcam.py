@@ -15,7 +15,7 @@ import pandas as pd
 import torch
 
 #importing the class for calculating the cam values
-from gradcam import GradCam
+from gradcam import FracTotalNormCam, MaxMinNormCam
 
 
 def do_makedirs(dir):
@@ -26,32 +26,39 @@ def do_makedirs(dir):
 
 
 class PatientGradCam(object):
-    def __init__(self, pretrained_model, data):
-        self.grad_cam = GradCam(pretrained_model.cuda())
+    def __init__(self, pretrained_model, data, target):
+        self.grad_cam = MaxMinNormCam(pretrained_model.cuda())
         self.data = data
         self.gt = self.data.get_ground_truth_df()
         self.ards, self.non_ards = self.get_ardsids_otherids()
         self.batch_size = self.data.all_sequences[0][1].shape[0]
         self.breath_len = 224
+        self.target = target
 
     def get_ardsids_otherids(self):
         ards = self.gt[self.gt.y == 1].patient.unique()
         non_ards = self.gt[self.gt.y == 0].patient.unique()
         return ards, non_ards
 
+    def get_target(self, ground_truth):
+        if self.target == 'ground_truth':
+            return [ground_truth]
+        elif self.target == 'both':
+            return [0, 1]
+        else:
+            return [{'ards': 1, 'other': 0}[self.target]]
+
     def get_median_patient_camout(self, patient_id):
+        if self.target == 'both':
+            raise NotImplementedError('both mode currently doesnt support operations outside sampled_seqs')
         #initializing variables
         patient_idxs = self.gt[self.gt.patient == patient_id].index
-        target = self.gt.loc[patient_idxs].y.iloc[0]
+        target = self.get_target(self.gt.loc[patient_idxs].y.iloc[0])
         mapping = {0: 'non_ards', 1: 'ards'}
         dirname = os.path.join('gradcam_results', 'patient_medians', mapping[target])
         do_makedirs(dirname)
 
         # XXX in future make this configurable
-        #
-        # Also, why do cam outputs have to be 7 long?????? XXX
-        # maybe trying to strike a balance with precision of results. Too many outputs
-        # and it becomes too noisy, too few and its not granular enough.
         med_breath = np.empty((0, self.batch_size, 1, self.breath_len))
         cam_outputs = np.empty((0,7))
         target_class = None
@@ -64,13 +71,15 @@ class PatientGradCam(object):
         br = torch.FloatTensor(med_breath)[[0] * self.batch_size].cuda()
         cam = self.grad_cam.generate_cam(br, target)
         cam_outputs = cv2.resize(cam, (1, self.breath_len))
-        filename = os.path.join(dirname, patient_id + '.png')
+        filename = os.path.join(dirname, patient_id + '_target-{}.png'.format(self.target))
         self.visualize_sequence(med_breath[0], cam_outputs, patient_id, target, filename)
 
     def get_average_patient_camout(self, patient_id):
+        if self.target == 'both':
+            raise NotImplementedError('both mode currently doesnt support operations outside sampled_seqs')
         #initializing variables
         patient_idxs = self.gt[self.gt.patient == patient_id].index
-        target = self.gt.loc[patient_idxs].y.iloc[0]
+        target = self.get_target(self.gt.loc[patient_idxs].y.iloc[0])
         mapping = {0: 'non_ards', 1: 'ards'}
         dirname = os.path.join('gradcam_results', 'patient_averages', mapping[target])
         do_makedirs(dirname)
@@ -91,7 +100,7 @@ class PatientGradCam(object):
         cam_outputs = np.mean(cam_outputs, axis = 0)
         cam_outputs = cv2.resize(cam_outputs,(1, self.breath_len))
         avg_breath = np.mean(avg_breath, axis = 0)
-        filename = os.path.join(dirname, patient_id + '.png')
+        filename = os.path.join(dirname, patient_id + '_target-{}.png'.format(self.target))
         self.visualize_sequence(avg_breath, cam_outputs, patient_id, target, filename)
 
     def get_sampled_patient_sequences_camout(self, patient_id):
@@ -99,24 +108,36 @@ class PatientGradCam(object):
         Idea is that we iterate over patient batches and sample a single sequence
         from each batch. That sequence is fed into gradcam for a result
         """
-        # XXX this line is failing us we need to adjust indexes to be a continuous range
-        # instead of a potentially discontinuous one
         patient_idxs = self.gt[self.gt.patient == patient_id].index
-        target = self.gt.loc[patient_idxs].y.iloc[0]
-        mapping = {0: 'non_ards', 1: 'ards'}
-        dirname = os.path.join('gradcam_results', 'sampled_sequences', mapping[target], patient_id)
-        do_makedirs(dirname)
 
         for abs_idx in patient_idxs:
             rand_seq = random.choice(range(self.batch_size))
-            rel_idx = list(self.data.kfold_indexes).index(abs_idx)
-            cam_outputs, br = self.get_single_sequence_grad_cam(rel_idx, rand_seq, target)
-            filename = os.path.join(dirname, 'seq-{}-{}.png'.format(abs_idx, rand_seq))
-            self.visualize_sequence(br[0], cam_outputs, patient_id, target, filename)
+            for target in self.get_target(self.gt.loc[patient_idxs].y.iloc[0]):
+                mapping = {0: 'non_ards', 1: 'ards'}
+                dirname = os.path.join('gradcam_results', 'sampled_sequences', mapping[target], patient_id)
+                do_makedirs(dirname)
+                rel_idx = list(self.data.kfold_indexes).index(abs_idx)
+                cam_outputs, br = self.get_single_sequence_grad_cam(rel_idx, rand_seq, target)
+                filename = os.path.join(dirname, 'seq-{}-{}-target-{}.png'.format(abs_idx, rand_seq, self.target))
+                self.visualize_sequence(br[0], cam_outputs, patient_id, target, filename)
+
+    def get_full_read_patient_sequences(self, patient_id):
+        patient_idxs = self.gt[self.gt.patient == patient_id].index
+        for abs_idx in patient_idxs:
+            for target in self.get_target(self.gt.loc[patient_idxs].y.iloc[0]):
+                mapping = {0: 'non_ards', 1: 'ards'}
+                dirname = os.path.join('gradcam_results', 'full_read', mapping[target], patient_id)
+                do_makedirs(dirname)
+                rel_idx = list(self.data.kfold_indexes).index(abs_idx)
+                # XXX need to figure this out from here below
+                cam_outputs, br = self.get_read_grad_cam(rel_idx, target)
+                filename = os.path.join(dirname, 'seq-{}-target-{}.png'.format(abs_idx, self.target))
+                self.visualize_read(br, cam_outputs, patient_id, target, filename)
 
     def plot_sequence(self, br, cam_outputs):
-        img = br.reshape((self.breath_len, 1))
-        t = np.arange(0, self.breath_len, 1)
+        br_len = len(br.ravel())
+        img = br.reshape((br_len, 1))
+        t = np.arange(0, br_len, 1)
         plt.scatter(t, img, c=cam_outputs, vmin = 0, vmax = 255)
         plt.plot(t, img)
 
@@ -126,6 +147,23 @@ class PatientGradCam(object):
         cbar.set_label("cam_outputs", labelpad=-1)
         mapping = {0: 'Non-ARDS', 1: 'ARDS'}
         plt.title(patient_id + ' ' + mapping[c])
+        #plt.show()
+        plt.savefig(filepath)
+        plt.close()
+
+    def visualize_read(self, br, cam_outputs, patient_id, c, filepath):
+        fig = plt.figure(figsize=(3*8, 3*4))
+        fig.add_subplot(1, 1, 1)
+        # XXX show first half of read
+        half_len = len(br.ravel()) / 2
+        self.plot_sequence(br.ravel()[:half_len], cam_outputs.ravel()[:half_len])
+        cbar  = plt.colorbar()
+        cbar.set_label("cam_outputs", labelpad=-1)
+        mapping = {0: 'Non-ARDS', 1: 'ARDS'}
+        plt.title(patient_id + ' ' + mapping[c])
+        plt.tight_layout()
+        plt.xlim(-1, half_len+1)
+        #plt.show()
         plt.savefig(filepath)
         plt.close()
 
@@ -136,14 +174,21 @@ class PatientGradCam(object):
             br = np.expand_dims(br, axis=0)
 
         # make sure the breath is duplicated <batch_size> times
-        #
-        # does the duplication mess things up? thats my main worry here. I think
-        # another worry of mine is that grad cam outputs dont translate one to one
-        # with an actual input. because there are multiple inputs that are being run
-        # and then classified.
         br = torch.FloatTensor(br)[[0] * self.batch_size].cuda()
         cam = self.grad_cam.generate_cam(br, target)
         cam_outputs = cv2.resize(cam, (1, self.breath_len))
+        return cam_outputs, br.cpu().numpy()
+
+    def get_camout_for_read(self, br, target):
+        if len(br.shape) == 1:
+            br = np.expand_dims(np.expand_dims(br, axis=0), axis=0)
+        elif len(br.shape) == 2:
+            br = np.expand_dims(br, axis=0)
+        br = torch.FloatTensor(br).cuda()
+        cam = self.grad_cam.generate_read_cam(br, target)
+        cam_outputs = np.zeros((20, self.breath_len))
+        for i, cam_line in enumerate(cam):
+            cam_outputs[i] = cv2.resize(cam[i], (1, self.breath_len)).ravel()
         return cam_outputs, br.cpu().numpy()
 
     def get_single_sequence_grad_cam(self, seq_idx, batch_idx, target):
@@ -151,6 +196,11 @@ class PatientGradCam(object):
         item = self.data[seq_idx]
         br = np.expand_dims(item[1][batch_idx], axis=0)
         return self.get_camout_for_breath(br, target)
+
+    def get_read_grad_cam(self, seq_idx, target):
+        # this op could be a time hog
+        item = self.data[seq_idx]
+        return self.get_camout_for_read(item[1], target)
 
     def _plot_single_random_sequence(self, patho):
         target = {'ards': 1, 'non_ards': 0}[patho]
@@ -224,9 +274,16 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('model_path', help='path to the saved_model')
     parser.add_argument('-pdp', '--pickled-data-path', help = 'PATH to pickled data', required=True)
+    parser.add_argument('--only-patient')
     parser.add_argument('--fold', type=int, required=True)
-    parser.add_argument('--ops', choices=['averages', 'medians', 'sample_seqs', 'rand_sample'], required=True)
+    parser.add_argument('--ops', choices=['averages', 'medians', 'sample_seqs', 'read_cam', 'rand_sample'], required=True)
     parser.add_argument('-shuf', '--shuffle-samples', action='store_true')
+    parser.add_argument(
+        '--target',
+        choices=['ards', 'other', 'ground_truth', 'both'],
+        default='ground_truth',
+        help='perform grad cam wrt a certain pathophysiology. If unset it defaults to the ground truth labeling for the data. Both will examine both ards and other. However, this only works with sample_seqs'
+    )
     args = parser.parse_args()
 
     data = pd.read_pickle(args.pickled_data_path)
@@ -239,15 +296,23 @@ if __name__ == '__main__':
     else:
         pretrained_model = pretrained_model.module
 
-    pt_grad = PatientGradCam(pretrained_model, data)
+    pt_grad = PatientGradCam(pretrained_model, data, args.target)
+    if not args.only_patient:
+        patients = np.append(pt_grad.ards, pt_grad.non_ards)
+    else:
+        patients = [args.only_patient]
+
     if args.ops == 'medians':
-        for patient_id in np.append(pt_grad.ards, pt_grad.non_ards):
+        for patient_id in patients:
             pt_grad.get_median_patient_camout(patient_id)
     elif args.ops == 'sample_seqs':
-        for patient_id in np.append(pt_grad.ards, pt_grad.non_ards):
+        for patient_id in patients:
             pt_grad.get_sampled_patient_sequences_camout(patient_id)
     elif args.ops == 'averages':
-        for patient_id in np.append(pt_grad.ards, pt_grad.non_ards):
+        for patient_id in patients:
             pt_grad.get_average_patient_camout(patient_id)
     elif args.ops == 'rand_sample':
         pt_grad.rand_sample(args.shuffle_samples)
+    elif args.ops == 'read_cam':
+        for patient_id in patients:
+            pt_grad.get_full_read_patient_sequences(patient_id)
