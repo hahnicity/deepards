@@ -941,7 +941,8 @@ class ARDSRawDataset(Dataset):
         # This is a bit tricky because pytorch will just assume that indexing
         # goes from 0 ... __len__ - 1. But this is not the case for kfold. So you
         # have to get the pytorch index and then translate that to what it looks
-        # like in your kfold
+        # like in your kfold. So translate the relative indexing of pytorch to
+        # absolute indexing of the dataset
         if self.kfold_num is not None:
             index = self.kfold_indexes[index]
         seq = self.all_sequences[index]
@@ -975,6 +976,7 @@ class ARDSRawDataset(Dataset):
         else:
             data = (data - mu) / std
 
+        # this will return absolute index of data, the data, metadata, and target
         return index, data, meta, target
 
     def _get_padding_mask(self, data, mu):

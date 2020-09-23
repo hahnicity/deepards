@@ -109,6 +109,7 @@ class BaseTraining(object):
         print('train instances: {}'.format(len(train_loader)))
         with torch.enable_grad():
             print("\nrun epoch {}\n".format(epoch_num))
+            model.train()
             for idx, (obs_idx, seq, metadata, target) in enumerate(train_loader):
                 model.zero_grad()
                 if not self.args.batch_size == 1:
@@ -156,6 +157,7 @@ class BaseTraining(object):
     def get_base_datasets(self):
         kfold_num = None if self.args.kfolds is None else 0
         transforms = self.get_transforms()
+        # XXX if we set from_pickle but dont set kfolds, then it runs holdout set generateion
 
         # for holdout and kfold
         if not self.args.train_from_pickle:
@@ -241,7 +243,7 @@ class BaseTraining(object):
             test_loader = DataLoader(
                 test_dataset,
                 batch_size=self.args.batch_size,
-                shuffle=True if not self.args.unshuffled else False,
+                shuffle=False,
                 pin_memory=self.args.cuda,
                 num_workers=self.args.loader_threads,
             )
@@ -249,6 +251,8 @@ class BaseTraining(object):
 
     def train_and_test(self):
         for fold_num, (train_dataset, train_loader, test_dataset, test_loader) in enumerate(self.get_splits()):
+            if self.args.only_fold and fold_num != self.args.only_fold:
+                continue
             model = self.get_model()
             optimizer = self.get_optimizer(model)
             for epoch_num in range(self.args.epochs):
@@ -322,6 +326,24 @@ class BaseTraining(object):
         self.preds = []
         self.pred_idx = []
         with torch.no_grad():
+            # alright...this is weird af. each time I enter the input into
+            # the model the results change each time. This is bizarre because
+            # the weights are set and theres no gradient involved. Its like they're
+            # floating in some probabilistic range. The predictions do
+            # seem to change between gradcam and here. Also the predictions can
+            # change between runs. what the actual fuck. Are the weights changing
+            # somehow? weights dont seem to be changing on first conv layer.
+            # Nor does it seem to change on final layer. It seems the breath block
+            # is changing between iterations somehow. Crap, could it have been
+            # dropout this whole time? It was the batch statistics that was doing
+            # it.
+            #
+            # So on inference time batch norm normalizes by the computed mean and variance.
+            # However, I think the thing here is that we end up normalizing twice. Once
+            # in the dataset class, and again in the batch norm. This shouldn't really
+            # do anything, but we're normalizing to unit std not unit var. So thats the
+            # difference here.
+            model.eval()
             for idx, (obs_idx, seq, metadata, target) in enumerate(test_loader):
                 if not self.args.batch_size == 1 and self.clip_odd_batches:
                     obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)
@@ -487,6 +509,7 @@ class SiameseMixin(object):
         print('train instances: {}'.format(len(train_loader)))
         with torch.enable_grad():
             print("\nrun epoch {}\n".format(epoch_num))
+            model.train()
             for batch_idx, (seq, pos_compr, neg_compr) in enumerate(train_loader):
                 model.zero_grad()
                 # XXX do we need this?
@@ -513,6 +536,7 @@ class SiameseMixin(object):
 
     def run_test_epoch(self, epoch_num, model, test_dataset, test_loader, fold_num):
         with torch.no_grad():
+            model.eval()
             for batch_idx, (seq, pos_compr, neg_compr) in enumerate(test_loader):
                 #obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)
                 #if seq.shape[0] == 0:
@@ -706,6 +730,7 @@ class CNNLSTMModel(PerBreathClassifierMixin, BaseTraining, PatientClassifierMixi
         gt_df = train_loader.dataset.get_ground_truth_df()
         last_pt = None
         with torch.enable_grad():
+            model.train()
             for idx, (obs_idx, seq, metadata, target) in enumerate(train_loader):
                 model.zero_grad()
                 obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)
@@ -734,6 +759,7 @@ class CNNLSTMModel(PerBreathClassifierMixin, BaseTraining, PatientClassifierMixi
         gt_df = test_dataset.get_ground_truth_df()
         last_pt = None
         with torch.no_grad():
+            model.eval()
             for idx, (obs_idx, seq, metadata, target) in enumerate(test_loader):
                 obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)
                 if seq.shape[0] == 0:
@@ -1123,6 +1149,7 @@ def build_parser():
     true_false_flag('--drop-i-lim', '')
     true_false_flag('--drop-e-lim', '')
     parser.add_argument('--truncate-e-lim', type=float, help='Number of seconds of the E lim to keep. Everything afterwards is discarded. Should be done in a number divisible by 2', default=None)
+    parser.add_argument('--only-fold', type=int, default=None, help='only run specific fold')
     return parser
 
 

@@ -61,15 +61,14 @@ class GradCam():
     """
     def __init__(self, model):
         self.model = model
-        self.model.eval()
+        # dont use eval because it will normalize twice. It does slow things
+        # down, but its only 1 item.
+        #self.model.eval()
         # Define extractor
         self.extractor = CamExtractor(self.model)
 
     def generate_one_hot_grad_and_output(self, input, target):
         return self._generate_grad_and_output(input, target, self.one_hot_model_output)
-
-    def generate_static_grad_and_output(self, input, target):
-        return self._generate_grad_and_output(input, target, self.static_model_output)
 
     def _generate_grad_and_output(self, input, target, model_out_func):
         # Full forward pass
@@ -77,7 +76,6 @@ class GradCam():
         conv_output, model_output = self.extractor.forward_pass(input)
         # this line ensures grad cam is done wrt model prediction
         output = model_out_func(model_output, target)
-        # Target for backprop
         self.model.zero_grad()
         # Backward pass wrt output
         output.backward(retain_graph=True)
@@ -86,10 +84,6 @@ class GradCam():
         # Get convolution outputs
         conv_output = conv_output.cpu().data.numpy()
         return conv_output, guided_gradients, model_output
-
-    def static_model_output(self, output, target):
-        # XXX this isnt working....
-        return torch.sum(output)
 
     def one_hot_model_output(self, output, target):
         if target is None:
@@ -119,7 +113,7 @@ class MaxMinNormCam(GradCam):
             for j, w in enumerate(weights[i,:]):
                 cam[i] += w * conv_output[i, j, :]
             cam[i] = self.normalize(cam[i])
-        return cam
+        return cam, mo
 
     def generate_cam(self, input, target=None):
         conv_output, grad, mo = self.generate_one_hot_grad_and_output(input, target)
@@ -135,7 +129,7 @@ class MaxMinNormCam(GradCam):
         for i, w in enumerate(weights):
             cam += w * conv_output[i, :]
 
-        return self.normalize(cam)
+        return self.normalize(cam), mo
 
     def normalize(self, cam):
         cam = np.maximum(cam, 0)
@@ -164,7 +158,7 @@ class FracTotalNormCam(GradCam):
                 cam_target[i] += w * conv_output[i, j, :]
                 cam_other[i] += weights_other[i, j] * conv_output[i, j, :]
             cam[i] = self.normalize(cam_target[i], cam_other[i])
-        return cam
+        return cam, mo
 
     def normalize(self, cam_target, cam_other):
         cam_target = np.maximum(cam_target, 0)

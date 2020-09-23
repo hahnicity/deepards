@@ -13,9 +13,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn.functional as F
 
 #importing the class for calculating the cam values
-from gradcam import FracTotalNormCam, MaxMinNormCam
+from deepards.dataset import ARDSRawDataset
+from deepards.gradcam import FracTotalNormCam, MaxMinNormCam
 
 
 def do_makedirs(dir):
@@ -69,17 +71,18 @@ class PatientGradCam(object):
         med_breath = np.median(np.median(med_breath, axis=0), axis=0)
         med_breath = np.expand_dims(med_breath, axis=0)
         br = torch.FloatTensor(med_breath)[[0] * self.batch_size].cuda()
-        cam = self.grad_cam.generate_cam(br, target)
+        cam, model_output = self.grad_cam.generate_cam(br, target)
         cam_outputs = cv2.resize(cam, (1, self.breath_len))
         filename = os.path.join(dirname, patient_id + '_target-{}.png'.format(self.target))
-        self.visualize_sequence(med_breath[0], cam_outputs, patient_id, target, filename)
+        self.visualize_sequence(med_breath[0], cam_outputs, patient_id, target, filename, model_output)
 
     def get_average_patient_camout(self, patient_id):
         if self.target == 'both':
             raise NotImplementedError('both mode currently doesnt support operations outside sampled_seqs')
         #initializing variables
         patient_idxs = self.gt[self.gt.patient == patient_id].index
-        target = self.get_target(self.gt.loc[patient_idxs].y.iloc[0])
+        ground_truth = self.gt.loc[patient_idxs].y.iloc[0]
+        target = self.get_target(ground_truth)
         mapping = {0: 'non_ards', 1: 'ards'}
         dirname = os.path.join('gradcam_results', 'patient_averages', mapping[target])
         do_makedirs(dirname)
@@ -87,6 +90,7 @@ class PatientGradCam(object):
     	avg_breath = np.empty((0, self.breath_len))
     	cam_outputs = np.empty((0,7))
 
+        mean_out = np.zeros((1, 2))
         for i in patient_idxs:
             breath_sequence = data[i][1]
             #concadinating the 224 breath sequences to get the avg of the patient breath
@@ -94,14 +98,16 @@ class PatientGradCam(object):
             avg_breath = np.append(avg_breath, br1, axis = 0)
             #for gradcam values
             br = torch.FloatTensor(breath_sequence).cuda()
-            cam = self.grad_cam.generate_cam(br, target)
+            cam, model_output = self.grad_cam.generate_cam(br, target)
             cam = np.expand_dims(cam, axis = 0)
             cam_outputs = np.append(cam_outputs, cam, axis = 0)
+            mean_out += model_output
+        mean_out = mean_out / len(patient_idxs)
         cam_outputs = np.mean(cam_outputs, axis = 0)
         cam_outputs = cv2.resize(cam_outputs,(1, self.breath_len))
         avg_breath = np.mean(avg_breath, axis = 0)
         filename = os.path.join(dirname, patient_id + '_target-{}.png'.format(self.target))
-        self.visualize_sequence(avg_breath, cam_outputs, patient_id, target, filename)
+        self.visualize_sequence(avg_breath, cam_outputs, patient_id, ground_truth, filename, mean_out)
 
     def get_sampled_patient_sequences_camout(self, patient_id):
         """
@@ -109,30 +115,34 @@ class PatientGradCam(object):
         from each batch. That sequence is fed into gradcam for a result
         """
         patient_idxs = self.gt[self.gt.patient == patient_id].index
+        ground_truth = self.gt.loc[patient_idxs].y.iloc[0]
 
         for abs_idx in patient_idxs:
             rand_seq = random.choice(range(self.batch_size))
-            for target in self.get_target(self.gt.loc[patient_idxs].y.iloc[0]):
+            for target in self.get_target(ground_truth):
                 mapping = {0: 'non_ards', 1: 'ards'}
                 dirname = os.path.join('gradcam_results', 'sampled_sequences', mapping[target], patient_id)
                 do_makedirs(dirname)
                 rel_idx = list(self.data.kfold_indexes).index(abs_idx)
-                cam_outputs, br = self.get_single_sequence_grad_cam(rel_idx, rand_seq, target)
+                cam_outputs, br, model_output = self.get_single_sequence_grad_cam(rel_idx, rand_seq, target)
                 filename = os.path.join(dirname, 'seq-{}-{}-target-{}.png'.format(abs_idx, rand_seq, self.target))
-                self.visualize_sequence(br[0], cam_outputs, patient_id, target, filename)
+                self.visualize_sequence(br[0], cam_outputs, patient_id, ground_truth, filename, model_output)
 
     def get_full_read_patient_sequences(self, patient_id):
         patient_idxs = self.gt[self.gt.patient == patient_id].index
+        ground_truth = self.gt.loc[patient_idxs].y.iloc[0]
+
         for abs_idx in patient_idxs:
-            for target in self.get_target(self.gt.loc[patient_idxs].y.iloc[0]):
+            for target in self.get_target(ground_truth):
                 mapping = {0: 'non_ards', 1: 'ards'}
                 dirname = os.path.join('gradcam_results', 'full_read', mapping[target], patient_id)
                 do_makedirs(dirname)
                 rel_idx = list(self.data.kfold_indexes).index(abs_idx)
                 # XXX need to figure this out from here below
-                cam_outputs, br = self.get_read_grad_cam(rel_idx, target)
+                cam_outputs, br, model_output = self.get_read_grad_cam(rel_idx, target)
                 filename = os.path.join(dirname, 'seq-{}-target-{}.png'.format(abs_idx, self.target))
-                self.visualize_read(br, cam_outputs, patient_id, target, filename)
+                import IPython; IPython.embed()
+                self.visualize_read(br, cam_outputs, patient_id, ground_truth, filename, model_output)
 
     def plot_sequence(self, br, cam_outputs):
         br_len = len(br.ravel())
@@ -141,17 +151,17 @@ class PatientGradCam(object):
         plt.scatter(t, img, c=cam_outputs, vmin = 0, vmax = 255)
         plt.plot(t, img)
 
-    def visualize_sequence(self, br, cam_outputs, patient_id, c, filepath):
+    def visualize_sequence(self, br, cam_outputs, patient_id, c, filepath, model_output):
         self.plot_sequence(br, cam_outputs)
         cbar  = plt.colorbar()
         cbar.set_label("cam_outputs", labelpad=-1)
         mapping = {0: 'Non-ARDS', 1: 'ARDS'}
-        plt.title(patient_id + ' ' + mapping[c])
+        plt.title('{} ground truth: {} prediction: {}'.format(patient_id, mapping[c], F.softmax(model_output, dim=1).cpu().detach().numpy().round(3)))
         #plt.show()
         plt.savefig(filepath)
         plt.close()
 
-    def visualize_read(self, br, cam_outputs, patient_id, c, filepath):
+    def visualize_read(self, br, cam_outputs, patient_id, c, filepath, model_output):
         fig = plt.figure(figsize=(3*8, 3*4))
         fig.add_subplot(1, 1, 1)
         # XXX show first half of read
@@ -160,7 +170,7 @@ class PatientGradCam(object):
         cbar  = plt.colorbar()
         cbar.set_label("cam_outputs", labelpad=-1)
         mapping = {0: 'Non-ARDS', 1: 'ARDS'}
-        plt.title(patient_id + ' ' + mapping[c])
+        plt.title('{} ground truth: {} prediction: {}'.format(patient_id, mapping[c], F.softmax(model_output, dim=1).cpu().detach().numpy().round(3)))
         plt.tight_layout()
         plt.xlim(-1, half_len+1)
         #plt.show()
@@ -175,9 +185,9 @@ class PatientGradCam(object):
 
         # make sure the breath is duplicated <batch_size> times
         br = torch.FloatTensor(br)[[0] * self.batch_size].cuda()
-        cam = self.grad_cam.generate_cam(br, target)
+        cam, model_output = self.grad_cam.generate_cam(br, target)
         cam_outputs = cv2.resize(cam, (1, self.breath_len))
-        return cam_outputs, br.cpu().numpy()
+        return cam_outputs, br.cpu().numpy(), model_output
 
     def get_camout_for_read(self, br, target):
         if len(br.shape) == 1:
@@ -185,22 +195,20 @@ class PatientGradCam(object):
         elif len(br.shape) == 2:
             br = np.expand_dims(br, axis=0)
         br = torch.FloatTensor(br).cuda()
-        cam = self.grad_cam.generate_read_cam(br, target)
+        cam, model_output = self.grad_cam.generate_read_cam(br, target)
         cam_outputs = np.zeros((20, self.breath_len))
         for i, cam_line in enumerate(cam):
             cam_outputs[i] = cv2.resize(cam[i], (1, self.breath_len)).ravel()
-        return cam_outputs, br.cpu().numpy()
+        return cam_outputs, br.cpu().numpy(), model_output
 
     def get_single_sequence_grad_cam(self, seq_idx, batch_idx, target):
-        # this op could be a time hog
         item = self.data[seq_idx]
         br = np.expand_dims(item[1][batch_idx], axis=0)
         return self.get_camout_for_breath(br, target)
 
     def get_read_grad_cam(self, seq_idx, target):
-        # this op could be a time hog
         item = self.data[seq_idx]
-        return self.get_camout_for_read(item[1], target)
+        return self.get_camout_for_read(item[1].round(4), target)
 
     def _plot_single_random_sequence(self, patho):
         target = {'ards': 1, 'non_ards': 0}[patho]
@@ -275,7 +283,7 @@ if __name__ == '__main__':
     parser.add_argument('model_path', help='path to the saved_model')
     parser.add_argument('-pdp', '--pickled-data-path', help = 'PATH to pickled data', required=True)
     parser.add_argument('--only-patient')
-    parser.add_argument('--fold', type=int, required=True)
+    parser.add_argument('--fold', type=int, required=True, help="K-fold we want our dataset to use. This should be set in accordance to the patients that would normally be in the training dataset during a kfold run.")
     parser.add_argument('--ops', choices=['averages', 'medians', 'sample_seqs', 'read_cam', 'rand_sample'], required=True)
     parser.add_argument('-shuf', '--shuffle-samples', action='store_true')
     parser.add_argument(
@@ -286,9 +294,11 @@ if __name__ == '__main__':
     )
     args = parser.parse_args()
 
+    # XXX make sure dataset matches test dataset.
     data = pd.read_pickle(args.pickled_data_path)
     data.set_kfold_indexes_for_fold(args.fold)
     data.transforms = None
+    data = ARDSRawDataset.make_test_dataset_if_kfold(data)
     pretrained_model = torch.load(args.model_path)
     # ensure that model is on same cuda device that data will be on
     if not isinstance(pretrained_model, torch.nn.DataParallel):
