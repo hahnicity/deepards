@@ -74,7 +74,7 @@ class PatientGradCam(object):
         cam, model_output = self.grad_cam.generate_cam(br, target)
         cam_outputs = cv2.resize(cam, (1, self.breath_len))
         filename = os.path.join(dirname, patient_id + '_target-{}.png'.format(self.target))
-        self.visualize_sequence(med_breath[0], cam_outputs, patient_id, target, filename, model_output)
+        self.visualize_sequence(med_breath[0], cam_outputs, patient_id, target, filename, model_output, target)
 
     def get_average_patient_camout(self, patient_id):
         if self.target == 'both':
@@ -86,10 +86,8 @@ class PatientGradCam(object):
         mapping = {0: 'non_ards', 1: 'ards'}
         dirname = os.path.join('gradcam_results', 'patient_averages', mapping[target])
         do_makedirs(dirname)
-
-    	avg_breath = np.empty((0, self.breath_len))
-    	cam_outputs = np.empty((0,7))
-
+        avg_breath = np.empty((0, self.breath_len))
+        cam_outputs = np.empty((0,7))
         mean_out = np.zeros((1, 2))
         for i in patient_idxs:
             breath_sequence = data[i][1]
@@ -107,7 +105,7 @@ class PatientGradCam(object):
         cam_outputs = cv2.resize(cam_outputs,(1, self.breath_len))
         avg_breath = np.mean(avg_breath, axis = 0)
         filename = os.path.join(dirname, patient_id + '_target-{}.png'.format(self.target))
-        self.visualize_sequence(avg_breath, cam_outputs, patient_id, ground_truth, filename, mean_out)
+        self.visualize_sequence(avg_breath, cam_outputs, patient_id, ground_truth, filename, mean_out, target)
 
     def get_sampled_patient_sequences_camout(self, patient_id):
         """
@@ -126,7 +124,7 @@ class PatientGradCam(object):
                 rel_idx = list(self.data.kfold_indexes).index(abs_idx)
                 cam_outputs, br, model_output = self.get_single_sequence_grad_cam(rel_idx, rand_seq, target)
                 filename = os.path.join(dirname, 'seq-{}-{}-target-{}.png'.format(abs_idx, rand_seq, self.target))
-                self.visualize_sequence(br[0], cam_outputs, patient_id, ground_truth, filename, model_output)
+                self.visualize_sequence(br[0], cam_outputs, patient_id, ground_truth, filename, model_output, target)
 
     def get_full_read_patient_sequences(self, patient_id):
         patient_idxs = self.gt[self.gt.patient == patient_id].index
@@ -141,8 +139,7 @@ class PatientGradCam(object):
                 # XXX need to figure this out from here below
                 cam_outputs, br, model_output = self.get_read_grad_cam(rel_idx, target)
                 filename = os.path.join(dirname, 'seq-{}-target-{}.png'.format(abs_idx, self.target))
-                import IPython; IPython.embed()
-                self.visualize_read(br, cam_outputs, patient_id, ground_truth, filename, model_output)
+                self.visualize_read(br, cam_outputs, patient_id, ground_truth, filename, model_output, target)
 
     def plot_sequence(self, br, cam_outputs):
         br_len = len(br.ravel())
@@ -151,26 +148,29 @@ class PatientGradCam(object):
         plt.scatter(t, img, c=cam_outputs, vmin = 0, vmax = 255)
         plt.plot(t, img)
 
-    def visualize_sequence(self, br, cam_outputs, patient_id, c, filepath, model_output):
+    def visualize_sequence(self, br, cam_outputs, patient_id, c, filepath, model_output, cam_target):
         self.plot_sequence(br, cam_outputs)
         cbar  = plt.colorbar()
         cbar.set_label("cam_outputs", labelpad=-1)
         mapping = {0: 'Non-ARDS', 1: 'ARDS'}
-        plt.title('{} ground truth: {} prediction: {}'.format(patient_id, mapping[c], F.softmax(model_output, dim=1).cpu().detach().numpy().round(3)))
+        pred_prob = F.softmax(model_output, dim=1).cpu().detach().numpy().round(3)
+        pred = np.argmax(pred_prob)
+        plt.title('{}, ground truth: {}, pred: {}, prob: {}, cam target: {}'.format(patient_id, mapping[c], mapping[pred], pred_prob, mapping[cam_target]), fontsize=8)
         #plt.show()
         plt.savefig(filepath)
         plt.close()
 
-    def visualize_read(self, br, cam_outputs, patient_id, c, filepath, model_output):
+    def visualize_read(self, br, cam_outputs, patient_id, c, filepath, model_output, cam_target):
         fig = plt.figure(figsize=(3*8, 3*4))
         fig.add_subplot(1, 1, 1)
-        # XXX show first half of read
         half_len = len(br.ravel()) / 2
         self.plot_sequence(br.ravel()[:half_len], cam_outputs.ravel()[:half_len])
         cbar  = plt.colorbar()
         cbar.set_label("cam_outputs", labelpad=-1)
         mapping = {0: 'Non-ARDS', 1: 'ARDS'}
-        plt.title('{} ground truth: {} prediction: {}'.format(patient_id, mapping[c], F.softmax(model_output, dim=1).cpu().detach().numpy().round(3)))
+        pred_prob = F.softmax(model_output, dim=1).cpu().detach().numpy().round(3)
+        pred = np.argmax(pred_prob)
+        plt.title('{}, ground truth: {}, pred: {}, prob: {}, cam target: {}'.format(patient_id, mapping[c], mapping[pred], pred_prob, mapping[cam_target]))
         plt.tight_layout()
         plt.xlim(-1, half_len+1)
         #plt.show()
