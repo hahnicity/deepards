@@ -38,51 +38,54 @@ feature_mapping = {
     7: 'dyn_compliance',
     8: 'tve:tvi ratio',
 }
+map = {'ards': 1, 'other': 0}
+reverse_map = {0: 'other', 1: 'ards'}
 
 
-def main():
-    parser = ArgumentParser()
-    parser.add_argument('experiment_name')
-    parser.add_argument('dataset')
-    parser.add_argument('-e', '--epoch', type=int, default=4, help='epoch to analyze')
-    parser.add_argument('--patho', choices=['ards', 'other'], required=True)
-    args = parser.parse_args()
-
+def get_results_and_data(args):
     dataset = pd.read_pickle(args.dataset)
-    results_files = list(Path(__file__).parent.joinpath('results/').glob('*' + args.experiment_name + '*.pkl'))
+    results_files = list(Path(__file__).parent.joinpath('results/').glob(args.experiment_name + '*.pkl'))
     assert len(results_files) == 1
     results = pd.read_pickle(results_files[0])
-    map = {'ards': 1, 'other': 0}
-    reverse_map = {0: 'other', 1: 'ards'}
+    gt = dataset._get_all_sequence_ground_truth()
+    return results, dataset, gt
+
+
+
+def get_data_by_preds(dataset, preds, gt, remove_outliers=True):
+    idxs = []
+    for pt, pt_df in preds.groupby('patient'):
+        # get sequence idx first
+        eyes = gt[(gt.patient == pt) & (gt.hour.isin(pt_df.hour))].index
+        idxs.extend(eyes)
+    data = []
+    for i in idxs:
+        # -4 is mean and -3 is median
+        data.append(dataset.all_sequences[i][-3])
+    data = np.array(data)
+    # clear nans
+    mask_nan = np.any(np.isnan(data), axis=1)
+    data = data[~mask_nan]
+
+    if remove_outliers:
+        std = data.std(axis=0).reshape([1, 9]).repeat(len(data), axis=0)
+        mean = data.mean(axis=0).reshape([1, 9]).repeat(len(data), axis=0)
+        min_thresh = mean - 3 * std
+        max_thresh = mean + 3 * std
+        mask = np.logical_and(data > min_thresh, data < max_thresh)
+        mask = np.all(mask, axis=1)
+        data = data[mask]
+    return data
+
+
+def plot_ards_and_other_cond_dist(args):
+    results, dataset, gt = get_results_and_data(args)
+    # analyze mispredictions
     patho_n = map[args.patho]
     preds_df = results.all_pred_to_hour[(results.all_pred_to_hour.epoch == args.epoch) & (results.all_pred_to_hour.y == patho_n)]
-    gt = dataset._get_all_sequence_ground_truth()
+    mispred_data = get_data_by_preds(dataset, preds_df[preds_df.y != preds_df.pred], gt)
+    correct_data = get_data_by_preds(dataset, preds_df[preds_df.y == preds_df.pred], gt)
 
-    # analyze mispredictions
-    #
-    # XXX should prolly group by pathophys
-    mispred = preds_df[preds_df.y != preds_df.pred]
-    mispred_idxs = []
-    for pt, pt_df in mispred.groupby('patient'):
-        # get sequence idx first
-        idxs = gt[(gt.patient == pt) & (gt.hour.isin(pt_df.hour))].index
-        mispred_idxs.extend(idxs)
-    correct_idxs = gt.index.difference(mispred_idxs)
-
-    # now can analyze
-    #
-    # consider analyzing by patient
-    mispred_data = []
-    correct_data = []
-    for i in mispred_idxs:
-        # -4 is mean and -3 is median
-        mispred_data.append(dataset.all_sequences[i][-3])
-
-    for i in correct_idxs:
-        correct_data.append(dataset.all_sequences[i][-3])
-
-    mispred_data = np.array(mispred_data)
-    correct_data = np.array(correct_data)
     for i in range(0, 9):
         result = ks_2samp(correct_data[:, i], mispred_data[:, i])
         print("feature: {}, kstest: {}".format(feature_mapping[i], result.pvalue))
@@ -109,6 +112,90 @@ def main():
         plt.legend(fontsize=8)
     plt.suptitle('Conditional Distributions for {} Reads'.format(args.patho.upper()))
     plt.show()
+
+
+def plot_tp_tn_and_patient(frame, dataset, gt, true_pos_data, true_neg_data, epoch_results, data_type):
+    for pt, patient_df in frame.groupby('patient'):
+        pt_data = get_data_by_preds(dataset, patient_df, gt)
+        prob = epoch_results[epoch_results.patient == pt].iloc[0].pred_frac
+        prob = round(prob, 4)
+        fig = plt.figure(figsize=(3*8, 3*4))
+
+        for i in range(0, 9):
+            fig.add_subplot(3, 3, i+1)
+            bootstrapped = np.random.choice(
+                pt_data[:, i],
+                size=int(min([len(true_pos_data), len(true_neg_data)])/2.0),
+                replace=True
+            )
+
+            # max must be greater than min problem is caused by nans in the array
+            plt.hist(true_pos_data[:, i], bins=100, alpha=0.7, label='true pos', color='c')
+            plt.hist(true_neg_data[:, i], bins=100, alpha=0.5, label='true neg', color='orange')
+            plt.hist(bootstrapped, bins=100, alpha=0.45, label='{} reads'.format(data_type), color='purple')
+            plt.title(feature_mapping[i], fontsize=8)
+            plt.xticks(fontsize=7)
+            plt.yticks(fontsize=7)
+            plt.legend(fontsize=8)
+        plt.suptitle("{}, ground truth: {}, prediction: {},\nARDS pred prob: {}".format(
+            pt,
+            reverse_map[patient_df.iloc[0].y].upper(),
+            reverse_map[patient_df.iloc[0].pred].upper(),
+            prob,
+        ), fontsize=18)
+        plt.savefig("{}.png".format(pt))
+        plt.close()
+
+
+def misclassified_pt_plotting(args):
+    results, dataset, gt = get_results_and_data(args)
+    patho_n = map[args.patho]
+    true_pos = results.all_pred_to_hour[
+        (results.all_pred_to_hour.epoch == args.epoch) &
+        (results.all_pred_to_hour.y == 1) &
+        (results.all_pred_to_hour.pred == 1)
+    ]
+    true_neg = results.all_pred_to_hour[
+        (results.all_pred_to_hour.epoch == args.epoch) &
+        (results.all_pred_to_hour.y == 0) &
+        (results.all_pred_to_hour.pred == 0)
+    ]
+    true_pos_data = get_data_by_preds(dataset, true_pos, gt)
+    true_neg_data = get_data_by_preds(dataset, true_neg, gt)
+
+    epoch_results = results.results[results.results.epoch_num == args.epoch]
+    false_pos_pt = epoch_results[
+        (epoch_results.patho == 0) &
+        (epoch_results.prediction == 1)
+    ].patient.unique()
+    false_neg_pt = epoch_results[
+        (epoch_results.patho == 1) &
+        (epoch_results.prediction == 0)
+    ].patient.unique()
+    false_pos = results.all_pred_to_hour[
+        (results.all_pred_to_hour.epoch == args.epoch) &
+        (results.all_pred_to_hour.patient.isin(false_pos_pt)) &
+        (results.all_pred_to_hour.pred == 1)
+    ]
+    false_neg = results.all_pred_to_hour[
+        (results.all_pred_to_hour.epoch == args.epoch) &
+        (results.all_pred_to_hour.patient.isin(false_neg_pt)) &
+        (results.all_pred_to_hour.pred == 0)
+    ]
+    plot_tp_tn_and_patient(false_pos, dataset, gt, true_pos_data, true_neg_data, epoch_results, 'false pos')
+    plot_tp_tn_and_patient(false_neg, dataset, gt, true_pos_data, true_neg_data, epoch_results, 'false neg')
+
+
+def main():
+    parser = ArgumentParser()
+    parser.add_argument('experiment_name')
+    parser.add_argument('dataset')
+    parser.add_argument('-e', '--epoch', type=int, default=4, help='epoch to analyze')
+    parser.add_argument('--patho', choices=['ards', 'other'], required=True)
+    args = parser.parse_args()
+
+    misclassified_pt_plotting(args)
+
 
 
 if __name__ == "__main__":

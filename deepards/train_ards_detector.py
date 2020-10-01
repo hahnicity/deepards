@@ -29,7 +29,7 @@ from deepards.models.senet import senet18, senet154, se_resnet18, se_resnet50, s
 from deepards.models.siamese import SiameseARDSClassifier, SiameseCNNLinearNetwork, SiameseCNNLSTMNetwork, SiameseCNNTransformerNetwork
 from deepards.models.torch_cnn_lstm_combo import CNNLSTMDoubleLinearNetwork, CNNLSTMNetwork
 from deepards.models.torch_cnn_bm_regressor import CNNRegressor
-from deepards.models.torch_cnn_linear_network import CNNDoubleLinearNetwork, CNNLinearComprToRF, CNNLinearNetwork, CNNSingleBreathLinearNetwork
+from deepards.models.torch_cnn_linear_network import CNNDoubleLinearNetwork, CNNLinearComprToRF, CNNLinearToMean, CNNLinearNetwork, CNNSingleBreathLinearNetwork
 from deepards.models.torch_metadata_only_network import MetadataOnlyNetwork
 from deepards.models.unet import UNet
 from deepards.models.vgg import vgg11_bn, vgg13_bn
@@ -869,6 +869,26 @@ class CNNLinearComprToRFModel(PerBreathClassifierMixin, BaseTraining, PatientCla
         return CNNLinearComprToRF(base_network)
 
 
+class CNNLinearToMeanModel(PerBreathClassifierMixin, BaseTraining, PatientClassifierMixin):
+    def __init__(self, args):
+        super(CNNLinearToMeanModel, self).__init__(args)
+
+    def calc_loss(self, outputs, target, inputs):
+        return self.criterion(outputs, target)
+
+    def _process_test_batch_results(self, outputs, target, inputs, fold_num):
+        batch_preds = outputs.argmax(dim=-1).cpu().view(-1)
+        target = target.argmax(dim=1).cpu().reshape((outputs.shape[0], 1)).view(-1)
+        self.record_testing_results(target, batch_preds, fold_num)
+        return batch_preds.tolist()
+
+    def transform_obs_idx(self, obs_idx, outputs):
+        return obs_idx
+
+    def get_network(self, base_network):
+        return CNNLinearToMean(base_network)
+
+
 class MetadataOnlyModel(BaseTraining, PatientClassifierMixin):
     def __init__(self, args):
         super(CNNMetadataModel, self).__init__(args)
@@ -1041,6 +1061,7 @@ network_map = {
     'cnn_to_nested_lstm': CNNToNestedLSTMModel,
     'cnn_to_nested_transformer': CNNToNestedTransformerModel,
     'cnn_linear_compr_to_rf': CNNLinearComprToRFModel,
+    'cnn_linear_to_mean': CNNLinearToMeanModel,
 }
 
 
