@@ -16,6 +16,8 @@ model_urls = {
 
 
 class _DenseLayer(nn.Sequential):
+    num_layers = 2
+
     def __init__(self, num_input_features, growth_rate, bn_size, drop_rate):
         super(_DenseLayer, self).__init__()
         self.add_module('norm1', nn.BatchNorm1d(num_input_features, track_running_stats=False)),
@@ -37,17 +39,34 @@ class _DenseLayer(nn.Sequential):
                                      training=self.training)
         return torch.cat([x, new_features], 1)
 
+    def conv_info(self):
+        return [1, 3], [1, 1], [0, 1]
+
 
 class _DenseBlock(nn.Sequential):
     def __init__(self, num_layers, num_input_features, bn_size, growth_rate, drop_rate):
         super(_DenseBlock, self).__init__()
+        self.kernel_sizes = []
+        self.strides = []
+        self.paddings = []
+        self.num_layers = 0
         for i in range(num_layers):
             layer = _DenseLayer(num_input_features + i * growth_rate, growth_rate,
                                 bn_size, drop_rate)
+            lks, ls, lp = layer.conv_info()
+            self.kernel_sizes.extend(lks)
+            self.strides.extend(ls)
+            self.paddings.extend(lp)
             self.add_module('denselayer%d' % (i + 1), layer)
+        self.num_layers = _DenseLayer.num_layers * num_layers
+
+    def conv_info(self):
+        return self.kernel_sizes, self.strides, self.paddings
 
 
 class _Transition(nn.Sequential):
+    num_layers = 1
+
     def __init__(self, num_input_features, num_output_features):
         super(_Transition, self).__init__()
         self.add_module('norm', nn.BatchNorm1d(num_input_features, track_running_stats=False))
@@ -55,6 +74,9 @@ class _Transition(nn.Sequential):
         self.add_module('conv', nn.Conv1d(num_input_features, num_output_features,
                                           kernel_size=1, stride=1, bias=False))
         self.add_module('pool', nn.AvgPool1d(kernel_size=2, stride=2))
+
+    def conv_info(self):
+        return [1, 2], [1, 2], [0, 0]
 
 
 class DenseNet(nn.Module):
@@ -74,6 +96,10 @@ class DenseNet(nn.Module):
                  num_init_features=64, bn_size=4, drop_rate=0.2, num_classes=1000):
 
         super(DenseNet, self).__init__()
+        self.kernel_sizes = []
+        self.strides = []
+        self.paddings = []
+        self.n_layers = 0
         self.inplanes = num_init_features
         self.drop_rate = drop_rate
 
@@ -85,6 +111,10 @@ class DenseNet(nn.Module):
             ('relu0', nn.ReLU(inplace=True)),
             ('pool0', nn.MaxPool1d(kernel_size=3, stride=2, padding=1)),
         ]))
+        # the conv and pool are included here
+        self.kernel_sizes.extend([7, 3])
+        self.strides.extend([2, 2])
+        self.paddings.extend([3, 1])
 
         # Each denseblock
         num_features = num_init_features
@@ -92,16 +122,20 @@ class DenseNet(nn.Module):
             block = _DenseBlock(num_layers=num_layers, num_input_features=num_features,
                                 bn_size=bn_size, growth_rate=growth_rate,
                                 drop_rate=drop_rate)
+            self.update_conv_info(block)
             self.features.add_module('denseblock%d' % (i + 1), block)
             num_features = num_features + num_layers * growth_rate
             if i != len(block_config) - 1:
                 trans = _Transition(num_input_features=num_features,
                                     num_output_features=num_features // 2)
+                self.update_conv_info(trans)
+                self.n_layers += trans.num_layers
                 self.features.add_module('transition%d' % (i + 1), trans)
                 num_features = num_features // 2
 
         # Final batch norm
         self.features.add_module('norm5', nn.BatchNorm1d(num_features, track_running_stats=False))
+        # XXX interesting, is there supposed to be a relu here?
 
         # Linear layer
         #self.classifier = nn.Linear(num_features, num_classes)
@@ -120,6 +154,16 @@ class DenseNet(nn.Module):
         self.n_out_filters = num_features
         self.avgpool = nn.AvgPool1d(7, stride=1)
 
+    def update_conv_info(self, obj):
+        bks, bs, bp = obj.conv_info()
+        self.n_layers += obj.num_layers
+        self.kernel_sizes.extend(bks)
+        self.strides.extend(bs)
+        self.paddings.extend(bp)
+
+    def conv_info(self):
+        return self.kernel_sizes, self.strides, self.paddings
+
     def forward(self, x):
         features = self.features(x)
         #print(features.size())
@@ -131,6 +175,10 @@ class DenseNet(nn.Module):
         #print(out.size())
         #print(self.n_out_filters)
         return out
+
+    def forward_no_pool(self, x):
+        features = self.features(x)
+        return F.relu(features, inplace=True)
 
 
 def _load_state_dict(model, model_url, progress):

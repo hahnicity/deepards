@@ -175,7 +175,7 @@ class ARDSRawDataset(Dataset):
         elif holdout_set_type == 'proto':
             data_subdir = 'prototrain' if train else 'prototest'
         elif holdout_set_type == 'main':
-            data_subdir = 'training' if train else 'testing'
+            data_subdir = 'aim1_70_30_training' if train else 'aim1_70_30_testing'
         elif holdout_set_type == 'random':
             if train:
                 data_subdir = 'randomtrain'

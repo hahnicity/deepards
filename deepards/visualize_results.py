@@ -54,6 +54,7 @@ def visualize_results_for_start_time(start_time):
     plt.legend()
     plt.grid()
     plt.ylabel('loss')
+    plt.title('test loss')
     plt.show()
 
     all_vals = None

@@ -24,6 +24,7 @@ from deepards.models.cnn_to_nested_layer import CNNToNestedLSTMNetwork, CNNToNes
 from deepards.models.cnn_transformer import CNNTransformerNetwork
 from deepards.models.densenet import densenet18, densenet121, densenet161, densenet169, densenet201
 from deepards.models.lstm_only import DoubleLSTMNetwork, LSTMOnlyNetwork, LSTMOnlyWithPacking
+from deepards.models.protopnet import construct_PPNet
 from deepards.models.resnet import resnet18, resnet50, resnet101, resnet152
 from deepards.models.senet import senet18, senet154, se_resnet18, se_resnet50, se_resnet101, se_resnet152, se_resnext50_32x4d, se_resnext101_32x4d
 from deepards.models.siamese import SiameseARDSClassifier, SiameseCNNLinearNetwork, SiameseCNNLSTMNetwork, SiameseCNNTransformerNetwork
@@ -33,6 +34,7 @@ from deepards.models.torch_cnn_linear_network import CNNDoubleLinearNetwork, CNN
 from deepards.models.torch_metadata_only_network import MetadataOnlyNetwork
 from deepards.models.unet import UNet
 from deepards.models.vgg import vgg11_bn, vgg13_bn
+from deepards.ppnet_push import prototype_viz, push_prototypes
 
 torch.set_default_tensor_type('torch.FloatTensor')
 base_networks = {
@@ -198,7 +200,7 @@ class BaseTraining(object):
         if not self.args.test_from_pickle and (self.args.kfolds is not None):
             test_dataset = ARDSRawDataset.make_test_dataset_if_kfold(train_dataset)
         elif self.args.test_from_pickle:
-            test_dataset = ARDSRawDataset.from_pickle(self.args.test_from_pickle, False, 1.0, None, -1)
+            test_dataset = ARDSRawDataset.from_pickle(self.args.test_from_pickle, False, 1.0, None, -1, None)
         else:  # holdout, no pickle, no kfold
             # there is a really bizarre bug where my default arg is being overwritten by
             # the state of the train_dataset obj. I checked pointer references and there was
@@ -255,9 +257,9 @@ class BaseTraining(object):
                 continue
             model = self.get_model()
             optimizer = self.get_optimizer(model)
-            for epoch_num in range(self.args.epochs):
+            for epoch_num in range(1, self.args.epochs+1):
                 if not self.args.no_train:
-                    self.run_train_epoch(model, train_loader, optimizer, epoch_num+1, fold_num)
+                    self.run_train_epoch(model, train_loader, optimizer, epoch_num, fold_num)
                 if self.args.reshuffle_oversample_per_epoch:
                     train_loader.dataset.set_oversampling_indices()
 
@@ -1038,6 +1040,223 @@ class SiamesePretrainedModel(PerBreathClassifierMixin, BaseTraining, PatientClas
         return SiameseARDSClassifier(network)
 
 
+class ProtoPNetModel(BaseTraining, PatientClassifierMixin):
+    def __init__(self, args):
+        super(ProtoPNetModel, self).__init__(args)
+
+    def get_network(self, base_network):
+        return construct_PPNet(
+            base_network,
+            self.args.n_sub_batches,
+            prototype_shape=(self.args.n_prototypes*2, 128, 1),
+            batch_size=self.args.batch_size
+        )
+
+    def get_optimizer(self, model):
+        if self.args.optimizer == 'adam':
+            optim_cls = torch.optim.Adam
+        elif self.args.optimizer == 'sgd':
+            optim_cls = torch.optim.SGD
+        joint_optimizer_specs = [{
+            'params': model.features.parameters(),
+            'lr': self.args.learning_rate,
+            'weight_decay': self.args.weight_decay,
+        }, {
+            'params': model.add_on_layers.parameters(),
+            'lr': self.args.learning_rate,
+            'weight_decay': self.args.weight_decay,
+        }, {
+            'params': model.prototype_vectors,
+            'lr': self.args.learning_rate,
+        }]
+        joint_optimizer = optim_cls(joint_optimizer_specs)
+
+        warm_optimizer_specs = [{
+            'params': model.add_on_layers.parameters(),
+            'lr': self.args.learning_rate,
+            'weight_decay': self.args.weight_decay,
+        }, {
+            'params': model.prototype_vectors,
+            'lr': self.args.learning_rate,
+        }]
+        warm_optimizer = optim_cls(warm_optimizer_specs)
+        last_layer_optimizer_specs = [{
+            'params': model.last_layer.parameters(),
+            'lr': self.args.learning_rate,
+            'weight_decay': self.args.weight_decay,
+        }]
+        last_layer_optimizer = optim_cls(last_layer_optimizer_specs)
+        return [warm_optimizer, joint_optimizer, last_layer_optimizer]
+
+    def _process_test_batch_results(self, outputs, target, inputs, fold_num):
+        batch_preds = outputs.argmax(dim=-1).cpu()
+        target = target.argmax(dim=1).cpu()
+        self.record_testing_results(target, batch_preds, fold_num)
+        return batch_preds.tolist()
+
+    def calc_loss(self, model, output, target, min_distances):
+        # compute loss. change to BCE with logits because of the binary classification
+        # problem we are dealing with.
+        cls_loss = F.binary_cross_entropy(F.softmax(output, dim=1), target)
+        max_dist = (model.prototype_shape[1] * model.prototype_shape[2])
+        label = target.argmax(dim=1)
+        # prototypes_of_correct_class is a tensor of shape batch_size * num_prototypes
+        # calculate cluster cost
+        # just pick which prototypes are relevant for each observation
+        prototypes_of_correct_class = self.cuda_wrapper(torch.t(model.prototype_class_identity[:,label]))
+        inverted_distances, _ = torch.max((max_dist - min_distances) * prototypes_of_correct_class, dim=1)
+        cluster_cost = torch.mean(max_dist - inverted_distances)
+
+        # calculate separation cost
+        prototypes_of_wrong_class = 1 - prototypes_of_correct_class
+        inverted_distances_to_nontarget_prototypes, _ = \
+            torch.max((max_dist - min_distances) * prototypes_of_wrong_class, dim=1)
+        separation_cost = torch.mean(max_dist - inverted_distances_to_nontarget_prototypes)
+
+        # calculate avg cluster cost
+        avg_separation_cost = \
+            torch.sum(min_distances * prototypes_of_wrong_class, dim=1) / torch.sum(prototypes_of_wrong_class, dim=1)
+        avg_separation_cost = torch.mean(avg_separation_cost)
+
+        l1_mask = 1 - self.cuda_wrapper(torch.t(model.prototype_class_identity))
+        l1 = (model.last_layer.weight * l1_mask).norm(p=1)
+
+        # XXX this is if we are not class_specific. What does this mean? do we
+        # need class specific? I know sep cost doesnt come into effect in
+        # non-class_specific
+        #else:
+        #    min_distance, _ = torch.min(min_distances, dim=1)
+        #    cluster_cost = torch.mean(min_distance)
+        #    l1 = model.last_layer.weight.norm(p=1)
+
+        # compute gradient and do SGD step
+        #
+        # interesting. cluster and sep losses come down during run, but
+        # cls_loss can remain pretty high. I wonder if removing sep loss
+        # helps this at all
+        #
+        # sep seems to come down regardless. having no sep loss actually seems
+        # to help a bit as I predicted. Although there will need to
+        # be some real empirical experiment to ensure this. There's
+        # also the need of adding grad clipping here because the gradients
+        # can def. explode with some batches.
+        #
+        # It would be nice to investigate lowering cluster loss. Dont think
+        # that its always a reasonable assumption that we have a prototype well
+        # represented in a single read.
+        loss = cls_loss + self.args.clust_lambda * cluster_cost + self.args.sep_lambda * separation_cost + 1e-4 * l1
+        return loss, cls_loss, cluster_cost, separation_cost, l1
+
+    def run_train_epoch(self, model, train_loader, optimizer, epoch_num, fold_num):
+        # and then what they start doing is pushing prototypes. I dont know what this
+        # means. It seems like the prototypes are pushed towards the nearest patch.
+        # Yes the paper describes this as the method of how the prototypes are
+        # overlaid with the img.
+        print('train instances: {}'.format(len(train_loader)))
+        if epoch_num <= self.args.n_warm_epochs:
+            # choose only the warm optimizer
+            optim = optimizer[0]
+        else:
+            # choose the joint optimizer
+            optim = optimizer[1]
+
+        # XXX need to impl grad clipping
+        with torch.enable_grad():
+            print("\nrun epoch {}\n".format(epoch_num))
+            total_batches = len(train_loader)
+            for batch_idx, (obs_idx, seq, metadata, target) in enumerate(train_loader):
+                inputs = self.cuda_wrapper(Variable(seq).float())
+                target = self.cuda_wrapper(Variable(target).float())
+
+                output, min_distances = model(inputs, None)
+                loss, cls_loss, cluster_cost, separation_cost, l1 = self.calc_loss(model, output, target, min_distances)
+                optim.zero_grad()
+                loss.backward()
+                optim.step()
+                self.results.update_meter('cls_loss', fold_num, cls_loss.data)
+                self.results.update_meter('clst_loss', fold_num, cluster_cost.data)
+                self.results.update_meter('sep_loss', fold_num, separation_cost.data)
+                self.results.update_meter('l1_loss', fold_num, l1.data)
+                self.results.update_meter('loss_epoch_{}'.format(epoch_num), fold_num, loss)
+                self.results.update_loss(fold_num, loss.data)
+
+                # print individual loss and total loss
+                if not self.args.no_print_progress:
+                    print("batch num: {}/{}, avg loss: {}, cls_loss: {}\r".format(
+                        batch_idx,
+                        total_batches,
+                        self.results.get_meter('loss_epoch_{}'.format(epoch_num), fold_num),
+                        self.results.get_meter('cls_loss', fold_num),
+                        end=""
+                    ))
+
+                if self.args.debug:
+                    break
+
+        if epoch_num >= self.args.push_start_epoch and (epoch_num - self.args.push_start_epoch) % self.args.push_every_n == 0:
+            # saving prototype push viz isnt that helpful on training because
+            # prototypes are subject to change. its more helpful on test
+            push_prototypes(train_loader, model, self.cuda_wrapper)
+            optim = optimizer[2]
+            with torch.enable_grad():
+                for iter in range(self.args.n_push_iters):
+                    print("\nrun iter {}\n".format(iter))
+                    total_batches = len(train_loader)
+                    for batch_idx, (obs_idx, seq, metadata, target) in enumerate(train_loader):
+                        inputs = self.cuda_wrapper(Variable(seq).float())
+                        target = self.cuda_wrapper(Variable(target).float())
+
+                        output, min_distances = model(inputs, None)
+                        loss, cls_loss, cluster_cost, separation_cost, l1 = self.calc_loss(model, output, target, min_distances)
+                        optim.zero_grad()
+                        loss.backward()
+                        optim.step()
+                        self.results.update_meter('cls_loss', fold_num, cls_loss.data)
+                        self.results.update_loss(fold_num, loss.data)
+                        # print individual loss and total loss
+                        if not self.args.no_print_progress:
+                            print("batch num: {}/{}, cls_loss: {}\r".format(
+                                batch_idx,
+                                total_batches,
+                                self.results.get_meter('cls_loss', fold_num),
+                                end=""
+                            ))
+                    if self.args.debug:
+                        break
+
+    def run_test_epoch(self, epoch_num, model, test_dataset, test_loader, fold_num):
+        self.preds = []
+        self.pred_idx = []
+        with torch.no_grad():
+            model.eval()
+            for batch_idx, (obs_idx, seq, metadata, target) in enumerate(test_loader):
+                inputs = self.cuda_wrapper(Variable(seq).float())
+                target = self.cuda_wrapper(Variable(target).float())
+
+                outputs, min_distances = model(inputs, None)
+                loss, cls_loss, cluster_cost, separation_cost, l1 = self.calc_loss(
+                    model, outputs, target, min_distances
+                )
+                outputs = F.softmax(outputs, dim=1)
+                self.results.update_meter('test_loss', fold_num, loss.data)
+                self.results.update_epoch_meter('test_loss', epoch_num, loss.data)
+                batch_preds = self._process_test_batch_results(outputs, target, inputs, fold_num)
+                self.pred_idx.extend(self.transform_obs_idx(obs_idx, outputs).cpu().tolist())
+                self.preds.extend(batch_preds)
+
+        if epoch_num >= self.args.viz_start_epoch and (epoch_num-self.args.viz_start_epoch) % self.args.viz_every_n == 0:
+            prototype_viz(
+                test_loader,
+                model,
+                root_dir_for_saving_prototypes=self.args.prototype_results_dir,
+                epoch_num=epoch_num,
+                cuda_wrapper=self.cuda_wrapper,
+                proto_seq_filename_prefix=self.args.prototype_fname_prefix,
+            )
+
+        self.record_final_epoch_testing_results(fold_num, epoch_num, test_dataset)
+
+
 # Is putting a global in code like this a great idea? probably not, but saves some hassle
 # on outside scripting
 network_map = {
@@ -1062,6 +1281,7 @@ network_map = {
     'cnn_to_nested_transformer': CNNToNestedTransformerModel,
     'cnn_linear_compr_to_rf': CNNLinearComprToRFModel,
     'cnn_linear_to_mean': CNNLinearToMeanModel,
+    'protopnet': ProtoPNetModel,
 }
 
 
@@ -1171,6 +1391,17 @@ def build_parser():
     true_false_flag('--drop-e-lim', '')
     parser.add_argument('--truncate-e-lim', type=float, help='Number of seconds of the E lim to keep. Everything afterwards is discarded. Should be done in a number divisible by 2', default=None)
     parser.add_argument('--only-fold', type=int, default=None, help='only run specific fold')
+    parser.add_argument('--n-warm-epochs', type=int, help='number of warm epochs to run with protopnet')
+    parser.add_argument('-pse', '--push-start-epoch', type=int, help='epoch to start the projection pushes')
+    parser.add_argument('--push-every-n', type=int, help='starting at push start, push every n epochs')
+    parser.add_argument('--n-push-iters', type=int, help='number of iterations to optimize last layer following push')
+    parser.add_argument('--clust-lambda', type=float, help='multiplier of cluster loss for protopnet')
+    parser.add_argument('--sep-lambda', type=float, help='multiplier of separation loss for protopnet')
+    parser.add_argument('-vse', '--viz-start-epoch', type=int, help='epoch to start visualizing prototypes')
+    parser.add_argument('--viz-every-n', type=int, help='visualize prototypes every n eepochs')
+    parser.add_argument('--prototype-results-dir', help='directory to save prototype visualizations')
+    parser.add_argument('--prototype-fname-prefix', help='prefix to save prototype visualization filenames')
+    parser.add_argument('-np', '--n-prototypes', type=int, help='number of prototypes to use per class in our model')
     return parser
 
 

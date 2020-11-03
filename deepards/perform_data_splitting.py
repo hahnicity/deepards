@@ -143,8 +143,8 @@ class Splitting(object):
         self.create_split(test_pts, 'prototest')
 
     def perform_preset_aim1_split(self):
-        self.create_split(self.original_map['aim1_train'], 'training')
-        self.create_split(self.original_map['aim1_test'], 'testing')
+        self.create_split(self.original_map['aim1_train'], 'aim1_70_30_training')
+        self.create_split(self.original_map['aim1_test'], 'aim1_70_30_testing')
 
     def perform_preset_file_split(self, file_path):
         with open(file_path) as preset_file:

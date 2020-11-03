@@ -25,9 +25,9 @@ resnet_first_pool_type: max
 
 # main hyperparameters
 optimizer: sgd
-dataset_type: padded_breath_by_breath
+dataset_type: unpadded_centered_sequences
 learning_rate: 0.001
-n_sub_batches: 100
+n_sub_batches: 20
 weight_decay: 0.0001
 loss_func: bce
 clip_val: 0.01
@@ -41,6 +41,19 @@ stop_after_epoch: 1
 
 # augmentation options
 transform_probability: .2
+
+# protopnet
+n_warm_epochs: 3
+push_start_epoch: 6
+clust_lambda: 0.8
+sep_lambda: 0.2
+viz_start_epoch: 4
+push_every_n: 6
+n_push_iters: 5
+viz_every_n: 4
+prototype_results_dir: prototype_results/
+prototype_fname_prefix: proto
+n_prototypes: 10
 
 # other options
 holdout_set_type: main
