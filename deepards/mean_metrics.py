@@ -73,10 +73,7 @@ def get_metrics(start_times):
     return mean_df_stats, df_stats
 
 
-def _do_fold_graphing(df_stats, metric, label='aggregate results'):
-    if len(df_stats.fold.unique()) > 1:
-        for k, stats in df_stats.groupby('fold'):
-            sns.lineplot(x='epoch', y=metric, data=stats, label='fold {}'.format(int(k)))
+def _graph_aggregate(df_stats, metric, label):
     sns.lineplot(x='epoch', y=metric, data=df_stats, label=label)
     plt.xticks(np.arange(len(df_stats.epoch.unique())), sorted((df_stats.epoch.unique()+1).astype(int)))
     ax = plt.gca()
@@ -85,7 +82,14 @@ def _do_fold_graphing(df_stats, metric, label='aggregate results'):
     plt.grid(axis='both')
 
 
-def do_fold_graphing(start_times):
+def _do_fold_graphing(df_stats, metric, label='aggregate results'):
+    if len(df_stats.fold.unique()) > 1:
+        for k, stats in df_stats.groupby('fold'):
+            sns.lineplot(x='epoch', y=metric, data=stats, label='fold {}'.format(int(k)))
+    _graph_aggregate(df_stats, metric, label)
+
+
+def do_fold_graphing(start_times, only_aggregate):
     df_patient_results_list = []
     for time in start_times:
         df = pd.read_pickle("results/{}_patient_results.pkl".format(time))
@@ -96,7 +100,10 @@ def do_fold_graphing(start_times):
         df_stats = computeMetricsFromPatientResults(df, df_stats)
 
     for metric in ['AUC', 'Accuracy', 'sensitivity', 'specificity']:
-        _do_fold_graphing(df_stats, metric)
+        if not only_aggregate:
+            _do_fold_graphing(df_stats, metric)
+        else:
+            _graph_aggregate(df_stats, metric, 'aggregate results')
         plt.show()
 
 
@@ -178,6 +185,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('-e', '--experiment-name', default='main_experiment')
     parser.add_argument('-sds', '--sim-dissim-file', help='If we are comparing between similar and dissimilar patients in the testing cohort, then supply a yaml file which specifies which patients are similar and which are dissimilar')
+    parser.add_argument('--only-aggregate', action='store_true', help='only graph aggregate results')
     args = parser.parse_args()
 
     exp_results = []
@@ -196,5 +204,5 @@ if __name__ == "__main__":
     if args.sim_dissim_file:
         analyze_similar_dissimilar_experiments(args.sim_dissim_file, unique_experiments)
     else:
-        do_fold_graphing(unique_experiments)
+        do_fold_graphing(unique_experiments, args.only_aggregate)
     # XXX analytics needed
