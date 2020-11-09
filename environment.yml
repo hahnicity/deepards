@@ -13,6 +13,9 @@ dependencies:
   - scikit-learn
   - opencv
   - pathlib
+  - pip
+  - pip:
+    - pathlib
 channels:
   - pytorch
   - conda-forge
