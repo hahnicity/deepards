@@ -288,6 +288,109 @@ def update_prototypes_on_batch(seq,
         del class_to_img_index_dict
 
 
+def viz_single_prototype(model,
+                         seq,
+                         target,
+                         protoL_input,
+                         proto_dist,
+                         prototype_idx):
+    """
+    For a single read, visualize the receptive field focused on by a prototype
+
+    :param model: The pytorch model
+    :param seq: sequence of data for the read
+    :param target: 0/1 for Non-ARDS/ARDS
+    :param protoL_input:
+    :param proto_dist:
+    :param prototype_idx:
+    """
+    seq_size = 224
+    protoL_input = np.copy(protoL_input.detach().cpu().numpy())
+    proto_dist = np.copy(proto_dist.detach().cpu().numpy())
+    max_dist = model.prototype_shape[1] * model.prototype_shape[2]
+
+    proto_dist_j = proto_dist[:,prototype_idx,:]
+    # just finds the indexing of the min in the array. they use unravel_index
+    # they just wanted a clever 1-liner to find this.
+    #
+    # maybe we can just have this get a sub-batch specific item?? I dont know
+    # the rest of the code well enuf to know if this makes sense or not.
+    #
+    # XXX are my dimensions all messed up as a result of just doing single sequences?
+    batch_argmin_proto_dist_j = \
+        list(np.unravel_index(np.argmin(proto_dist_j, axis=None),
+                              proto_dist_j.shape))
+
+    # retrieve the corresponding feature map patch
+    breath_index_in_read = batch_argmin_proto_dist_j[0]
+
+    # get the receptive field boundary of the image patch
+    # that generates the representation
+    protoL_rf_info = model.proto_layer_rf_info
+    # XXX dimensionality will probably get all screwed up
+    rf_prototype_j = compute_rf_prototype(seq_size, batch_argmin_proto_dist_j, protoL_rf_info)
+
+    # get the whole image
+    #
+    # XXX for now this is just working on a single sequence that has been defined
+    # by argmin. I'd like to in the future, be able to just run through all the
+    # breaths in a read and just look at each prototype sequentially
+    original_seq_j = seq.numpy()
+
+    # crop out the receptive field
+    rf_seq_j = original_seq_j[:, rf_prototype_j[1]:rf_prototype_j[2]]
+
+    # find the highly activated region of the original image
+    proto_dist_seq_j = proto_dist[breath_index_in_read, prototype_idx, :]
+    if model.prototype_activation_function == 'log':
+        proto_act_seq_j = np.log((proto_dist_seq_j + 1) / (proto_dist_seq_j + model.epsilon))
+    elif model.prototype_activation_function == 'linear':
+        proto_act_seq_j = max_dist - proto_dist_seq_j
+    else:
+        proto_act_seq_j = proto_activation_function_in_numpy(proto_dist_seq_j)
+    # use scipy.signal.resample.
+    upsampled_act_seq_j = resample(proto_act_seq_j, seq_size)
+    proto_bound_j = find_high_activation_crop(upsampled_act_seq_j)
+    # save the prototype boundary (rectangular boundary of highly activated region)
+
+    # save the whole image containing the prototype as png
+    cam_j = upsampled_act_seq_j - np.amin(upsampled_act_seq_j)
+    cam_j = (cam_j / np.amax(cam_j) * 255).ravel()
+    if rf_seq_j.shape[1] != seq_size:
+        seq_reshape = rf_seq_j.reshape((rf_seq_j.shape[1], 1))
+        cam_j = cam_j[rf_prototype_j[1]:rf_prototype_j[2]]
+        filename = filename.replace('.png', '-receptive-field.png')
+        x_min = max([0, proto_bound_j[0]-rf_prototype_j[1]-2])
+        y_min = original_seq_j[:, proto_bound_j[0]:proto_bound_j[1]].min() - .01
+        width = proto_bound_j[1] - proto_bound_j[0] + 2.5
+        height = original_seq_j[:, proto_bound_j[0]:proto_bound_j[1]].max() - y_min + .02
+    else:
+        seq_reshape = original_seq_j.reshape((seq_size, 1))
+        x_min = max([0, proto_bound_j[0]-2])
+        y_min = original_seq_j[:, proto_bound_j[0]:proto_bound_j[1]].min() - .01
+        width = proto_bound_j[1] - x_min + 2
+        height = original_seq_j[:, proto_bound_j[0]:proto_bound_j[1]].max() - y_min + .02
+
+    t = np.arange(0, len(seq_reshape), 1)
+    plt.scatter(t, seq_reshape, c=cam_j, vmin=0, vmax=255)
+    plt.plot(t, seq_reshape)
+    cbar = plt.colorbar()
+    cbar.set_label('cam outputs', labelpad=-1)
+    mapping = {0: 'Non-ARDS', 1: 'ARDS'}
+    gt_lab = mapping[target]
+    title = 'gt: {}, breath_idx: {} proto: {}'.format(
+        gt_lab,
+        breath_index_in_read,
+        prototype_idx,
+    )
+    plt.title(title)
+    final_path = str(Path(dir_for_saving_prototypes).joinpath(filename))
+    rect = Rectangle((x_min, y_min), width, height, linewidth=1, edgecolor='r', facecolor='none', label='prototype activation zone')
+    ax = plt.gca()
+    ax.add_patch(rect)
+    plt.legend()
+
+
 # push each prototype to the nearest patch in the training set
 def prototype_viz(dataloader, # pytorch dataloader (must be unnormalized in [0,1])
                   model, # pytorch network with prototype_vectors

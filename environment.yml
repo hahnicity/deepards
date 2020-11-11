@@ -7,12 +7,18 @@ dependencies:
   - pandas
   - pytorch
   - torchvision
-  - cudatoolkit=10.1
+  - cudatoolkit=11.0
   - seaborn
   - scipy
   - scikit-learn
   - opencv
   - pathlib
+  - shap
+  - pip
+  - matplotlib
+  - pyqt
+  - jupyter
+  - ipython
 channels:
   - pytorch
   - conda-forge
