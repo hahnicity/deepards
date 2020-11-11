@@ -14,11 +14,13 @@ dependencies:
   - opencv
   - pathlib
   - shap
-  - pip
   - matplotlib
   - pyqt
   - jupyter
   - ipython
+  - pip
+  - pip:
+    - pathlib
 channels:
   - pytorch
   - conda-forge

@@ -4,12 +4,12 @@ clip_grad: true
 dataset_type: unpadded_centered_with_bm
 oversample: true
 kfolds: 5
-#no_print_progress: true
+no_print_progress: true
 epochs: 18
 batch_size: 16
 network: protopnet
-train_from_pickle: /fastdata/deepards/unpadded_centered_with_bm-nb20-kfold.pkl
-#train_to_pickle: /fastdata/deepards/unpadded_centered_with_bm-nb20-kfold.pkl
+train_from_pickle: unpadded_centered_with_bm-nb20-kfold.pkl
+#train_to_pickle: unpadded_centered_with_bm-nb20-kfold.pkl
 n_sub_batches: 20
 data_path: /fastdata/ardsdetection
 n_prototypes: 7
