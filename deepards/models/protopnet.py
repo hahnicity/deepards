@@ -47,12 +47,9 @@ def compute_layer_rf_info(layer_filter_size, layer_stride, layer_padding,
 
 
 def compute_rf_protoL_at_spatial_location(seq_len, width_index, protoL_rf_info):
-    # XXX removed height from eq here. but still need to reconcile
-    # protoL_rf_info
     n = protoL_rf_info[0]
     j = protoL_rf_info[1]
     r = protoL_rf_info[2]
-    # XXX start hasn't changed from 0.5 even though a number of other params have.
     start = protoL_rf_info[3]
     assert(width_index < n)
 

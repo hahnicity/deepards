@@ -8,8 +8,8 @@ no_print_progress: true
 epochs: 18
 batch_size: 16
 network: protopnet
-train_from_pickle: unpadded_centered_with_bm-nb20-kfold.pkl
-#train_to_pickle: unpadded_centered_with_bm-nb20-kfold.pkl
+train_from_pickle: /fastdata/deepards/unpadded_centered_with_bm-nb20-kfold.pkl
+#train_to_pickle: /fastdata/deepards/unpadded_centered_with_bm-nb20-kfold.pkl
 n_sub_batches: 20
 data_path: /fastdata/ardsdetection
 n_prototypes: 6
@@ -17,7 +17,7 @@ n_push_iters: 10
 sep_lambda: 1.0
 clust_lambda: 0.8
 viz_every_n: 4
-viz_start_epoch: 14
+viz_start_epoch: 20
 push_start_epoch: 6
 push_every_n: 4
 prototype_fname_prefix: proto_kfold_np6
