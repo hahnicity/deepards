@@ -114,7 +114,7 @@ class PPNet(nn.Module):
     def __init__(self, features, seq_len, prototype_shape, sub_batch_size, batch_size,
                  proto_layer_rf_info, num_classes, init_weights=True,
                  prototype_activation_function='log',
-                 add_on_layers_type='bottleneck'):
+                 add_on_layers_type='bottleneck', incorrect_strength=-0.5):
 
         super(PPNet, self).__init__()
         self.seq_len = seq_len
@@ -123,6 +123,7 @@ class PPNet(nn.Module):
         self.num_classes = num_classes
         self.epsilon = 1e-4
         self.sub_batch_size = sub_batch_size
+        self.incorrect_strength = incorrect_strength
 
         # prototype_activation_function could be 'log', 'linear',
         # or a generic function that converts distance to similarity score
@@ -138,6 +139,7 @@ class PPNet(nn.Module):
         for j in range(self.num_prototypes):
             self.prototype_class_identity_orig[j, j // num_prototypes_per_class] = 1
         self.prototype_class_identity = self.prototype_class_identity_orig.repeat((20, 1))
+        self.prototype_class_identity_cuda = self.prototype_class_identity.cuda()
 
         self.proto_layer_rf_info = proto_layer_rf_info
 
@@ -302,7 +304,7 @@ class PPNet(nn.Module):
                           self.num_classes,
                           self.epsilon)
 
-    def set_last_layer_incorrect_connection(self, incorrect_strength):
+    def set_last_layer_incorrect_connection(self):
         '''
         Preset weights on final linear layer so that things will be weighted
         toward using class specific prototypes to make class specific predictions
@@ -313,7 +315,7 @@ class PPNet(nn.Module):
         negative_one_weights_locations = 1 - positive_one_weights_locations
 
         correct_class_connection = 1
-        incorrect_class_connection = incorrect_strength
+        incorrect_class_connection = self.incorrect_strength
         weights = (correct_class_connection * positive_one_weights_locations
                    + incorrect_class_connection * negative_one_weights_locations)
         self.last_layer.weight.data.copy_(weights)
@@ -331,7 +333,12 @@ class PPNet(nn.Module):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
 
-        self.set_last_layer_incorrect_connection(incorrect_strength=-0.5)
+        self.set_last_layer_incorrect_connection()
+
+    def ensure_incorrect_protos_zeroed(self):
+        weights = self.last_layer.weight.data
+        new_weights = weights * torch.t(self.prototype_class_identity_cuda)
+        self.last_layer.weight.data.copy_(new_weights)
 
 
 # first num in prototype_shape has to do with how many total prototypes we want.
@@ -339,7 +346,7 @@ class PPNet(nn.Module):
 def construct_PPNet(base_architecture, sub_batch_size, seq_len=224,
                     prototype_shape=(20, 128, 1), num_classes=2,
                     prototype_activation_function='log',
-                    add_on_layers_type='bottleneck', batch_size=16):
+                    add_on_layers_type='bottleneck', batch_size=16, incorrect_strength=-0.5):
     # add_on_layers_type is set to "regular" in the original settings
     layer_filter_sizes, layer_strides, layer_paddings = base_architecture.conv_info()
     proto_layer_rf_info = compute_proto_layer_rf_info_v2(seq_len=seq_len,
@@ -356,7 +363,8 @@ def construct_PPNet(base_architecture, sub_batch_size, seq_len=224,
                  num_classes=num_classes,
                  init_weights=True,
                  prototype_activation_function=prototype_activation_function,
-                 add_on_layers_type=add_on_layers_type)
+                 add_on_layers_type=add_on_layers_type,
+                 incorrect_strength=incorrect_strength)
 
 
 

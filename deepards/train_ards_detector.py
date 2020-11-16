@@ -1045,11 +1045,16 @@ class ProtoPNetModel(BaseTraining, PatientClassifierMixin):
         super(ProtoPNetModel, self).__init__(args)
 
     def get_network(self, base_network):
+        if self.args.zero_incorrect_protos:
+            incorrect_strength = 0.0
+        else:
+            incorrect_strength = -0.5
         return construct_PPNet(
             base_network,
             self.args.n_sub_batches,
             prototype_shape=(self.args.n_prototypes*2, 128, 1),
-            batch_size=self.args.batch_size
+            batch_size=self.args.batch_size,
+            incorrect_strength=incorrect_strength,
         )
 
     def get_optimizer(self, model):
@@ -1160,7 +1165,6 @@ class ProtoPNetModel(BaseTraining, PatientClassifierMixin):
             # choose the joint optimizer
             optim = optimizer[1]
 
-        # XXX need to impl grad clipping
         with torch.enable_grad():
             print("\nrun epoch {}\n".format(epoch_num))
             total_batches = len(train_loader)
@@ -1173,6 +1177,8 @@ class ProtoPNetModel(BaseTraining, PatientClassifierMixin):
                 optim.zero_grad()
                 loss.backward()
                 optim.step()
+                if self.args.zero_incorrect_protos:
+                    model.ensure_incorrect_protos_zeroed()
                 self.results.update_meter('cls_loss', fold_num, cls_loss.data)
                 self.results.update_meter('clst_loss', fold_num, cluster_cost.data)
                 self.results.update_meter('sep_loss', fold_num, separation_cost.data)
@@ -1211,6 +1217,8 @@ class ProtoPNetModel(BaseTraining, PatientClassifierMixin):
                         optim.zero_grad()
                         loss.backward()
                         optim.step()
+                        if self.args.zero_incorrect_protos:
+                            model.ensure_incorrect_protos_zeroed()
                         self.results.update_meter('cls_loss', fold_num, cls_loss.data)
                         self.results.update_loss(fold_num, loss.data)
                         # print individual loss and total loss
@@ -1402,6 +1410,7 @@ def build_parser():
     parser.add_argument('--prototype-results-dir', help='directory to save prototype visualizations')
     parser.add_argument('--prototype-fname-prefix', help='prefix to save prototype visualization filenames')
     parser.add_argument('-np', '--n-prototypes', type=int, help='number of prototypes to use per class in our model')
+    true_false_flag('--zero-incorrect-protos', 'ensure that incorrect protos do not contribute to predictions')
     return parser
 
 

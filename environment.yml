@@ -21,6 +21,7 @@ dependencies:
   - pip
   - pip:
     - pathlib
+    - lime
 channels:
   - pytorch
   - conda-forge
