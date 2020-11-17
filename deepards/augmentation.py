@@ -78,8 +78,8 @@ class IEWindowWarpingBase(object):
         # modify each breath instance in the sub batch
         for b_idx, inst in enumerate(sub_batch):
             rel_time_array = list(np.arange(dt, dt+dt*seq_len, dt))
-            x0s = find_x0s_multi_algorithms(list(inst[0]), rel_time_array, rel_time_array[-1], dt=dt)
-            i_time, x0_idx = x0_heuristic(x0s, None, rel_time_array)
+            x0s = find_x0s_multi_algorithms(list(inst[0]), rel_time_array, dt=dt)
+            i_time, x0_idx = x0_heuristic(x0s, rel_time_array)
 
             # warp the i or e time.
             warping_ratio = np.random.uniform(self.rate_lower_bound, self.rate_upper_bound)

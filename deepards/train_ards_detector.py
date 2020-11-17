@@ -2,9 +2,14 @@ from __future__ import print_function
 import argparse
 from datetime import datetime
 import os
+import sys
 
 import numpy as np
 import pandas as pd
+import six
+# this is for python3 compat
+if sys.version_info.major == 3:
+    sys.modules['sklearn.externals.six'] = six
 from sklearn.metrics import accuracy_score, classification_report, mean_absolute_error, mean_squared_error, r2_score
 import torch
 from torch.autograd import Variable
