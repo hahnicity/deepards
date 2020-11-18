@@ -1060,6 +1060,7 @@ class ProtoPNetModel(BaseTraining, PatientClassifierMixin):
             prototype_shape=(self.args.n_prototypes*2, 128, 1),
             batch_size=self.args.batch_size,
             incorrect_strength=incorrect_strength,
+            average_linear=self.args.average_linear_layer,
         )
 
     def get_optimizer(self, model):
@@ -1114,6 +1115,12 @@ class ProtoPNetModel(BaseTraining, PatientClassifierMixin):
         # calculate cluster cost
         # just pick which prototypes are relevant for each observation
         prototypes_of_correct_class = self.cuda_wrapper(torch.t(model.prototype_class_identity[:,label]))
+        # XXX if I do averagiing I can do this a few ways.
+        #  1. average the distances and this eq. doesn't change
+        #  2. dont average the distances and keep a separate un-averaged output var
+        #     to use in the loss function
+        #
+        # for now I should try #1 and #2 if #1 delivers poor perf
         inverted_distances, _ = torch.max((max_dist - min_distances) * prototypes_of_correct_class, dim=1)
         cluster_cost = torch.mean(max_dist - inverted_distances)
 
@@ -1416,6 +1423,7 @@ def build_parser():
     parser.add_argument('--prototype-fname-prefix', help='prefix to save prototype visualization filenames')
     parser.add_argument('-np', '--n-prototypes', type=int, help='number of prototypes to use per class in our model')
     true_false_flag('--zero-incorrect-protos', 'ensure that incorrect protos do not contribute to predictions')
+    true_false_flag('--average-linear-layer', 'instead of flattening the linear layer average all like features together. currently this only works for protopnet')
     return parser
 
 

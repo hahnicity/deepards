@@ -114,7 +114,7 @@ class PPNet(nn.Module):
     def __init__(self, features, seq_len, prototype_shape, sub_batch_size, batch_size,
                  proto_layer_rf_info, num_classes, init_weights=True,
                  prototype_activation_function='log',
-                 add_on_layers_type='bottleneck', incorrect_strength=-0.5):
+                 add_on_layers_type='bottleneck', incorrect_strength=-0.5, average_linear=False):
 
         super(PPNet, self).__init__()
         self.seq_len = seq_len
@@ -124,6 +124,7 @@ class PPNet(nn.Module):
         self.epsilon = 1e-4
         self.sub_batch_size = sub_batch_size
         self.incorrect_strength = incorrect_strength
+        self.average_linear = average_linear
 
         # prototype_activation_function could be 'log', 'linear',
         # or a generic function that converts distance to similarity score
@@ -138,7 +139,11 @@ class PPNet(nn.Module):
         num_prototypes_per_class = self.num_prototypes // self.num_classes
         for j in range(self.num_prototypes):
             self.prototype_class_identity_orig[j, j // num_prototypes_per_class] = 1
-        self.prototype_class_identity = self.prototype_class_identity_orig.repeat((20, 1))
+
+        if not average_linear:
+            self.prototype_class_identity = self.prototype_class_identity_orig.repeat((20, 1))
+        else:
+            self.prototype_class_identity = self.prototype_class_identity_orig
         self.prototype_class_identity_cuda = self.prototype_class_identity.cuda()
 
         self.proto_layer_rf_info = proto_layer_rf_info
@@ -191,9 +196,12 @@ class PPNet(nn.Module):
         self.ones = nn.Parameter(torch.ones(self.prototype_shape),
                                  requires_grad=False)
 
-        self.last_layer = nn.Linear(self.num_prototypes*sub_batch_size,
-                                         self.num_classes,
-                                         bias=False) # do not use bias
+        if average_linear:
+            mult = 1
+        else:
+            mult = sub_batch_size
+        # don't use bias
+        self.last_layer = nn.Linear(self.num_prototypes*mult, self.num_classes, bias=False)
 
         if init_weights:
             self._initialize_weights()
@@ -261,11 +269,15 @@ class PPNet(nn.Module):
         outputs, min_distances = self.seq_forward(x[0])
         # I think I can just do 1 linear op to save time at the end before
         # I return outputs from the function
-        outputs, min_distances = self.last_layer(outputs.view(-1)).unsqueeze(0), min_distances.unsqueeze(0)
+        if self.average_linear:
+            func = lambda out: out.mean(dim=0)
+        else:
+            func = lambda out: out.view(-1)
+        outputs, min_distances = self.last_layer(func(outputs)).unsqueeze(0), func(min_distances).unsqueeze(0)
         for i in range(1, x.shape[0]):
             tmp_o, tmp_md = self.seq_forward(x[i])
-            outputs = torch.cat([outputs, self.last_layer(tmp_o.view(-1)).unsqueeze(0)], dim=0)
-            min_distances = torch.cat([min_distances, tmp_md.unsqueeze(0)], dim=0)
+            outputs = torch.cat([outputs, self.last_layer(func(tmp_o)).unsqueeze(0)], dim=0)
+            min_distances = torch.cat([min_distances, func(tmp_md).unsqueeze(0)], dim=0)
         return outputs, min_distances.view((min_distances.shape[0], -1))
 
     def push_forward(self, x):
@@ -346,7 +358,8 @@ class PPNet(nn.Module):
 def construct_PPNet(base_architecture, sub_batch_size, seq_len=224,
                     prototype_shape=(20, 128, 1), num_classes=2,
                     prototype_activation_function='log',
-                    add_on_layers_type='bottleneck', batch_size=16, incorrect_strength=-0.5):
+                    add_on_layers_type='bottleneck', batch_size=16,
+                    incorrect_strength=-0.5, average_linear=False):
     # add_on_layers_type is set to "regular" in the original settings
     layer_filter_sizes, layer_strides, layer_paddings = base_architecture.conv_info()
     proto_layer_rf_info = compute_proto_layer_rf_info_v2(seq_len=seq_len,
@@ -364,7 +377,8 @@ def construct_PPNet(base_architecture, sub_batch_size, seq_len=224,
                  init_weights=True,
                  prototype_activation_function=prototype_activation_function,
                  add_on_layers_type=add_on_layers_type,
-                 incorrect_strength=incorrect_strength)
+                 incorrect_strength=incorrect_strength,
+                 average_linear=average_linear)
 
 
 
