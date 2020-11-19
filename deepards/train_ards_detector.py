@@ -145,7 +145,7 @@ class BaseTraining(object):
         self.results.update_loss(fold_num, loss.data)
 
         # print individual loss and total loss
-        if not self.args.no_print_progress:
+        if not self.args.no_print_progress or self.args.print_progress:
             print("batch num: {}/{}, avg loss: {}\r".format(batch_idx, total_batches, self.results.get_meter('loss_epoch_{}'.format(epoch_num), fold_num), end=""))
 
     def get_transforms(self):
@@ -535,7 +535,7 @@ class SiameseMixin(object):
                 self.results.update_loss(fold_num, loss.data)
 
                 # print individual loss and total loss
-                if not self.args.no_print_progress:
+                if not self.args.no_print_progress or self.args.print_progress:
                     print("batch num: {}/{}, avg loss: {}\r".format(batch_idx, len(train_loader), self.results.get_meter('loss', fold_num), end=""))
 
                 if self.args.debug:
@@ -1069,7 +1069,7 @@ class ProtoPNetModel(BaseTraining, PatientClassifierMixin):
         elif self.args.optimizer == 'sgd':
             optim_cls = torch.optim.SGD
         joint_optimizer_specs = [{
-            'params': model.features.parameters(),
+            'params': model.breath_block.parameters(),
             'lr': self.args.learning_rate,
             'weight_decay': self.args.weight_decay,
         }, {
@@ -1199,7 +1199,7 @@ class ProtoPNetModel(BaseTraining, PatientClassifierMixin):
                 self.results.update_loss(fold_num, loss.data)
 
                 # print individual loss and total loss
-                if not self.args.no_print_progress:
+                if not self.args.no_print_progress or self.args.print_progress:
                     print("batch num: {}/{}, avg loss: {}, cls_loss: {}\r".format(
                         batch_idx,
                         total_batches,
@@ -1234,7 +1234,7 @@ class ProtoPNetModel(BaseTraining, PatientClassifierMixin):
                         self.results.update_meter('cls_loss', fold_num, cls_loss.data)
                         self.results.update_loss(fold_num, loss.data)
                         # print individual loss and total loss
-                        if not self.args.no_print_progress:
+                        if not self.args.no_print_progress or self.args.print_progress:
                             print("batch num: {}/{}, cls_loss: {}\r".format(
                                 batch_idx,
                                 total_batches,
@@ -1424,6 +1424,7 @@ def build_parser():
     parser.add_argument('-np', '--n-prototypes', type=int, help='number of prototypes to use per class in our model')
     true_false_flag('--zero-incorrect-protos', 'ensure that incorrect protos do not contribute to predictions')
     true_false_flag('--average-linear-layer', 'instead of flattening the linear layer average all like features together. currently this only works for protopnet')
+    true_false_flag('--print-progress', 'print progress for batch losses. This will override --no-print-progress flag if set')
     return parser
 
 

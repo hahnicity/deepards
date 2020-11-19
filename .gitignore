@@ -13,6 +13,7 @@ results/
 # project specific dirs
 Data/
 gradcam_results/
+prototype_results/
 
 # C extensions
 *.so

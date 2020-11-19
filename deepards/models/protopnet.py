@@ -149,9 +149,9 @@ class PPNet(nn.Module):
         self.proto_layer_rf_info = proto_layer_rf_info
 
         # this has to be named features to allow the precise loading
-        self.features = features
+        self.breath_block = features
 
-        features_name = str(self.features).upper()
+        features_name = str(self.breath_block).upper()
         first_add_on_layer_in_channels = \
             [i for i in features.modules() if isinstance(i, nn.BatchNorm1d)][-1].num_features
 
@@ -210,7 +210,7 @@ class PPNet(nn.Module):
         '''
         the feature input to prototype layer
         '''
-        x = self.features.forward_no_pool(x)
+        x = self.breath_block.forward_no_pool(x)
         x = self.add_on_layers(x)
         return x
 
@@ -309,7 +309,7 @@ class PPNet(nn.Module):
             ')'
         )
 
-        return rep.format(self.features,
+        return rep.format(self.breath_block,
                           self.seq_len,
                           self.prototype_shape,
                           self.proto_layer_rf_info,
