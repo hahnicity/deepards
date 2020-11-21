@@ -519,10 +519,6 @@ class SiameseMixin(object):
             model.train()
             for batch_idx, (seq, pos_compr, neg_compr) in enumerate(train_loader):
                 model.zero_grad()
-                # XXX do we need this?
-                #obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)
-                #if seq.shape[0] == 0:
-                #    continue
                 seq = self.cuda_wrapper(Variable(seq.float()))
                 pos_compr = self.cuda_wrapper(Variable(pos_compr.float()))
                 neg_compr = self.cuda_wrapper(Variable(neg_compr.float()))
@@ -595,8 +591,6 @@ class NestedMixin(object):
     def _process_test_batch_results(self, outputs, target, inputs, fold_num):
         batch_preds = outputs.argmax(dim=-1).cpu().view(-1)
         target = target.argmax(dim=1).cpu().reshape((outputs.shape[0], 1)).repeat((1, outputs.shape[1])).view(-1)
-        # XXX find a way to make this function work later
-        #self.record_testing_results(target, batch_preds, fold_num)
         return batch_preds.tolist()
 
     def get_base_datasets(self):
@@ -661,7 +655,6 @@ class NestedMixin(object):
             return self.criterion(outputs[:, -1], target)
 
     def record_final_epoch_testing_results(self, fold_num, epoch_num, test_dataset):
-        # XXX add last_breath / all_breaths split
         self.preds = pd.Series(self.preds, index=self.pred_idx)
         self.preds = self.preds.sort_index()
         y_test = test_dataset.get_ground_truth_df()
@@ -669,7 +662,6 @@ class NestedMixin(object):
         self.save_predictions_by_hour(y_test, self.preds, test_dataset.seq_hours, epoch_num, fold_num)
 
     def transform_obs_idx(self, obs_idx, outputs):
-        # XXX add last_breath / all_breaths split
         return obs_idx.reshape((outputs.shape[0], 1)).repeat((1, outputs.shape[1])).view(-1)
 
     def perform_post_modeling_actions(self):
@@ -1050,16 +1042,12 @@ class ProtoPNetModel(BaseTraining, PatientClassifierMixin):
         super(ProtoPNetModel, self).__init__(args)
 
     def get_network(self, base_network):
-        if self.args.zero_incorrect_protos:
-            incorrect_strength = 0.0
-        else:
-            incorrect_strength = -0.5
         return construct_PPNet(
             base_network,
             self.args.n_sub_batches,
             prototype_shape=(self.args.n_prototypes*2, 128, 1),
             batch_size=self.args.batch_size,
-            incorrect_strength=incorrect_strength,
+            incorrect_strength=self.args.incorrect_strength,
             average_linear=self.args.average_linear_layer,
         )
 
@@ -1105,10 +1093,10 @@ class ProtoPNetModel(BaseTraining, PatientClassifierMixin):
         self.record_testing_results(target, batch_preds, fold_num)
         return batch_preds.tolist()
 
-    def calc_loss(self, model, output, target, min_distances):
+    def calc_loss(self, model, cls_output, target, min_distances):
         # compute loss. change to BCE with logits because of the binary classification
         # problem we are dealing with.
-        cls_loss = F.binary_cross_entropy(F.softmax(output, dim=1), target)
+        cls_loss = F.binary_cross_entropy(F.softmax(cls_output, dim=1), target)
         max_dist = (model.prototype_shape[1] * model.prototype_shape[2])
         label = target.argmax(dim=1)
         # prototypes_of_correct_class is a tensor of shape batch_size * num_prototypes
@@ -1116,7 +1104,7 @@ class ProtoPNetModel(BaseTraining, PatientClassifierMixin):
         # just pick which prototypes are relevant for each observation
         prototypes_of_correct_class = self.cuda_wrapper(torch.t(model.prototype_class_identity[:,label]))
         # XXX if I do averagiing I can do this a few ways.
-        #  1. average the distances and this eq. doesn't change
+        #  1. average the distances and this eq. doesn't change - may be underperforming
         #  2. dont average the distances and keep a separate un-averaged output var
         #     to use in the loss function
         #
@@ -1135,8 +1123,11 @@ class ProtoPNetModel(BaseTraining, PatientClassifierMixin):
             torch.sum(min_distances * prototypes_of_wrong_class, dim=1) / torch.sum(prototypes_of_wrong_class, dim=1)
         avg_separation_cost = torch.mean(avg_separation_cost)
 
-        l1_mask = 1 - self.cuda_wrapper(torch.t(model.prototype_class_identity))
-        l1 = (model.last_layer.weight * l1_mask).norm(p=1)
+        if self.args.use_l1:
+            l1_mask = 1 - self.cuda_wrapper(torch.t(model.prototype_class_identity))
+            l1 = (model.last_layer.weight * l1_mask).norm(p=1)
+        else:
+            l1 = torch.zeros(1).norm(p=1)
 
         # XXX this is if we are not class_specific. What does this mean? do we
         # need class specific? I know sep cost doesnt come into effect in
@@ -1184,13 +1175,11 @@ class ProtoPNetModel(BaseTraining, PatientClassifierMixin):
                 inputs = self.cuda_wrapper(Variable(seq).float())
                 target = self.cuda_wrapper(Variable(target).float())
 
-                output, min_distances = model(inputs, None)
-                loss, cls_loss, cluster_cost, separation_cost, l1 = self.calc_loss(model, output, target, min_distances)
+                cls_output, min_distances = model(inputs, None)
+                loss, cls_loss, cluster_cost, separation_cost, l1 = self.calc_loss(model, cls_output, target, min_distances)
                 optim.zero_grad()
                 loss.backward()
                 optim.step()
-                if self.args.zero_incorrect_protos:
-                    model.ensure_incorrect_protos_zeroed()
                 self.results.update_meter('cls_loss', fold_num, cls_loss.data)
                 self.results.update_meter('clst_loss', fold_num, cluster_cost.data)
                 self.results.update_meter('sep_loss', fold_num, separation_cost.data)
@@ -1229,8 +1218,6 @@ class ProtoPNetModel(BaseTraining, PatientClassifierMixin):
                         optim.zero_grad()
                         loss.backward()
                         optim.step()
-                        if self.args.zero_incorrect_protos:
-                            model.ensure_incorrect_protos_zeroed()
                         self.results.update_meter('cls_loss', fold_num, cls_loss.data)
                         self.results.update_loss(fold_num, loss.data)
                         # print individual loss and total loss
@@ -1422,8 +1409,9 @@ def build_parser():
     parser.add_argument('--prototype-results-dir', help='directory to save prototype visualizations')
     parser.add_argument('--prototype-fname-prefix', help='prefix to save prototype visualization filenames')
     parser.add_argument('-np', '--n-prototypes', type=int, help='number of prototypes to use per class in our model')
-    true_false_flag('--zero-incorrect-protos', 'ensure that incorrect protos do not contribute to predictions')
+    parser.add_argument('-ic', '--incorrect-strength', type=float, help='the incorrect strength value for the linear layer of protopnet')
     true_false_flag('--average-linear-layer', 'instead of flattening the linear layer average all like features together. currently this only works for protopnet')
+    true_false_flag('--use-l1', 'add an l1 regularization for ppnet')
     true_false_flag('--print-progress', 'print progress for batch losses. This will override --no-print-progress flag if set')
     return parser
 

@@ -140,11 +140,11 @@ class PPNet(nn.Module):
         for j in range(self.num_prototypes):
             self.prototype_class_identity_orig[j, j // num_prototypes_per_class] = 1
 
-        if not average_linear:
-            self.prototype_class_identity = self.prototype_class_identity_orig.repeat((20, 1))
+        self.prototype_class_identity = self.prototype_class_identity_orig.repeat((20, 1))
+        if self.average_linear:
+            self.prototype_class_identity_linear_layer = self.prototype_class_identity_orig
         else:
-            self.prototype_class_identity = self.prototype_class_identity_orig
-        self.prototype_class_identity_cuda = self.prototype_class_identity.cuda()
+            self.prototype_class_identity_linear_layer = self.prototype_class_identity
 
         self.proto_layer_rf_info = proto_layer_rf_info
 
@@ -270,15 +270,15 @@ class PPNet(nn.Module):
         # I think I can just do 1 linear op to save time at the end before
         # I return outputs from the function
         if self.average_linear:
-            func = lambda out: out.mean(dim=0)
+            func = lambda out: out.mean(dim=1)
         else:
-            func = lambda out: out.view(-1)
-        outputs, min_distances = self.last_layer(func(outputs)).unsqueeze(0), func(min_distances).unsqueeze(0)
+            func = lambda out: out.view(x.shape[0], -1)
+        outputs, min_distances = outputs.unsqueeze(0), min_distances.unsqueeze(0)
         for i in range(1, x.shape[0]):
             tmp_o, tmp_md = self.seq_forward(x[i])
-            outputs = torch.cat([outputs, self.last_layer(func(tmp_o)).unsqueeze(0)], dim=0)
-            min_distances = torch.cat([min_distances, func(tmp_md).unsqueeze(0)], dim=0)
-        return outputs, min_distances.view((min_distances.shape[0], -1))
+            outputs = torch.cat([outputs, tmp_o.unsqueeze(0)], dim=0)
+            min_distances = torch.cat([min_distances, tmp_md.unsqueeze(0)], dim=0)
+        return self.last_layer(func(outputs)), min_distances.view((min_distances.shape[0], -1))
 
     def push_forward(self, x):
         # basically similar ops as the forward, except no pooling on the distances
@@ -323,7 +323,7 @@ class PPNet(nn.Module):
 
         the incorrect strength will be actual strength if -0.5 then input -0.5
         '''
-        positive_one_weights_locations = torch.t(self.prototype_class_identity)
+        positive_one_weights_locations = torch.t(self.prototype_class_identity_linear_layer)
         negative_one_weights_locations = 1 - positive_one_weights_locations
 
         correct_class_connection = 1
@@ -349,7 +349,8 @@ class PPNet(nn.Module):
 
     def ensure_incorrect_protos_zeroed(self):
         weights = self.last_layer.weight.data
-        new_weights = weights * torch.t(self.prototype_class_identity_cuda)
+        dev = weights.device
+        new_weights = weights * torch.t(self.prototype_class_identity_linear_layer.to(dev))
         self.last_layer.weight.data.copy_(new_weights)
 
 

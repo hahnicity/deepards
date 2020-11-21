@@ -54,6 +54,7 @@ viz_every_n: 4
 prototype_results_dir: prototype_results/
 prototype_fname_prefix: proto
 n_prototypes: 10
+incorrect_strength: -0.5
 
 # other options
 holdout_set_type: main
