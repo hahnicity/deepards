@@ -21,6 +21,7 @@ viz_start_epoch: 20
 push_start_epoch: 6
 push_every_n: 4
 prototype_fname_prefix: proto_kfold_np6_ww_i_only
+use_l1: true
 
 # transform properties
 transforms: ie_ww_i_or_e

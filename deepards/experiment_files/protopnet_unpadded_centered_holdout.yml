@@ -16,3 +16,12 @@ n_sub_batches: 20
 data_path: /fastdata/ardsdetection
 holdout_set_type: main
 base_network: densenet18
+
+clust_lambda: 0.8
+sep_lambda: 1.0
+n_warm_epochs: 4
+push_start_epoch: 8
+push_every_n: 4
+n_push_iters: 5
+# dont viz
+viz_start_epoch: 30
