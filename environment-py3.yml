@@ -1,0 +1,27 @@
+name: deepardsdev3
+dependencies:
+  - python>=3.6
+  - cython
+  - ipython
+  - numpy
+  - pandas
+  - pytorch
+  - torchvision
+  - cudatoolkit=11.0
+  - seaborn
+  - scipy
+  - scikit-learn
+  - opencv
+  - pathlib
+  - shap
+  - matplotlib
+  - pyqt
+  - jupyter
+  - ipython
+  - pip
+  - pip:
+    - pathlib
+    - lime
+channels:
+  - pytorch
+  - conda-forge

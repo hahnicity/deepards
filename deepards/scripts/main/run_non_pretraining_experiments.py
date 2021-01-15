@@ -1,4 +1,5 @@
 import argparse
+from copy import copy
 import os
 import subprocess
 
@@ -10,15 +11,16 @@ saved_models_dir = Path(__file__).parent.joinpath('../../saved_models')
 def run_experiment(dry_run, cuda_arg, config_override, cuda_devices, n_times_each_experiment):
     experiment_name = config_override.split('.yml')[0].replace('/', '_')
     script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'train_ards_detector.py'))
-    saved_models_dir = saved_models_dir.joinpath(experiment_name)
-    saved_models_dir.mkdir()
+    dir = saved_models_dir.joinpath(experiment_name)
+    if not dir.exists():
+        dir.mkdir()
     commands = [[str(i) for i in [
         'ts', 'python', script_path, '-co', config_override,
         '--no-print-progress', '-exp', experiment_name,
         '--clip-grad', cuda_arg,
         '--cuda-device', dev,
-        '--saved-models-dir', str(saved_models_dir.resolve()),
-        '--save-model', 'model-run-{}.pth'.format(i),
+        '--saved-models-dir', str(dir.resolve()),
+        '--save-model', 'model-run-{model_num}.pth',
         '--save-model-per-epoch',
     ]] for dev in cuda_devices.split('+')]
 
@@ -27,7 +29,8 @@ def run_experiment(dry_run, cuda_arg, config_override, cuda_devices, n_times_eac
 
     i = 0
     while i < n_times_each_experiment:
-        to_run = commands[i % len(commands)]
+        to_run = copy(commands[i % len(commands)])
+        to_run[-2] = to_run[-2].format(model_num=i)
         if dry_run:
             print("{}\n".format(" ".join(to_run)))
         else:
