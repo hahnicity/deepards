@@ -65,7 +65,7 @@ base_networks = {
     'vgg11': vgg11_bn,
     'vgg13': vgg13_bn,
 }
-saved_models_dir = os.path.join(os.path.dirname(__file__), 'saved_models')
+saved_models_default_dir = os.path.join(os.path.dirname(__file__), 'saved_models')
 
 
 class BaseTraining(object):
@@ -257,6 +257,7 @@ class BaseTraining(object):
             yield train_dataset, train_loader, test_dataset, test_loader
 
     def train_and_test(self):
+        saved_models_dir = saved_models_default_dir if not self.args.saved_models_dir else self.args.saved_models_dir
         for fold_num, (train_dataset, train_loader, test_dataset, test_loader) in enumerate(self.get_splits()):
             if self.args.only_fold and fold_num != self.args.only_fold:
                 continue
@@ -1410,6 +1411,7 @@ def build_parser():
     parser.add_argument('--prototype-fname-prefix', help='prefix to save prototype visualization filenames')
     parser.add_argument('-np', '--n-prototypes', type=int, help='number of prototypes to use per class in our model')
     parser.add_argument('-ic', '--incorrect-strength', type=float, help='the incorrect strength value for the linear layer of protopnet')
+    parser.add_argument('--saved-models-dir', help='directory to save models')
     true_false_flag('--average-linear-layer', 'instead of flattening the linear layer average all like features together. currently this only works for protopnet')
     true_false_flag('--use-l1', 'add an l1 regularization for ppnet')
     true_false_flag('--print-progress', 'print progress for batch losses. This will override --no-print-progress flag if set')
