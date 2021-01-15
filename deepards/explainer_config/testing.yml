@@ -1,0 +1,17 @@
+rf_results_file: rf_results/model_collection_results_1588065998_same_as_table.pkl
+dataset_file: /fastdata/deepards/unpadded_centered_with_bm-nb20-kfold.pkl
+results_base_dir: /slowdata/deepards
+ppnet_model_files:
+  0: saved_models/protopnet_np6_ww_i_only-fold0.pth
+  1: saved_models/protopnet_np6_ww_i_only-fold1.pth
+  2: saved_models/protopnet_np6_ww_i_only-fold2.pth
+  3: saved_models/protopnet_np6_ww_i_only-fold3.pth
+  4: saved_models/protopnet_np6_ww_i_only-fold4.pth
+deepards_model_files:
+  0: saved_models/unpadded_centered_sequences-nb20-kfold-fold-0.pth
+  1: saved_models/unpadded_centered_sequences-nb20-kfold-fold-1.pth
+  2: saved_models/unpadded_centered_sequences-nb20-kfold-fold-2.pth
+  3: saved_models/unpadded_centered_sequences-nb20-kfold-fold-3.pth
+  4: saved_models/unpadded_centered_sequences-nb20-kfold-fold-4.pth
+track_running_stats_gradcam: true
+track_running_stats_ppnet: false
