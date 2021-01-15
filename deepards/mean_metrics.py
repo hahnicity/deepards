@@ -2,6 +2,7 @@ import argparse
 from glob import glob
 import os
 import re
+from warnings import warn
 
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MultipleLocator
@@ -129,7 +130,7 @@ def get_experiment_id(experiment_file):
         return os.path.splitext(experiment_file)[0].split('_')[-1]
     # probably some kind of error between v1 and v2
     else:
-        raise Exception('File {} did not match any versioning spec'.format(experiment_file))
+        warn('File {} did not match any versioning spec'.format(experiment_file))
 
 
 def find_matching_experiments(experiment_name):
@@ -140,6 +141,8 @@ def find_matching_experiments(experiment_name):
         if '{}_results'.format(experiment_name) in file:
             continue
         experiment_id = get_experiment_id(file)
+        if not experiment_id:
+            continue
         candidate = os.path.basename(file).replace('_'+experiment_id+'.pth', '')
         if candidate == experiment_name:
             experiment_ids.append(experiment_id)

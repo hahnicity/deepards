@@ -1020,8 +1020,8 @@ class ARDSRawDataset(Dataset):
             # uses mean and median breath meta
             elif len(seq) == 6:
                 patient, _, __, ___, target, hrs = seq
-            rows.append([patient, np.argmax(target, axis=0)])
-        return pd.DataFrame(rows, columns=['patient', 'y'], index=self.kfold_indexes)
+            rows.append([patient, np.argmax(target, axis=0), hrs[0]])
+        return pd.DataFrame(rows, columns=['patient', 'y', 'hour'], index=self.kfold_indexes)
 
     def get_abs_bs_dt(self, breath):
         try:

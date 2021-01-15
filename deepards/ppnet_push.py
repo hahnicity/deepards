@@ -1,16 +1,213 @@
 import copy
+import math
+from pathlib import Path
 import os
 import time
 
+import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 import numpy as np
+import pandas as pd
 from pathlib import Path
 from scipy.signal import resample
 import torch
 
 from deepards.models.protopnet import compute_rf_prototype
+from deepards.patient_gradcam import do_makedirs
 from deepards.ppnet_helpers import makedir, find_high_activation_crop
+
+
+class PrototypeVisualizer(object):
+    def __init__(self, model, results_base_dir):
+        """
+        :param model: The pytorch model
+        """
+        self.model = model.cuda()
+        self.seq_size = 224
+        self.max_dist = self.model.prototype_shape[1] * self.model.prototype_shape[2]
+        self.results_base_dir = results_base_dir
+
+    def sanitize_inputs(self, protoL_input, proto_dist):
+        protoL_input = np.copy(protoL_input.detach().cpu().numpy())
+        if len(protoL_input.shape) == 4:
+            protoL_input = protoL_input[0]
+        elif len(protoL_input.shape) != 3:
+            raise Exception('input sequences should be of 3 dimensions')
+        proto_dist = np.copy(proto_dist.detach().cpu().numpy())
+        if len(proto_dist.shape) == 4:
+            proto_dist = proto_dist[0]
+        elif len(proto_dist.shape) != 3:
+            raise Exception('input distances should be of 3 dimensions')
+        return protoL_input, proto_dist
+
+    def plot_cam(self, seq, upsampled_act_seq_j, show_cbar):
+        cam_j = upsampled_act_seq_j - np.amin(upsampled_act_seq_j)
+        cam_j = (cam_j / np.amax(cam_j) * 255).ravel()
+        t = np.arange(0, len(seq), 1)
+        plt.scatter(t, seq, c=cam_j, vmin=0, vmax=255)
+        if show_cbar:
+            cbar = plt.colorbar()
+            cbar.set_label('cam outputs', labelpad=-1)
+
+    def show_proto_bounds(self, seq, proto_bound_j, rect_label, j):
+        x_min = max([0, proto_bound_j[0]-2])
+        y_min = seq[:, proto_bound_j[0]:proto_bound_j[1]].min() - .01
+        width = proto_bound_j[1] - x_min + 2
+        height = seq[:, proto_bound_j[0]:proto_bound_j[1]].max() - y_min + .02
+        rect = Rectangle((x_min, y_min), width, height, linewidth=1, edgecolor='r', facecolor='none', label=rect_label)
+        ax = plt.gca()
+        ax.add_patch(rect)
+        # XXX i want to have an algo that sets up new annos so that they dont cluster
+        #prior_annos = [child for child in ax.get_children() if isinstance(child, matplotlib.text.Annotation)]
+        ax.annotate(
+            '{}'.format(j),
+            arrowprops=dict(arrowstyle='->', facecolor='black'),
+            xy=(x_min+(width/2), y_min+height),
+            # XXX this anno location is good enuf for now, altho its still pretty rough
+            xytext=(x_min+j**1.5, (y_min+height-math.sqrt(j))),
+            xycoords='data',
+            fontsize=6,
+        )
+
+    def viz_prototypes_for_patient_and_label_by_hour(self, dataset, patient_id, hour_start, hour_end, n_sequences_per_hour):
+        """
+        Visualize prototypes for patient using their ground truth label and searching
+        over a start to end hour. This function visualizes all prototypes available,
+        not just a single prototype
+        """
+        mapping = {0: 'non_ards', 1: 'ards'}
+        gt = dataset.get_ground_truth_df()
+        batch_size = dataset.all_sequences[0][1].shape[0]
+        patient_idxs = gt[(gt.patient == patient_id) & (gt.hour >= hour_start) & (gt.hour < hour_end)].index
+        if n_sequences_per_hour is not None:
+            n_sequences_per_hour = n_sequences_per_hour if n_sequences_per_hour < len(patient_idxs) else len(patient_idxs)
+            patient_idxs = np.random.choice(patient_idxs, size=n_sequences_per_hour, replace=False)
+
+        if len(patient_idxs) == 0:
+            return
+        ground_truth = gt.loc[patient_idxs].y.iloc[0]
+        dirname = Path(self.results_base_dir, 'prototype_results', 'hour_sequences', mapping[ground_truth], patient_id, str(hour_start))
+        do_makedirs(str(dirname))
+
+        for abs_idx in patient_idxs:
+            rel_idx = list(dataset.kfold_indexes).index(abs_idx)
+            # relative index specifies indices that we use for the kfold indexes.
+            # abs_id specifies absolute ordering of the data in dataset.all_sequences.
+            idx, seq, meta, target = dataset[rel_idx]
+            with torch.no_grad():
+                protoL_input, proto_dist = self.model.push_forward(torch.FloatTensor(seq).cuda().unsqueeze(0))
+
+            for seq_idx in range(batch_size):
+                self.viz_prototypes_for_target(seq, ground_truth, protoL_input, proto_dist, seq_idx)
+                filename = dirname.joinpath('seq-{}-{}-target-{}.pkl'.format(abs_idx, seq_idx, mapping[ground_truth]))
+                # saving to pickle is much faster, and we can convert to png if we
+                # want to later
+                ax = plt.gca()
+                pd.to_pickle(ax, str(filename), compression=None)
+                # clear axis so we're not redrawing the figure and axes each time
+                # this speeds up processing **considerably**
+                plt.cla()
+
+    def viz_prototypes_for_target(self, seq, target, protoL_input, proto_dist, breath_idx):
+        """
+        Visualize all prototypes on target sequence. Don't use heatmap, because
+        it will just be a mess
+
+        :param XXX:
+        """
+        n_prototypes = self.model.num_prototypes
+        protos_of_interest = range(n_prototypes / 2 * target, n_prototypes / 2 * (1 + target))
+        self.viz_single_prototype(seq, target, protoL_input, proto_dist, protos_of_interest[0], breath_idx, True, False, True, False, False, None)
+        for proto in protos_of_interest[1:]:
+            self.viz_single_prototype(seq, target, protoL_input, proto_dist, proto, breath_idx, False, False, False, False, False, None)
+
+    def viz_single_prototype(self,
+                             seq,
+                             target,
+                             protoL_input,
+                             proto_dist,
+                             prototype_idx,
+                             breath_idx,
+                             show_title,
+                             show_legend,
+                             plot_sequence,
+                             plot_cam=True,
+                             show_cbar=True,
+                             rect_label='prototype activation zone'):
+        """
+        For a single breath in single read, visualize the receptive field focused on by
+        a prototype
+
+        :param seq: sequence of data for the read
+        :param target: 0/1 for Non-ARDS/ARDS
+        :param protoL_input: input into the prototype layer
+        :param proto_dist: prototype distances
+        :param prototype_idx: the specific prototype we want to focus on
+        :param breath_idx: the specific breath we want to focus on
+        :param show_title: true/false on whether to show the plot title
+        :param show_legend: true/false on whether to show plot legend
+        :param plot_sequence:
+        :param plot_cam:
+        :param show_cbar: true/false on whether to show the color bar
+        :param rect_label:
+        """
+        protoL_input, proto_dist = self.sanitize_inputs(protoL_input, proto_dist)
+
+        proto_dist_j = proto_dist[breath_idx, prototype_idx, :]
+        width_index = np.argmin(proto_dist_j)
+        batch_argmin_proto_dist_j = [0, breath_idx, width_index]
+
+        # get the receptive field boundary of the image patch
+        # that generates the representation
+        protoL_rf_info = self.model.proto_layer_rf_info
+        rf_prototype_j = compute_rf_prototype(self.seq_size, batch_argmin_proto_dist_j, protoL_rf_info)
+
+        # get the breath-specific instance
+        seq = seq[breath_idx]
+        if isinstance(seq, torch.Tensor):
+            seq = seq.numpy()
+
+        # crop out the receptive field
+        rf_seq_j = seq[:, rf_prototype_j[1]:rf_prototype_j[2]]
+
+        # find the highly activated region of the original image
+        proto_dist_seq_j = proto_dist[breath_idx, prototype_idx, :]
+        if self.model.prototype_activation_function == 'log':
+            proto_act_seq_j = np.log((proto_dist_seq_j + 1) / (proto_dist_seq_j + self.model.epsilon))
+        elif self.model.prototype_activation_function == 'linear':
+            proto_act_seq_j = self.max_dist - proto_dist_seq_j
+        else:
+            proto_act_seq_j = proto_activation_function_in_numpy(proto_dist_seq_j)
+        # use scipy.signal.resample.
+        upsampled_act_seq_j = resample(proto_act_seq_j, self.seq_size)
+        proto_bound_j = find_high_activation_crop(upsampled_act_seq_j)
+        # save the prototype boundary (rectangular boundary of highly activated region)
+
+        # save the whole image containing the prototype as png
+        seq_reshape = seq.reshape((self.seq_size, 1))
+
+        t = np.arange(0, len(seq_reshape), 1)
+        if plot_sequence:
+            #import IPython; IPython.embed()
+            plt.plot(seq[0])
+
+        if plot_cam:
+            self.plot_cam(seq_reshape, upsampled_act_seq_j, show_cbar)
+
+        if show_title:
+            mapping = {0: 'Non-ARDS', 1: 'ARDS'}
+            gt_lab = mapping[target]
+            title = 'gt: {}, breath_idx: {} proto: {}'.format(
+                gt_lab,
+                breath_idx,
+                prototype_idx,
+            )
+            plt.title(title)
+
+        self.show_proto_bounds(seq, proto_bound_j, rect_label, prototype_idx)
+        if show_legend:
+            plt.legend()
 
 
 # push each prototype to the nearest patch in the training set
@@ -229,6 +426,8 @@ def update_prototypes_on_batch(seq,
             if proto_rf_boxes.shape[1] == 4 and target is not None:
                 proto_rf_boxes[j, 3] = target[rf_prototype_j[0]].argmax().item()
 
+            # XXX I'd like to split the viz work into separate functions. Need
+            # to consolidate this with the Visualizer class above
             if dir_for_saving_prototypes is not None:
                 if proto_self_act_filename_prefix is not None:
                     # save the numpy array of the prototype self activation
@@ -286,112 +485,6 @@ def update_prototypes_on_batch(seq,
                     #overlayed_original_seq_j = 0.5 * original_seq_j + 0.3 * heatmap
     if class_specific:
         del class_to_img_index_dict
-
-
-def viz_single_prototype(model,
-                         seq,
-                         target,
-                         protoL_input,
-                         proto_dist,
-                         prototype_idx,
-                         breath_idx):
-    """
-    For a single breath in single read, visualize the receptive field focused on by
-    a prototype
-
-    :param model: The pytorch model
-    :param seq: sequence of data for the read
-    :param target: 0/1 for Non-ARDS/ARDS
-    :param protoL_input: input into the prototype layer
-    :param proto_dist: prototype distances
-    :param prototype_idx: the specific prototype we want to focus on
-    :param breath_idx: the specific breath we want to focus on
-    """
-    seq_size = 224
-    protoL_input = np.copy(protoL_input.detach().cpu().numpy())
-    if len(protoL_input.shape) == 4:
-        protoL_input = protoL_input[0]
-    elif len(protoL_input.shape) != 3:
-        raise Exception('input sequences should be of 3 dimensions')
-    proto_dist = np.copy(proto_dist.detach().cpu().numpy())
-    if len(proto_dist.shape) == 4:
-        proto_dist = proto_dist[0]
-    elif len(proto_dist.shape) != 3:
-        raise Exception('input distances should be of 3 dimensions')
-    max_dist = model.prototype_shape[1] * model.prototype_shape[2]
-
-    proto_dist_j = proto_dist[breath_idx, prototype_idx, :]
-    width_index = np.argmin(proto_dist_j)
-    batch_argmin_proto_dist_j = [0, breath_idx, width_index]
-
-    # get the receptive field boundary of the image patch
-    # that generates the representation
-    protoL_rf_info = model.proto_layer_rf_info
-    rf_prototype_j = compute_rf_prototype(seq_size, batch_argmin_proto_dist_j, protoL_rf_info)
-
-    # get the breath-specific instance
-    seq = seq[breath_idx]
-    if isinstance(seq, torch.Tensor):
-        seq = seq.numpy()
-
-    # crop out the receptive field
-    rf_seq_j = seq[:, rf_prototype_j[1]:rf_prototype_j[2]]
-
-    # find the highly activated region of the original image
-    proto_dist_seq_j = proto_dist[breath_idx, prototype_idx, :]
-    if model.prototype_activation_function == 'log':
-        proto_act_seq_j = np.log((proto_dist_seq_j + 1) / (proto_dist_seq_j + model.epsilon))
-    elif model.prototype_activation_function == 'linear':
-        proto_act_seq_j = max_dist - proto_dist_seq_j
-    else:
-        proto_act_seq_j = proto_activation_function_in_numpy(proto_dist_seq_j)
-    # use scipy.signal.resample.
-    upsampled_act_seq_j = resample(proto_act_seq_j, seq_size)
-    proto_bound_j = find_high_activation_crop(upsampled_act_seq_j)
-    # save the prototype boundary (rectangular boundary of highly activated region)
-
-    # save the whole image containing the prototype as png
-    cam_j = upsampled_act_seq_j - np.amin(upsampled_act_seq_j)
-    cam_j = (cam_j / np.amax(cam_j) * 255).ravel()
-    # XXX is the receptive field pruning for a purpose?
-    # if so then maybe we have to change our activation box params
-    # otherwise we can just viz the entire breath.
-#    if rf_seq_j.shape[1] != seq_size:
-#        seq_reshape = rf_seq_j.reshape((rf_seq_j.shape[1], 1))
-#        cam_j = cam_j[rf_prototype_j[1]:rf_prototype_j[2]]
-#        x_min = max([0, proto_bound_j[0]-rf_prototype_j[1]-2])
-#        y_min = seq[:, proto_bound_j[0]:proto_bound_j[1]].min() - .01
-#        width = proto_bound_j[1] - proto_bound_j[0] + 2.5
-#        height = seq[:, proto_bound_j[0]:proto_bound_j[1]].max() - y_min + .02
-#    else:
-#        seq_reshape = seq.reshape((seq_size, 1))
-#        x_min = max([0, proto_bound_j[0]-2])
-#        y_min = seq[:, proto_bound_j[0]:proto_bound_j[1]].min() - .01
-#        width = proto_bound_j[1] - x_min + 2
-#        height = seq[:, proto_bound_j[0]:proto_bound_j[1]].max() - y_min + .02
-    seq_reshape = seq.reshape((seq_size, 1))
-    x_min = max([0, proto_bound_j[0]-2])
-    y_min = seq[:, proto_bound_j[0]:proto_bound_j[1]].min() - .01
-    width = proto_bound_j[1] - x_min + 2
-    height = seq[:, proto_bound_j[0]:proto_bound_j[1]].max() - y_min + .02
-
-    t = np.arange(0, len(seq_reshape), 1)
-    plt.scatter(t, seq_reshape, c=cam_j, vmin=0, vmax=255)
-    plt.plot(t, seq_reshape)
-    cbar = plt.colorbar()
-    cbar.set_label('cam outputs', labelpad=-1)
-    mapping = {0: 'Non-ARDS', 1: 'ARDS'}
-    gt_lab = mapping[target]
-    title = 'gt: {}, breath_idx: {} proto: {}'.format(
-        gt_lab,
-        breath_idx,
-        prototype_idx,
-    )
-    plt.title(title)
-    rect = Rectangle((x_min, y_min), width, height, linewidth=1, edgecolor='r', facecolor='none', label='prototype activation zone')
-    ax = plt.gca()
-    ax.add_patch(rect)
-    plt.legend()
 
 
 # push each prototype to the nearest patch in the training set

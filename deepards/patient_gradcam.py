@@ -28,7 +28,7 @@ def do_makedirs(dir):
 
 
 class PatientGradCam(object):
-    def __init__(self, pretrained_model, data, target):
+    def __init__(self, pretrained_model, data, target, results_base_dir):
         self.grad_cam = MaxMinNormCam(pretrained_model.cuda())
         self.data = data
         self.gt = self.data.get_ground_truth_df()
@@ -36,6 +36,7 @@ class PatientGradCam(object):
         self.batch_size = self.data.all_sequences[0][1].shape[0]
         self.breath_len = 224
         self.target = target
+        self.results_base_dir = results_base_dir
 
     def get_ardsids_otherids(self):
         ards = self.gt[self.gt.y == 1].patient.unique()
@@ -43,7 +44,9 @@ class PatientGradCam(object):
         return ards, non_ards
 
     def get_target(self, ground_truth):
-        if self.target == 'ground_truth':
+        if isinstance(self.target, int):
+            return [self.target]
+        elif self.target == 'ground_truth':
             return [ground_truth]
         elif self.target == 'both':
             return [0, 1]
@@ -57,7 +60,7 @@ class PatientGradCam(object):
         patient_idxs = self.gt[self.gt.patient == patient_id].index
         target = self.get_target(self.gt.loc[patient_idxs].y.iloc[0])
         mapping = {0: 'non_ards', 1: 'ards'}
-        dirname = os.path.join('gradcam_results', 'patient_medians', mapping[target])
+        dirname = os.path.join(self.results_base_dir, 'gradcam_results', 'patient_medians', mapping[target])
         do_makedirs(dirname)
 
         # XXX in future make this configurable
@@ -74,7 +77,9 @@ class PatientGradCam(object):
         cam, model_output = self.grad_cam.generate_cam(br, target)
         cam_outputs = cv2.resize(cam, (1, self.breath_len))
         filename = os.path.join(dirname, patient_id + '_target-{}.png'.format(self.target))
-        self.visualize_sequence(med_breath[0], cam_outputs, patient_id, target, filename, model_output, target)
+        self.visualize_sequence(med_breath[0], cam_outputs, patient_id, target, model_output, target)
+        plt.savefig(filename)
+        plt.close()
 
     def get_average_patient_camout(self, patient_id):
         if self.target == 'both':
@@ -84,7 +89,7 @@ class PatientGradCam(object):
         ground_truth = self.gt.loc[patient_idxs].y.iloc[0]
         target = self.get_target(ground_truth)
         mapping = {0: 'non_ards', 1: 'ards'}
-        dirname = os.path.join('gradcam_results', 'patient_averages', mapping[target])
+        dirname = os.path.join(self.results_base_dir, 'gradcam_results', 'patient_averages', mapping[target])
         do_makedirs(dirname)
         avg_breath = np.empty((0, self.breath_len))
         cam_outputs = np.empty((0,7))
@@ -105,7 +110,9 @@ class PatientGradCam(object):
         cam_outputs = cv2.resize(cam_outputs,(1, self.breath_len))
         avg_breath = np.mean(avg_breath, axis = 0)
         filename = os.path.join(dirname, patient_id + '_target-{}.png'.format(self.target))
-        self.visualize_sequence(avg_breath, cam_outputs, patient_id, ground_truth, filename, mean_out, target)
+        self.visualize_sequence(avg_breath, cam_outputs, patient_id, ground_truth, mean_out, target)
+        plt.savefig(filename)
+        plt.clf()
 
     def get_sampled_patient_sequences_camout(self, patient_id):
         """
@@ -119,12 +126,36 @@ class PatientGradCam(object):
             rand_seq = random.choice(range(self.batch_size))
             for target in self.get_target(ground_truth):
                 mapping = {0: 'non_ards', 1: 'ards'}
-                dirname = os.path.join('gradcam_results', 'sampled_sequences', mapping[target], patient_id)
+                dirname = os.path.join(self.results_base_dir, 'gradcam_results', 'sampled_sequences', mapping[target], patient_id)
                 do_makedirs(dirname)
                 rel_idx = list(self.data.kfold_indexes).index(abs_idx)
                 cam_outputs, br, model_output = self.get_single_sequence_grad_cam(rel_idx, rand_seq, target)
                 filename = os.path.join(dirname, 'seq-{}-{}-target-{}.png'.format(abs_idx, rand_seq, self.target))
-                self.visualize_sequence(br[0], cam_outputs, patient_id, ground_truth, filename, model_output, target)
+                self.visualize_sequence(br[0], cam_outputs, patient_id, ground_truth, model_output, target)
+                plt.savefig(filename)
+                plt.clf()
+
+    def get_cam_by_hour(self, patient_id, hour_start, hour_end, n_sequences_per_hour):
+        patient_idxs = self.gt[(self.gt.patient == patient_id) & (self.gt.hour >= hour_start) & (self.gt.hour < hour_end)].index
+        if n_sequences_per_hour is not None:
+            n_sequences_per_hour = n_sequences_per_hour if n_sequences_per_hour < len(patient_idxs) else len(patient_idxs)
+            patient_idxs = np.random.choice(patient_idxs, size=n_sequences_per_hour, replace=False)
+        ground_truth = self.gt.loc[patient_idxs].y.iloc[0]
+        for abs_idx in patient_idxs:
+            for seq_idx in range(self.batch_size):
+                for target in self.get_target(ground_truth):
+                    mapping = {0: 'non_ards', 1: 'ards'}
+                    dirname = os.path.join(self.results_base_dir, 'gradcam_results', 'hour_sequences', mapping[target], patient_id, str(hour_start))
+                    do_makedirs(dirname)
+                    rel_idx = list(self.data.kfold_indexes).index(abs_idx)
+                    cam_outputs, br, model_output = self.get_single_sequence_grad_cam(rel_idx, seq_idx, target)
+                    filename = os.path.join(dirname, 'seq-{}-{}-target-{}.pkl'.format(abs_idx, seq_idx, self.target))
+                    self.visualize_sequence(br[0], cam_outputs, patient_id, ground_truth, model_output, target)
+                    ax = plt.gca()
+                    # save to pickle first, and then can convert to png if we
+                    # want to later. pickle is much faster than png
+                    pd.to_pickle(ax, filename, compression=None)
+                    plt.clf()
 
     def get_full_read_patient_sequences(self, patient_id):
         patient_idxs = self.gt[self.gt.patient == patient_id].index
@@ -133,7 +164,7 @@ class PatientGradCam(object):
         for abs_idx in patient_idxs:
             for target in self.get_target(ground_truth):
                 mapping = {0: 'non_ards', 1: 'ards'}
-                dirname = os.path.join('gradcam_results', 'full_read', mapping[target], patient_id)
+                dirname = os.path.join(self.results_base_dir, 'gradcam_results', 'full_read', mapping[target], patient_id)
                 do_makedirs(dirname)
                 rel_idx = list(self.data.kfold_indexes).index(abs_idx)
                 # XXX need to figure this out from here below
@@ -148,7 +179,7 @@ class PatientGradCam(object):
         plt.scatter(t, img, c=cam_outputs, vmin = 0, vmax = 255)
         plt.plot(t, img)
 
-    def visualize_sequence(self, br, cam_outputs, patient_id, c, filepath, model_output, cam_target):
+    def visualize_sequence(self, br, cam_outputs, patient_id, c, model_output, cam_target):
         self.plot_sequence(br, cam_outputs)
         cbar  = plt.colorbar()
         cbar.set_label("cam_outputs", labelpad=-1)
@@ -156,9 +187,6 @@ class PatientGradCam(object):
         pred_prob = F.softmax(model_output, dim=1).cpu().detach().numpy().round(3)
         pred = np.argmax(pred_prob)
         plt.title('{}, ground truth: {}, pred: {}, prob: {}, cam target: {}'.format(patient_id, mapping[c], mapping[pred], pred_prob, mapping[cam_target]), fontsize=8)
-        #plt.show()
-        plt.savefig(filepath)
-        plt.close()
 
     def visualize_read(self, br, cam_outputs, patient_id, c, filepath, model_output, cam_target):
         fig = plt.figure(figsize=(3*8, 3*4))
@@ -264,7 +292,7 @@ class PatientGradCam(object):
 
     def rand_sample(self, randomize_groups=False):
         if not randomize_groups:
-            dirname = os.path.join('gradcam_results', 'rand_sample', 'non_random')
+            dirname = os.path.join(self.results_base_dir, 'gradcam_results', 'rand_sample', 'non_random')
             do_makedirs(dirname)
             for _ in range(3):
                 self._make_titled_sequence_pane('ards', dirname)
@@ -286,6 +314,7 @@ if __name__ == '__main__':
     parser.add_argument('--fold', type=int, required=True, help="K-fold we want our dataset to use. This should be set in accordance to the patients that would normally be in the training dataset during a kfold run.")
     parser.add_argument('--ops', choices=['averages', 'medians', 'sample_seqs', 'read_cam', 'rand_sample'], required=True)
     parser.add_argument('-shuf', '--shuffle-samples', action='store_true')
+    parser.add_argument('--results-base-dir', default='/slowdata/deepards/')
     parser.add_argument(
         '--target',
         choices=['ards', 'other', 'ground_truth', 'both'],
@@ -306,7 +335,7 @@ if __name__ == '__main__':
     else:
         pretrained_model = pretrained_model.module
 
-    pt_grad = PatientGradCam(pretrained_model, data, args.target)
+    pt_grad = PatientGradCam(pretrained_model, data, args.target, args.results_base_dir)
     if not args.only_patient:
         patients = np.append(pt_grad.ards, pt_grad.non_ards)
     else:

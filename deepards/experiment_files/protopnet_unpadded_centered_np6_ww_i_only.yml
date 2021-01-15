@@ -10,6 +10,7 @@ batch_size: 16
 network: protopnet
 train_from_pickle: /fastdata/deepards/unpadded_centered_with_bm-nb20-kfold.pkl
 n_sub_batches: 20
+save_model: protopnet_np6_ww_i_only
 
 # prototype properties
 n_prototypes: 6
