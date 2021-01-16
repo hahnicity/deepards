@@ -1024,10 +1024,15 @@ class ARDSRawDataset(Dataset):
         return pd.DataFrame(rows, columns=['patient', 'y', 'hour'], index=self.kfold_indexes)
 
     def get_abs_bs_dt(self, breath):
+        if isinstance(breath['abs_bs'], bytes):
+            abs_bs = breath['abs_bs'].decode('utf-8')
+        else:
+            abs_bs = breath['abs_bs']
+
         try:
-            breath_time = pd.to_datetime(breath['abs_bs'], format='%Y-%m-%d %H-%M-%S.%f')
+            breath_time = pd.to_datetime(abs_bs, format='%Y-%m-%d %H-%M-%S.%f')
         except:
-            breath_time = pd.to_datetime(breath['abs_bs'], format='%Y-%m-%d %H:%M:%S.%f')
+            breath_time = pd.to_datetime(abs_bs, format='%Y-%m-%d %H:%M:%S.%f')
         return breath_time
 
 

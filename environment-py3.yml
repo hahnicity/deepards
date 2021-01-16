@@ -1,6 +1,6 @@
 name: deepardsdev3
 dependencies:
-  - python>=3.6
+  - python<3.8
   - cython
   - ipython
   - numpy
@@ -10,7 +10,7 @@ dependencies:
   - cudatoolkit=11.0
   - seaborn
   - scipy
-  - scikit-learn
+  - scikit-learn<0.23
   - opencv
   - pathlib
   - shap

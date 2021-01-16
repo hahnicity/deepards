@@ -635,7 +635,8 @@ class DeepARDSResults(object):
         self.pred_to_hour_frame = predictions.to_frame(name='pred')
         for idx in self.pred_to_hour_frame.index.unique():
             hrs = pred_hour[idx]
-            if isinstance(self.pred_to_hour_frame.loc[idx, 'pred'], int):
+            pred = self.pred_to_hour_frame.loc[idx, 'pred']
+            if isinstance(pred, int) or isinstance(pred, np.int64):
                 self.pred_to_hour_frame.loc[idx, 'hour'] = hrs[0]
             else:
                 self.pred_to_hour_frame.loc[idx, 'hour'] = hrs

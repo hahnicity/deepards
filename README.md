@@ -10,7 +10,7 @@ Install using anaconda. First install anaconda on your machine then setup a new 
 After that install everything else with pip, because for some reason numpy and pandas dependencies
 get all messed up in anaconda. Also need to install our private python pkg, ucdpvanalysis.
 
-    pip install ucdpvanalysis-1.5.tar.gz
+    pip install build/static/ucdpvanalysis-1.5.tar.gz
 
 Then install dtwco
 
