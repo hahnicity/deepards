@@ -12,8 +12,28 @@ train_from_pickle: /fastdata/deepards/unpadded_centered_sequences-nb20-kfold.pkl
 n_sub_batches: 20
 experiment_name: experiment_files_unpadded_centered_nb20_cnn_linear
 models:
-  0: model-run-1-epoch3-fold0.pth
-  1: model-run-1-epoch3-fold1.pth
-  2: model-run-1-epoch3-fold2.pth
-  3: model-run-1-epoch3-fold3.pth
-  4: model-run-1-epoch3-fold4.pth
+  0:
+   - model-run-0-epoch1-fold0.pth
+   - model-run-1-epoch1-fold0.pth
+   - model-run-2-epoch1-fold0.pth
+   - model-run-3-epoch1-fold0.pth
+  1:
+   - model-run-0-epoch1-fold1.pth
+   - model-run-1-epoch1-fold1.pth
+   - model-run-2-epoch1-fold1.pth
+   - model-run-3-epoch1-fold1.pth
+  2:
+   - model-run-0-epoch1-fold2.pth
+   - model-run-1-epoch1-fold2.pth
+   - model-run-2-epoch1-fold2.pth
+   - model-run-3-epoch1-fold2.pth
+  3:
+   - model-run-0-epoch1-fold3.pth
+   - model-run-1-epoch1-fold3.pth
+   - model-run-2-epoch1-fold3.pth
+   - model-run-3-epoch1-fold3.pth
+  4:
+   - model-run-0-epoch1-fold4.pth
+   - model-run-1-epoch1-fold4.pth
+   - model-run-2-epoch1-fold4.pth
+   - model-run-3-epoch1-fold4.pth
