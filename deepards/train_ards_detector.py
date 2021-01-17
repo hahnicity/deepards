@@ -160,6 +160,11 @@ class BaseTraining(object):
     def get_base_datasets(self):
         kfold_num = None if self.args.kfolds is None else 0
         transforms = self.get_transforms()
+        if 'oversample' in self.args.__dict__:
+            oversample_minority = self.args.oversample
+        else:
+            oversample_minority = self.args.oversample_minority
+
         # XXX if we set from_pickle but dont set kfolds, then it runs holdout set generateion
 
         # for holdout and kfold
@@ -170,6 +175,7 @@ class BaseTraining(object):
             # good in the future if we didn't go down this path of dataset object development.
             # For now I think I don't want to refactor when we are close to done with the project
             # and I can just parallelize runs across multiple GPUs.
+
             train_dataset = ARDSRawDataset(
                 self.args.data_path,
                 self.args.experiment_num,
@@ -181,7 +187,7 @@ class BaseTraining(object):
                 kfold_num=kfold_num,
                 total_kfolds=self.args.kfolds,
                 unpadded_downsample_factor=self.args.downsample_factor,
-                oversample_minority=self.args.oversample,
+                oversample_minority=oversample_minority,
                 train_patient_fraction=self.args.train_pt_frac,
                 transforms=transforms,
                 holdout_set_type=self.args.holdout_set_type,
@@ -194,14 +200,14 @@ class BaseTraining(object):
             )
         else:
             train_dataset = ARDSRawDataset.from_pickle(
-                self.args.train_from_pickle, self.args.oversample, self.args.train_pt_frac, transforms, self.args.undersample_factor, self.args.undersample_std_factor
+                self.args.train_from_pickle, oversample_minority, self.args.train_pt_frac, transforms, self.args.undersample_factor, self.args.undersample_std_factor, self.args.oversample_all_factor
             )
 
         self.n_sub_batches = train_dataset.n_sub_batches
         if not self.args.test_from_pickle and (self.args.kfolds is not None):
             test_dataset = ARDSRawDataset.make_test_dataset_if_kfold(train_dataset)
         elif self.args.test_from_pickle:
-            test_dataset = ARDSRawDataset.from_pickle(self.args.test_from_pickle, False, 1.0, None, -1, None)
+            test_dataset = ARDSRawDataset.from_pickle(self.args.test_from_pickle, False, 1.0, None, -1, None, 1.0)
         else:  # holdout, no pickle, no kfold
             # there is a really bizarre bug where my default arg is being overwritten by
             # the state of the train_dataset obj. I checked pointer references and there was
@@ -225,6 +231,7 @@ class BaseTraining(object):
                 drop_e_lim=self.args.drop_e_lim,
                 truncate_e_lim=self.args.truncate_e_lim,
                 undersample_factor=-1,
+                oversample_minority=False,
             )
 
         return train_dataset, test_dataset
@@ -593,6 +600,11 @@ class NestedMixin(object):
     def get_base_datasets(self):
         kfold_num = None if self.args.kfolds is None else 0
 
+        if 'oversample' in self.args.__dict__:
+            oversample_minority = self.args.oversample
+        else:
+            oversample_minority = self.args.oversample_minority
+
         # for holdout and kfold
         if not self.args.train_from_pickle:
             train_dataset = ARDSRawDataset(
@@ -613,15 +625,16 @@ class NestedMixin(object):
                 truncate_e_lim=self.args.truncate_e_lim,
                 undersample_factor=self.args.undersample_factor,
                 undersample_std_factor=self.args.undersample_std_factor,
+                oversample_minority=oversample_minority,
             )
         else:
-            train_dataset = ARDSRawDataset.from_pickle(self.args.train_from_pickle, self.args.oversample, self.args.train_pt_frac, self.args.undersample_factor, self.args.undersample_std_factor)
+            train_dataset = ARDSRawDataset.from_pickle(self.args.train_from_pickle, oversample_minority, self.args.train_pt_frac, self.args.undersample_factor, self.args.undersample_std_factor, self.args.oversample_all_factor)
 
         self.n_sub_batches = train_dataset.n_sub_batches
         if not self.args.test_from_pickle and self.args.kfolds is not None:
             test_dataset = ARDSRawDataset.make_test_dataset_if_kfold(train_dataset)
         elif self.args.test_from_pickle:
-            test_dataset = ARDSRawDataset.from_pickle(self.args.test_from_pickle, False, 1.0)
+            test_dataset = ARDSRawDataset.from_pickle(self.args.test_from_pickle, False, 1.0, 1.0)
         else:  # holdout, no pickle, no kfold
             test_dataset = ARDSRawDataset(
                 self.args.data_path,
@@ -640,6 +653,7 @@ class NestedMixin(object):
                 drop_e_lim=self.args.drop_e_lim,
                 truncate_e_lim=self.args.truncate_e_lim,
                 undersample_factor=-1,
+                oversample_minority=False,
             )
 
         return train_dataset, test_dataset
@@ -1357,7 +1371,8 @@ def build_parser():
     parser.add_argument('--load-siamese', help='load a siamese network pretrained model')
     parser.add_argument('--fl-gamma', type=float, default=2.0)
     parser.add_argument('--fl-alpha', type=float, default=.9)
-    true_false_flag('--oversample', '')
+    true_false_flag('--oversample-minority', '')
+    parser.add_argument('--oversample-all-factor', type=float, help='amount by which we should randomly oversample all observations in dataset. Can be helpful to run in conjunction with augmentation')
     parser.add_argument('-usf', '--undersample-factor', type=float)
     parser.add_argument('-usdf', '--undersample-std-factor', type=float)
     true_false_flag('--reshuffle-oversample-per-epoch', '')

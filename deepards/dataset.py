@@ -124,7 +124,8 @@ class ARDSRawDataset(Dataset):
                  drop_e_lim=False,
                  truncate_e_lim=None,
                  undersample_factor=-1,
-                 undersample_std_factor=0.2):
+                 undersample_std_factor=0.2,
+                 oversample_all_factor=1.0):
         """
         Dataset to generate sequences of data for ARDS Detection
         """
@@ -140,7 +141,8 @@ class ARDSRawDataset(Dataset):
         self.n_sub_batches = n_sub_batches if all_sequences == [] else all_sequences[0][1].shape[0]
         self.unpadded_downsample_factor = unpadded_downsample_factor
         self.cohort_file = cohort_file
-        self.oversample = oversample_minority
+        self.oversample_minority = oversample_minority
+        self.oversample_all_factor = oversample_all_factor
         self.undersample_factor = undersample_factor
         self.undersample_std_factor = undersample_std_factor
         self.whole_patient_super_batch = whole_patient_super_batch
@@ -163,7 +165,7 @@ class ARDSRawDataset(Dataset):
             raise Exception('kfold are not supported currently with drop_if_under_r2')
         self.auto = deepards.correlation.AutoCorrelation()
 
-        if self.oversample and self.whole_patient_super_batch:
+        if self.oversample_minority and self.whole_patient_super_batch:
             raise Exception('currently oversampling with whole patient super batch is not supported')
 
         self.cohort = pd.read_csv(cohort_file)
@@ -269,17 +271,23 @@ class ARDSRawDataset(Dataset):
         if not self.train:
             return
 
-        if not self.oversample:
-            return
-
-        if self.total_kfolds:
+        if self.oversample_minority and not self.total_kfolds:
+            raise NotImplementedError('We havent implemented oversampling for holdout sets yet')
+        elif self.oversample_minority:
             x = copy(self.kfold_indexes)
             y = [self.all_sequences[idx][-2].argmax() for idx in x]
             ros = RandomOverSampler()
             x_resampled, y_resampled = ros.fit_resample(np.array(x).reshape(-1, 1), y)
             self.kfold_indexes = x_resampled.ravel()
-        else:
-            raise NotImplementedError('We havent implemented oversampling for holdout sets yet')
+
+        if self.oversample_all_factor > 1.0:
+            x = copy(self.kfold_indexes)
+            y = np.array([self.all_sequences[idx][-2].argmax() for idx in x])
+            non_ards_n = int(len(y[y==0])*self.oversample_all_factor)
+            ards_n = int(len(y[y==1])*self.oversample_all_factor)
+            ros = RandomOverSampler(sampling_strategy={0: non_ards_n, 1: ards_n})
+            x_resampled, y_resampled = ros.fit_resample(np.array(x).reshape(-1, 1), y)
+            self.kfold_indexes = x_resampled.ravel()
 
     def set_undersampling_indices(self):
         if not self.train:
@@ -369,11 +377,11 @@ class ARDSRawDataset(Dataset):
         return test_dataset
 
     @classmethod
-    def from_pickle(cls, data_path, oversample_minority, train_patient_fraction, transforms, undersample_factor, undersample_std_factor):
+    def from_pickle(cls, data_path, oversample_minority, train_patient_fraction, transforms, undersample_factor, undersample_std_factor, oversample_all_factor):
         dataset = pd.read_pickle(data_path)
         if not isinstance(dataset, ARDSRawDataset) and not isinstance(dataset, deepards.dataset.ARDSRawDataset):
             raise ValueError('The pickle file you have specified is out-of-date. Please re-process your dataset and save the new pickled dataset.')
-        dataset.oversample = oversample_minority
+        dataset.oversample_minority = oversample_minority
         dataset.train_patient_fraction = train_patient_fraction
         # paranoia
         try:
@@ -383,6 +391,7 @@ class ARDSRawDataset(Dataset):
         dataset.transforms = transforms
         dataset.undersample_factor = undersample_factor
         dataset.undersample_std_factor = undersample_std_factor
+        dataset.oversample_all_factor = oversample_all_factor
         return dataset
 
     def set_kfold_indexes_for_fold(self, kfold_num):
