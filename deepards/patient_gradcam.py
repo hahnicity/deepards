@@ -191,7 +191,7 @@ class PatientGradCam(object):
     def visualize_read(self, br, cam_outputs, patient_id, c, filepath, model_output, cam_target):
         fig = plt.figure(figsize=(3*8, 3*4))
         fig.add_subplot(1, 1, 1)
-        half_len = len(br.ravel()) / 2
+        half_len = int(len(br.ravel()) / 2)
         self.plot_sequence(br.ravel()[:half_len], cam_outputs.ravel()[:half_len])
         cbar  = plt.colorbar()
         cbar.set_label("cam_outputs", labelpad=-1)
@@ -245,7 +245,7 @@ class PatientGradCam(object):
         br_idx = random.randint(0, self.batch_size-1)
 
         rel_idx = list(self.data.kfold_indexes).index(abs_idx)
-        cam_outputs, br = self.get_single_sequence_grad_cam(rel_idx, br_idx, target)
+        cam_outputs, br, model_output = self.get_single_sequence_grad_cam(rel_idx, br_idx, target)
         self.plot_sequence(br[0], cam_outputs)
         plt.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
         plt.yticks(fontsize='x-small')
@@ -306,6 +306,19 @@ class PatientGradCam(object):
                 self._make_titled_sequence_pane('random', dirname)
 
 
+def plot_grads(pt_grad_obj):
+    grads = pt_grad_obj.grad_cam.grads
+    preds = pt_grad_obj.grad_cam.preds
+    grad_norms = np.array([torch.FloatTensor(grads[i]).norm() for i in range(len(grads))])
+    outputs = np.array([F.softmax(k).argmax() for k in preds])
+    ards_preds = grad_norms[outputs == 1]
+    other_preds = grad_norms[outputs == 0]
+    plt.hist(ards_preds, bins=20, label='ARDS', alpha=.5)
+    plt.hist(other_preds, bins=20, label='Other', alpha=.5)
+    plt.legend()
+    plt.show()
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('model_path', help='path to the saved_model')
@@ -323,11 +336,9 @@ if __name__ == '__main__':
     )
     args = parser.parse_args()
 
-    # XXX make sure dataset matches test dataset.
     data = pd.read_pickle(args.pickled_data_path)
-    data.set_kfold_indexes_for_fold(args.fold)
-    data.transforms = None
     data = ARDSRawDataset.make_test_dataset_if_kfold(data)
+    data.set_kfold_indexes_for_fold(args.fold)
     pretrained_model = torch.load(args.model_path)
     # ensure that model is on same cuda device that data will be on
     if not isinstance(pretrained_model, torch.nn.DataParallel):
@@ -355,3 +366,5 @@ if __name__ == '__main__':
     elif args.ops == 'read_cam':
         for patient_id in patients:
             pt_grad.get_full_read_patient_sequences(patient_id)
+
+    plot_grads(pt_grad)

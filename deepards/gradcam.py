@@ -9,7 +9,6 @@ import pickle
 import cv2
 import torch.nn.functional as F
 
-#from breath_visualize import visualize_sequence
 
 class CamExtractor():
     """
@@ -105,8 +104,15 @@ class MaxMinNormCam(GradCam):
     focused on an area intensely, whereas the area could have just been the
     strongest area out of many weak ones
     """
+    # XXX can probably drop grads one of these days
+    grads = []
+    preds = []
+
     def generate_read_cam(self, input, target):
         conv_output, grad, mo = self.generate_one_hot_grad_and_output(input, target)
+        # XXX can probably drop grads one of these days
+        self.grads.append(grad)
+        self.preds.append(mo)
         weights = np.mean(grad, axis=(2,))
         cam = np.zeros((conv_output.shape[0], conv_output.shape[2]), dtype=np.float32)
         for i, b in enumerate(conv_output):
@@ -117,6 +123,9 @@ class MaxMinNormCam(GradCam):
 
     def generate_cam(self, input, target=None):
         conv_output, grad, mo = self.generate_one_hot_grad_and_output(input, target)
+        # XXX can probably drop grads one of these days
+        self.grads.append(grad)
+        self.preds.append(mo)
         weights = np.mean(grad, axis=(0, 2))
         # Take averages across all breaths because of the way we are structuring
         # our model. We can in the future just pick a specific breath if we want
