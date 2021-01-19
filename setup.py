@@ -12,8 +12,6 @@ setup(name='deepards',
           'prettytable',
           'ucdpvanalysis>=1.5',
           'imbalanced-learn',
-          'scikit-learn',
-          'pyyaml',
       ],
       entry_points={
       },

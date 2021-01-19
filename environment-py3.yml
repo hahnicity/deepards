@@ -18,6 +18,8 @@ dependencies:
   - pyqt
   - jupyter
   - ipython
+  - statsmodels
+  - pyyaml
   - pip
   - pip:
     - pathlib

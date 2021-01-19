@@ -19,7 +19,11 @@ from ventmap.raw_utils import extract_raw, read_processed_file
 from algorithms.breath_meta import get_experimental_breath_meta
 from algorithms.constants import EXPERIMENTAL_META_HEADER
 import deepards
-import deepards.correlation
+try:
+    from deepards.correlation import AutoCorrelation
+except ImportError:  # if we dont have this installed we probably dont need it
+    from mock import Mock
+    AutoCorrelation = Mock()
 
 
 class GenericHomogeneityUndersampler(object):
@@ -163,7 +167,7 @@ class ARDSRawDataset(Dataset):
 
         if self.drop_if_under_r2 and kfold_num is not None:
             raise Exception('kfold are not supported currently with drop_if_under_r2')
-        self.auto = deepards.correlation.AutoCorrelation()
+        self.auto = AutoCorrelation()
 
         if self.oversample_minority and self.whole_patient_super_batch:
             raise Exception('currently oversampling with whole patient super batch is not supported')
