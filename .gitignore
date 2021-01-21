@@ -9,6 +9,7 @@ results/
 *.pth
 *.DS_Store
 *.Rhistory
+*.zip
 
 # project specific dirs
 Data/
