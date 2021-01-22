@@ -5,23 +5,21 @@ dataset_type: unpadded_centered_sequences
 loader_threads: 0
 oversample: true
 #no_print_progress: true
-epochs: 15
+epochs: 20
 batch_size: 16
 network: protopnet
-#train_to_pickle: /fastdata/deepards/unpadded_centered_sequences-nb20-aim1_holdout_train_redo.pkl
-#test_to_pickle: /fastdata/deepards/unpadded_centered_sequences-nb20-aim1_holdout_test_redo.pkl
-train_from_pickle: /fastdata/deepards/unpadded_centered_sequences-nb20-aim1_holdout_train_redo.pkl
-test_from_pickle: /fastdata/deepards/unpadded_centered_sequences-nb20-aim1_holdout_test_redo.pkl
+train_to_pickle: unpadded_centered_sequences-nb20-aim1_holdout_train_redo.pkl
+test_to_pickle: unpadded_centered_sequences-nb20-aim1_holdout_test_redo.pkl
+#train_from_pickle: unpadded_centered_sequences-nb20-aim1_holdout_train_redo.pkl
+#test_from_pickle: unpadded_centered_sequences-nb20-aim1_holdout_test_redo.pkl
 n_sub_batches: 20
-data_path: /fastdata/ardsdetection
+data_path: /home/grehm/workspace/datasets/ardsdetection
 holdout_set_type: main
 base_network: densenet18
 
-clust_lambda: 0.8
 sep_lambda: 1.0
-n_warm_epochs: 4
+clust_lambda: 0.8
+viz_start_epoch: 100
 push_start_epoch: 8
+n_warm_epochs: 4
 push_every_n: 4
-n_push_iters: 5
-# dont viz
-viz_start_epoch: 30

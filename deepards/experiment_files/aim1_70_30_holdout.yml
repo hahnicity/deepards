@@ -1,11 +1,9 @@
-data_path: /fastdata/ardsdetection/
+data_path: /home/grehm/workspace/datasets/ardsdetection/
 dataset_type: unpadded_centered_sequences
 n_sub_batches: 20
 loader_threads: 0
-#train_to_pickle: /fastdata/deepards/unpadded_centered_sequences-nb20-aim1_holdout_train.pkl
-#test_to_pickle: /fastdata/deepards/unpadded_centered_sequences-nb20-aim1_holdout_test.pkl
-train_from_pickle: /fastdata/deepards/unpadded_centered_sequences-nb20-aim1_holdout_train.pkl
-test_from_pickle: /fastdata/deepards/unpadded_centered_sequences-nb20-aim1_holdout_test.pkl
+train_from_pickle: unpadded_centered_sequences-nb20-aim1_holdout_train.pkl
+test_from_pickle: unpadded_centered_sequences-nb20-aim1_holdout_test.pkl
 clip_val: 0.01
 base_network: densenet18
 network: cnn_linear
