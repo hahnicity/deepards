@@ -11,7 +11,11 @@ from prettytable import PrettyTable
 from sklearn.metrics import roc_auc_score
 import torch
 
-import deepards.dtw_lib as dtw_lib
+try:
+    import deepards.dtw_lib as dtw_lib
+except ImportError:
+    from mock import Mock
+    dtw_lib = Mock()
 
 filename = './Data/data.csv'
 
