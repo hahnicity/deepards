@@ -14,6 +14,7 @@ setup(name='deepards',
           'prettytable',
           'ucdpvanalysis>=1.5',
           'imbalanced-learn',
+          'mock',
       ],
       entry_points={
       },

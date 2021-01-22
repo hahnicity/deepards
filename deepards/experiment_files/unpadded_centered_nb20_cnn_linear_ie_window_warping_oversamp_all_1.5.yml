@@ -1,11 +1,11 @@
 cuda_no_dp: true
-clip_val: 0.01
-clip_grad: true
+#clip_val: 0.01
+#clip_grad: true
 dataset_type: unpadded_centered_sequences
 oversample_minority: true
 oversample_all_factor: 1.5
 kfolds: 5
-no_print_progress: true
+#no_print_progress: true
 epochs: 10
 batch_size: 16
 network: cnn_linear
