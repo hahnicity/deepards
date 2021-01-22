@@ -10,8 +10,10 @@ import numpy as np
 import pandas as pd
 from scipy.signal import resample
 from sklearn.model_selection import StratifiedKFold
+import torch
 from torch.nn.utils.rnn import pack_padded_sequence
 from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms
 from ventmap import SAM
 from ventmap.raw_utils import extract_raw, read_processed_file
 
@@ -337,11 +339,13 @@ class ARDSRawDataset(Dataset):
             raise NotImplementedError("We haven't implemented train patient fractions for holdout yet")
 
     def derive_scaling_factors(self):
-        is_kfolds = self.total_kfolds is not None
-        if is_kfolds:
-            indices = [self.get_kfold_indexes_for_fold(kfold_num) for kfold_num in range(self.total_kfolds)]
+        if self.total_kfolds is not None:
+            indices = {
+                kfold_num: self.get_kfold_indexes_for_fold(kfold_num)
+                for kfold_num in range(self.total_kfolds)
+            }
         else:
-            indices = [range(len(self.all_sequences))]
+            indices = {None: range(len(self.all_sequences))}
 
         if 'padded_breath_by_breath' in self.dataset_type:
             is_padded = True
@@ -351,8 +355,8 @@ class ARDSRawDataset(Dataset):
             raise Exception('unsupported dataset type {} for scaling'.format(self.dataset_type))
 
         self.scaling_factors = {
-            kfold_num if is_kfolds else None: self._get_scaling_factors_for_indices(idxs, is_padded)
-            for kfold_num, idxs in enumerate(indices)
+            kfold_num: self._get_scaling_factors_for_indices(idxs, is_padded)
+            for kfold_num, idxs in indices.items()
         }
 
     @classmethod
@@ -990,6 +994,7 @@ class ARDSRawDataset(Dataset):
             data = (data - mu) / std
 
         # this will return absolute index of data, the data, metadata, and target
+        # by absolute index we mean the indexing in self.all_sequences
         return index, data, meta, target
 
     def _get_padding_mask(self, data, mu):
@@ -1209,3 +1214,185 @@ class SiameseNetworkDataset(ARDSRawDataset):
         if not isinstance(dataset, SiameseNetworkDataset):
             raise ValueError('The pickle file you have specified is out-of-date. Please re-process your dataset and save the new pickled dataset.')
         return dataset
+
+
+class ImgARDSDataset(ARDSRawDataset):
+    def __init__(self, raw_dataset_obj):
+        """
+        Create an ARDS dataset composed of 2D images. Operates off an ARDSRawDataset
+        object because it has done most of the hard work for us already.
+
+        :param raw_dataset_obj: instance of ARDSRawDataset
+        """
+        self.raw = raw_dataset_obj
+        self.all_sequences = []
+        # XXX I'm kinda doing planning for the case that i want to redo the dataset
+        # from fresh data files. this does have advantage of being able to go up to
+        # 256. But then again it might just be easier to modify the raw dataset for
+        # 256 instead.
+        self.make_dataset_from_raw()
+        self.total_kfolds = self.raw.total_kfolds
+        try:
+            self.oversample_minority = self.raw.oversample_minority
+        except AttributeError:
+            self.oversample_minority = self.raw.oversample
+        try:
+            self.oversample_all_factor = self.raw.oversample_all_factor
+        except AttributeError:  # if this was unset then it was 1.0
+            self.oversample_all_factor = 1
+        self.dataset_type = self.raw.dataset_type
+        self.seq_hours = dict()
+        self.train = self.raw.train
+        self.transforms = transforms.Compose([
+            transforms.ToTensor(),
+            # resize cant be done with an empty first dim otherwise it pukes
+            # and blows up the machine's memory
+            #
+            # Consider RandomPerspective later if you want to try things out
+            transforms.Resize(256),
+            transforms.RandomCrop(224),
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomVerticalFlip(),
+        ])
+        if self.dataset_type == 'padded_breath_by_breath':
+            raise NotImplementedError('padded dataset types not implemented yet!')
+        self.derive_scaling_factors()
+
+    def _append_to_mat(self, mat, new_data, seq_hours, new_seq_hours):
+        len_win, chans, seq_size = new_data.shape
+        existing_rows = sum([m.shape[0] for m in mat])
+
+        if existing_rows + new_data.shape[0] <= seq_size:
+            mat.append(new_data.reshape(len_win, seq_size))
+            seq_hours.extend(new_seq_hours)
+            return mat, [], []
+        else:
+            n_rows = seq_size - existing_rows
+            mat.append(new_data[:n_rows].reshape(n_rows, seq_size))
+            # its difficult to figure out exactly how many sequence hours to add.
+            # in unpadded sequences there will be multiple breaths in each row.
+            breaths_per_row = (len(new_seq_hours) / n_rows) if n_rows > 0 else 0
+            n_hrs = int(n_rows*breaths_per_row)
+            seq_hours.extend(new_seq_hours[:n_hrs])
+            return mat, new_data[n_rows:], new_seq_hours[n_hrs:]
+
+    def _finish_mat(self, pt, mat, target, seq_hours):
+        if len(mat) == 0:
+            return
+        existing_rows = sum([m.shape[0] for m in mat])
+        seq_size = mat[0].shape[1]
+        remaining_rows = seq_size - existing_rows
+
+        if remaining_rows != 0:
+            mat.append(np.zeros((remaining_rows, seq_size)))
+
+        self.all_sequences.append([pt, np.concatenate(mat), target, seq_hours])
+
+    def make_dataset_from_raw(self):
+        # this could probably be a recursive function but oh well.
+        last_pt = None
+        last_target = None
+        sh = []
+        mat = []
+        # if the data doesnt have this format then there will be an error
+        if len(self.raw.all_sequences[0]) != 4:
+            raise NotImplementedError('datasets with breath metadata or other information havent been implemented yet!')
+
+        for pt, data, target, seq_hours in self.raw.all_sequences:
+            if last_pt != pt and mat != []:
+                # this is pretty hacky
+                sh = sh if len(sh) > 0 else [last_hour_obs]
+                self._finish_mat(last_pt, mat, last_target, sh)
+                mat, sh = [], []
+
+            last_hour_obs = seq_hours[-1]
+            mat, remainder, remainder_sh = self._append_to_mat(mat, data, sh, seq_hours)
+            if remainder != []:
+                mat = self._finish_mat(pt, mat, target, sh)
+                mat, sh = [], []
+                # _, __ because there will be no remainder
+                mat, _, __ = self._append_to_mat(mat, remainder, sh, remainder_sh)
+            last_pt = pt
+            last_target = target
+
+        self._finish_mat(pt, mat, last_target, sh)
+
+    def _get_seq_ground_truth(self, idxs):
+        rows = []
+        for i in idxs:
+            pt, _, target, hrs = self.all_sequences[i]
+            rows.append([pt, np.argmax(target, axis=0), hrs[0]])
+        return pd.DataFrame(rows, columns=['patient', 'y', 'hour'], index=idxs)
+
+    def _get_all_sequence_ground_truth(self):
+        idxs = range(len(self.all_sequences))
+        return self._get_seq_ground_truth(idxs)
+
+    def get_ground_truth_df(self):
+        if self.kfold_num is None:
+            return self._get_all_sequence_ground_truth()
+        else:
+            return self._get_seq_ground_truth(self.kfold_indexes)
+
+    def set_kfold_indexes_for_fold(self, kfold_num):
+        self.kfold_num = kfold_num
+        self.kfold_indexes = self.get_kfold_indexes_for_fold(kfold_num)
+        # only oversampling here
+        self.set_oversampling_indices()
+
+    def __getitem__(self, index):
+
+        if self.kfold_num is not None:
+            index = self.kfold_indexes[index]
+        seq = self.all_sequences[index]
+        _, data, target, seq_hours = seq
+        meta = np.nan
+
+        self.seq_hours[index] = seq_hours
+        try:
+            mu, std = self.scaling_factors[self.kfold_num]
+        except AttributeError:
+            raise AttributeError(
+                'Scaling factors not found for dataset. You must derive them using '
+                'the `derive_scaling_factors` function.'
+            )
+
+        if self.transforms is not None:
+            data = self.transforms(data)
+
+        data = (data - mu) / std
+
+        # this will return absolute index of data, the data, metadata, and target
+        # by absolute index we mean the indexing in self.all_sequences
+        return index, data, meta, target
+
+    def __len__(self):
+        if self.kfold_num is None:
+            return len(self.all_sequences)
+        else:
+            return len(self.kfold_indexes)
+
+    @classmethod
+    def from_pickle(self):
+        # XXX do this in a bit when we have figured all the ins and outs
+        raise NotImplementedError('cant get 2d dataset from pickle yet')
+
+
+if __name__ == '__main__':
+    a = pd.read_pickle('/fastdata/deepards/unpadded_centered_sequences-nb20-kfold.pkl')
+    d = ImgARDSDataset(a)
+    d.set_kfold_indexes_for_fold(0)
+    idx, seq, meta, target = d[0]
+    #distort = transforms.RandomPerspective(distortion_scale=.1, p=1)
+    #aff = transforms.RandomAffine(25)
+    # jittering doesnt work very well
+    jit = transforms.ColorJitter(brightness=0.00001)
+    from matplotlib import pyplot as plt
+    fig, axes = plt.subplots(nrows=1, ncols=2)
+    ax = plt.subplot(1, 2, 1)
+    ax.imshow(seq.numpy().reshape(224,224))
+    ax.set_title('unmodified')
+    ax = plt.subplot(1, 2, 2)
+    ax.imshow(jit(seq).numpy().reshape(224,224))
+    ax.set_title('modified')
+    plt.show()
