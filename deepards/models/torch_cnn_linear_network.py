@@ -110,3 +110,14 @@ class CNNLinearNetwork(nn.Module):
         for i in range(1, batches):
             outputs = torch.cat([outputs, self.linear_final(self.breath_block(x[i]).view(-1)).unsqueeze(0)], dim=0)
         return outputs
+
+
+class CNNLinearNetwork2D(nn.Module):
+    def __init__(self, breath_block):
+        super(CNNLinearNetwork2D, self).__init__()
+        self.breath_block = breath_block
+        self.linear_final = nn.Linear(self.breath_block.n_out_filters, 2)
+
+    def forward(self, x, metadata):
+        x = self.breath_block(x)
+        return self.linear_final(x)

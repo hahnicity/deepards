@@ -16,7 +16,7 @@ from torchvision.transforms import Compose
 
 from deepards.augmentation import IEWindowWarping, IEWindowWarpingIEProgrammable,  NaiveWindowWarping
 from deepards.config import Configuration
-from deepards.dataset import ARDSRawDataset, SiameseNetworkDataset
+from deepards.dataset import ARDSRawDataset, ImgARDSDataset, SiameseNetworkDataset, two_dim_transforms
 from deepards.loss import ConfidencePenaltyLoss, FocalLoss, VacillatingLoss
 from deepards.metrics import DeepARDSResults, Reporting
 from deepards.models.autoencoder_cnn import AutoencoderCNN
@@ -24,6 +24,7 @@ from deepards.models.autoencoder_network import AutoencoderNetwork
 from deepards.models.cnn_to_nested_layer import CNNToNestedLSTMNetwork, CNNToNestedRNNNetwork, CNNToNestedTransformerNetwork
 from deepards.models.cnn_transformer import CNNTransformerNetwork
 from deepards.models.densenet import densenet18, densenet121, densenet161, densenet169, densenet201
+from deepards.models.densenet2d import densenet18 as densenet18_2d
 from deepards.models.lstm_only import DoubleLSTMNetwork, LSTMOnlyNetwork, LSTMOnlyWithPacking
 from deepards.models.protopnet import construct_PPNet
 from deepards.models.resnet import resnet18, resnet50, resnet101, resnet152
@@ -31,7 +32,7 @@ from deepards.models.senet import senet18, senet154, se_resnet18, se_resnet50, s
 from deepards.models.siamese import SiameseARDSClassifier, SiameseCNNLinearNetwork, SiameseCNNLSTMNetwork, SiameseCNNTransformerNetwork
 from deepards.models.torch_cnn_lstm_combo import CNNLSTMDoubleLinearNetwork, CNNLSTMNetwork
 from deepards.models.torch_cnn_bm_regressor import CNNRegressor
-from deepards.models.torch_cnn_linear_network import CNNDoubleLinearNetwork, CNNLinearComprToRF, CNNLinearToMean, CNNLinearNetwork, CNNSingleBreathLinearNetwork
+from deepards.models.torch_cnn_linear_network import CNNDoubleLinearNetwork, CNNLinearNetwork, CNNLinearNetwork2D, CNNLinearComprToRF, CNNLinearToMean, CNNSingleBreathLinearNetwork
 from deepards.models.torch_metadata_only_network import MetadataOnlyNetwork
 from deepards.models.unet import UNet
 from deepards.models.vgg import vgg11_bn, vgg13_bn
@@ -45,6 +46,7 @@ base_networks = {
     'resnet152': resnet152,
     'unet': UNet,
     'densenet18': densenet18,
+    'densenet18_2d': densenet18_2d,
     'densenet121': densenet121,
     'densenet161': densenet161,
     'densenet169': densenet169,
@@ -96,6 +98,10 @@ class BaseTraining(object):
         else:
             self.n_metadata_inputs = 0
 
+        self.is_2d_dataset = "_2d" in self.args.network
+        if self.is_2d_dataset:
+            self.args.base_network = self.args.base_network + '_2d'
+
         if self.args.unshuffled and self.args.batch_size > 1:
             raise Exception('Currently we can only run unshuffled runs with a batch size of 1!')
 
@@ -145,6 +151,7 @@ class BaseTraining(object):
             print("batch num: {}/{}, avg loss: {}\r".format(batch_idx, total_batches, self.results.get_meter('loss_epoch_{}'.format(epoch_num), fold_num), end=""))
 
     def get_transforms(self):
+        # XXX I should rly be handling this in the dataset cls
         if self.args.transforms is None:
             return
 
@@ -165,9 +172,6 @@ class BaseTraining(object):
         else:
             oversample_minority = self.args.oversample_minority
 
-        # XXX if we set from_pickle but dont set kfolds, then it runs holdout set generateion
-
-        # for holdout and kfold
         if not self.args.train_from_pickle:
             # NOTE: the datasets themselves are storing way too much state and causes us to
             # have to reinstantiate dataset objects in storage whenever our underlying code
@@ -233,6 +237,10 @@ class BaseTraining(object):
                 undersample_factor=-1,
                 oversample_minority=False,
             )
+
+        if self.is_2d_dataset:
+            train_dataset = ImgARDSDataset(train_dataset, self.args.two_dim_transforms)
+            test_dataset = ImgARDSDataset(test_dataset, self.args.two_dim_transforms)
 
         return train_dataset, test_dataset
 
@@ -817,6 +825,23 @@ class CNNLSTMDoubleLinearModel(BaseTraining, PatientClassifierMixin):
         return obs_idx.reshape((outputs.shape[0], 1)).view(-1)
 
 
+class CNNLinearModel2D(BaseTraining, PatientClassifierMixin):
+    def __init__(self, args):
+        super(CNNLinearModel2D, self).__init__(args)
+
+    def calc_loss(self, outputs, target, inputs):
+        return self.criterion(outputs, target)
+
+    def _process_test_batch_results(self, outputs, target, inputs, fold_num):
+        batch_preds = outputs.argmax(dim=-1).cpu()
+        target = target.argmax(dim=1).cpu()
+        self.record_testing_results(target, batch_preds, fold_num)
+        return batch_preds.tolist()
+
+    def get_network(self, base_network):
+        return CNNLinearNetwork2D(base_network)
+
+
 class CNNLinearModel(BaseTraining, PatientClassifierMixin):
     def __init__(self, args):
         super(CNNLinearModel, self).__init__(args)
@@ -1280,6 +1305,7 @@ class ProtoPNetModel(BaseTraining, PatientClassifierMixin):
 network_map = {
     'cnn_lstm': CNNLSTMModel,
     'cnn_linear': CNNLinearModel,
+    'cnn_linear_2d': CNNLinearModel2D,
     'cnn_regressor': CNNRegressorModel,
     'metadata_only': MetadataOnlyModel,
     'autoencoder': AutoencoderModel,
@@ -1426,6 +1452,7 @@ def build_parser():
     true_false_flag('--average-linear-layer', 'instead of flattening the linear layer average all like features together. currently this only works for protopnet')
     true_false_flag('--use-l1', 'add an l1 regularization for ppnet')
     true_false_flag('--print-progress', 'print progress for batch losses. This will override --no-print-progress flag if set')
+    parser.add_argument('-2dt', '--two-dim-transforms', nargs='*', choices=two_dim_transforms.keys())
     return parser
 
 

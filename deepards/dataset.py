@@ -103,6 +103,53 @@ class PatientLevelHomogeneityUndersampler(GenericHomogeneityUndersampler):
                (gt.dtw >= gt.pt_dtw_median-(gt.pt_dtw_std*self.std_factor)), 'usamp_factor'] = self.undersample_factor
 
 
+class RowShuffle(torch.nn.Module):
+    def __init__(self, p=0.5):
+        """
+        Randomly shuffle all rows in a tensor
+        """
+        super().__init__()
+        self.p = p
+
+    def forward(self, x):
+        if self.p < np.random.random():
+            return x
+        chans, seq_size, _ = x.shape
+        idxs = list(range(seq_size))
+        np.random.shuffle(idxs)
+        return x[:, idxs]
+
+
+class RandomRowHorizontalFlip(torch.nn.Module):
+    def __init__(self, p=0.5, frac_rows=.25):
+        """
+        Randomly perform a horizontal flip of a fraction of rows in
+        a tensor
+        """
+        super().__init__()
+        self.p = p
+        self.frac_rows = frac_rows
+
+    def forward(self, x):
+        if self.p < np.random.random():
+            return x
+        chans, seq_size, _ = x.shape
+        idxs = list(range(seq_size))
+        np.random.shuffle(idxs)
+        idxs = idxs[:int(seq_size*self.frac_rows)]
+        x[:, idxs] = torch.flip(x[:, idxs], dims=(-1,))
+        return x
+
+
+two_dim_transforms = {
+    'row_shuffle': RowShuffle,
+    'rand_erase': transforms.RandomErasing,
+    'row_horiz_flip': RandomRowHorizontalFlip,
+    'horiz_flip': transforms.RandomHorizontalFlip,
+    'vert_flip': transforms.RandomVerticalFlip,
+}
+
+
 class ARDSRawDataset(Dataset):
     # 224 seems reasonable because it would fit well with existing img systems.
     seq_len = 224
@@ -1217,12 +1264,13 @@ class SiameseNetworkDataset(ARDSRawDataset):
 
 
 class ImgARDSDataset(ARDSRawDataset):
-    def __init__(self, raw_dataset_obj):
+    def __init__(self, raw_dataset_obj, extra_transforms):
         """
         Create an ARDS dataset composed of 2D images. Operates off an ARDSRawDataset
         object because it has done most of the hard work for us already.
 
         :param raw_dataset_obj: instance of ARDSRawDataset
+        :param extra_transforms: list of 2d transforms you want to use
         """
         self.raw = raw_dataset_obj
         self.all_sequences = []
@@ -1243,17 +1291,17 @@ class ImgARDSDataset(ARDSRawDataset):
         self.dataset_type = self.raw.dataset_type
         self.seq_hours = dict()
         self.train = self.raw.train
-        self.transforms = transforms.Compose([
+        self.train_transforms = transforms.Compose([
             transforms.ToTensor(),
             # resize cant be done with an empty first dim otherwise it pukes
             # and blows up the machine's memory
             #
-            # Consider RandomPerspective later if you want to try things out
+            # Also consider RandomPerspective later if you want to try things out
             transforms.Resize(256),
             transforms.RandomCrop(224),
-            transforms.RandomHorizontalFlip(),
-            transforms.RandomVerticalFlip(),
-        ])
+        ] + [two_dim_transforms[trans]() for trans in extra_transforms]
+        )
+        self.test_transforms = transforms.Compose([transforms.ToTensor(),])
         if self.dataset_type == 'padded_breath_by_breath':
             raise NotImplementedError('padded dataset types not implemented yet!')
         self.derive_scaling_factors()
@@ -1317,23 +1365,6 @@ class ImgARDSDataset(ARDSRawDataset):
 
         self._finish_mat(pt, mat, last_target, sh)
 
-    def _get_seq_ground_truth(self, idxs):
-        rows = []
-        for i in idxs:
-            pt, _, target, hrs = self.all_sequences[i]
-            rows.append([pt, np.argmax(target, axis=0), hrs[0]])
-        return pd.DataFrame(rows, columns=['patient', 'y', 'hour'], index=idxs)
-
-    def _get_all_sequence_ground_truth(self):
-        idxs = range(len(self.all_sequences))
-        return self._get_seq_ground_truth(idxs)
-
-    def get_ground_truth_df(self):
-        if self.kfold_num is None:
-            return self._get_all_sequence_ground_truth()
-        else:
-            return self._get_seq_ground_truth(self.kfold_indexes)
-
     def set_kfold_indexes_for_fold(self, kfold_num):
         self.kfold_num = kfold_num
         self.kfold_indexes = self.get_kfold_indexes_for_fold(kfold_num)
@@ -1357,8 +1388,10 @@ class ImgARDSDataset(ARDSRawDataset):
                 'the `derive_scaling_factors` function.'
             )
 
-        if self.transforms is not None:
-            data = self.transforms(data)
+        if self.train:
+            data = self.train_transforms(data)
+        else:
+            data = self.test_transforms(data)
 
         data = (data - mu) / std
 
@@ -1380,19 +1413,24 @@ class ImgARDSDataset(ARDSRawDataset):
 
 if __name__ == '__main__':
     a = pd.read_pickle('/fastdata/deepards/unpadded_centered_sequences-nb20-kfold.pkl')
-    d = ImgARDSDataset(a)
+    d = ImgARDSDataset(a, [])
     d.set_kfold_indexes_for_fold(0)
     idx, seq, meta, target = d[0]
     #distort = transforms.RandomPerspective(distortion_scale=.1, p=1)
     #aff = transforms.RandomAffine(25)
     # jittering doesnt work very well
-    jit = transforms.ColorJitter(brightness=0.00001)
+    #jit = transforms.ColorJitter(brightness=0.00001)
+    #trans = transforms.RandomErasing(p=1)
+    trans = RandomRowHorizontalFlip(p=1)
     from matplotlib import pyplot as plt
-    fig, axes = plt.subplots(nrows=1, ncols=2)
-    ax = plt.subplot(1, 2, 1)
+    fig, axes = plt.subplots(nrows=1, ncols=3)
+    ax = plt.subplot(1, 3, 1)
+    ax.imshow(d.all_sequences[0][1].reshape(224, 224))
+    ax.set_title('original')
+    ax = plt.subplot(1, 3, 2)
     ax.imshow(seq.numpy().reshape(224,224))
-    ax.set_title('unmodified')
-    ax = plt.subplot(1, 2, 2)
-    ax.imshow(jit(seq).numpy().reshape(224,224))
-    ax.set_title('modified')
+    ax.set_title('dataset out')
+    ax = plt.subplot(1, 3, 3)
+    ax.imshow(trans(seq).numpy().reshape(224,224))
+    ax.set_title('trans modified')
     plt.show()
