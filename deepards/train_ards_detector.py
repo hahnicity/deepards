@@ -26,17 +26,17 @@ from deepards.models.cnn_transformer import CNNTransformerNetwork
 from deepards.models.densenet import densenet18, densenet121, densenet161, densenet169, densenet201
 from deepards.models.densenet2d import densenet18 as densenet18_2d
 from deepards.models.lstm_only import DoubleLSTMNetwork, LSTMOnlyNetwork, LSTMOnlyWithPacking
-from deepards.models.protopnet import construct_PPNet
+from deepards.models.protopnet1d.model import construct_PPNet
+from deepards.models.protopnet1d.ppnet_push import prototype_viz, push_prototypes
 from deepards.models.resnet import resnet18, resnet50, resnet101, resnet152
 from deepards.models.senet import senet18, senet154, se_resnet18, se_resnet50, se_resnet101, se_resnet152, se_resnext50_32x4d, se_resnext101_32x4d
 from deepards.models.siamese import SiameseARDSClassifier, SiameseCNNLinearNetwork, SiameseCNNLSTMNetwork, SiameseCNNTransformerNetwork
-from deepards.models.torch_cnn_lstm_combo import CNNLSTMDoubleLinearNetwork, CNNLSTMNetwork
 from deepards.models.torch_cnn_bm_regressor import CNNRegressor
 from deepards.models.torch_cnn_linear_network import CNNDoubleLinearNetwork, CNNLinearNetwork, CNNLinearNetwork2D, CNNLinearComprToRF, CNNLinearToMean, CNNSingleBreathLinearNetwork
+from deepards.models.torch_cnn_lstm_combo import CNNLSTMDoubleLinearNetwork, CNNLSTMNetwork
 from deepards.models.torch_metadata_only_network import MetadataOnlyNetwork
 from deepards.models.unet import UNet
 from deepards.models.vgg import vgg11_bn, vgg13_bn
-from deepards.ppnet_push import prototype_viz, push_prototypes
 
 torch.set_default_tensor_type('torch.FloatTensor')
 base_networks = {
