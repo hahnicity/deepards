@@ -43,7 +43,10 @@ class CamExtractor():
         # they forgot relu when they were doing this initially. damn
         x = F.relu(x)
         # pool and flatten
-        x = self.model.breath_block.avgpool(x).view(-1)
+        try:
+            x = self.model.breath_block.avgpool(x).view(-1)
+        except torch.nn.modules.module.ModuleAttributeError:
+            x = F.avg_pool2d(x, 7).view(-1)
         x = self.model.linear_final(x).unsqueeze(0)
         return conv_output, x
 
@@ -194,54 +197,56 @@ def get_sequence(filename, ards, c, fold):
     return br
 
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('model_path', help='path to the saved_model')
-    parser.add_argument('-pdp', '--pickled-data-path', help = 'PATH to pickled data', required=True)
-    parser.add_argument('--fold', type=int, required=True)
-    args = parser.parse_args()
+def img_process(model_in):
+    img = model_in.squeeze().cpu().numpy()
+    # process img to 0-1
+    img -= img.min()
+    img = img / img.max()
+    return img
 
-    pretrained_model = torch.load(args.model_path)
-    # ensure that model is on same cuda device that data will be on
-    if not isinstance(pretrained_model, torch.nn.DataParallel):
-        pretrained_model = pretrained_model.to(torch.cuda.current_device())
-    else:
-        pretrained_model = pretrained_model.module
 
-    #taking the pickle file we need to extract data from
-    pickle_file_name = args.pickled_data_path
-    # Get params
-    #target_example = 0  # Snake
-    target = None
-    file_name_to_export = 'gradcam_output.png'
+def cam_process(cam, seq_size):
+    cam = cv2.resize(cam, (seq_size, seq_size))
+    # process cam to 0-1
+    cam -= cam.min()
+    cam = cam / cam.max()
+    return cam
 
-    for i in range(2):
-        cam_outputs = np.empty((0,7))
-        for j in range(100):
-            breath_sequence = get_sequence(pickle_file_name, i , j, args.fold)
-            grad_cam = GradCam(pretrained_model)
-            cam = grad_cam.generate_cam(breath_sequence, target)
-            #print(cam)
-            cam = np.expand_dims(cam, axis = 0)
-            cam_outputs = np.append(cam_outputs, cam, axis = 0)
-        cam_outputs = np.mean(cam_outputs, axis = 0)
-        cam_outputs = cv2.resize(cam_outputs,(1,224))
-        #print(cam_outputs.shape)
-        outfile = None
-        if i == 0:
-            outfile = open('others_gradcam.pkl','wb')
-            #print("Gradcam output for others : {}".format(cam_outputs))
-        else:
-            outfile = open('ARDS_gradcam.pkl','wb')
-            #print("Gradcam output for ARDS: {}".format(cam_outputs))
-        pickle.dump(cam_outputs, outfile)
-        #visualize_sequence(cam_outputs)
 
-    #breath_sequence = get_sequence(pickle_file_name)
-    # Grad cam
-    #grad_cam = GradCam(pretrained_model)
-    # Generate cam mask
-    #cam = grad_cam.generate_cam(breath_sequence, target)
-    # Save mask
-    #save_class_activation_images(breath_sequence, cam, file_name_to_export)
-    print('Grad cam completed')
+if __name__ == "__main__":
+    import matplotlib.pyplot as plt
+    import pandas as pd
+
+    from deepards import dataset
+    filename = 'saved_models/experiment_files_unpadded_centered_nb20_cnn_linear_2d_bs2/model-run-0-epoch10-fold0.pth'
+    pkl_dataset = pd.read_pickle('/fastdata/deepards/unpadded_centered_sequences-nb20-kfold.pkl')
+    dev = torch.device('cuda:0')
+    model = torch.load(filename).to(dev).double()
+    g = MaxMinNormCam(model)
+    dat = dataset.ImgARDSDataset(pkl_dataset, [])
+    dat.train = False
+    dat.set_kfold_indexes_for_fold(0)
+    idx = np.random.randint(0, len(dat))
+
+    idx, seq, _, target = dat[idx]
+    input = seq.unsqueeze(dim=0).to(dev)
+    cam, out = g.generate_cam(input)
+    seq_size = input.shape[2]
+    img = img_process(input)
+    cam = cam_process(cam, seq_size)
+    fig, axes = plt.subplots(nrows=1, ncols=3)
+
+    ax = plt.subplot(1, 3, 1)
+    ax.imshow(img)
+    ax.set_title('orig')
+
+    ax = plt.subplot(1, 3, 2)
+    ax.imshow(cam, cmap='inferno')
+    ax.set_title('cam')
+
+    ax = plt.subplot(1, 3, 3)
+    ax.imshow(img)
+    ax.imshow(cam, cmap='inferno', alpha=0.6)
+    ax.set_title('cam overlay')
+    plt.suptitle('patient: {}, target: {}, pred: {}'.format(dat.all_sequences[idx][0], target.argmax(), F.softmax(out).argmax()))
+    plt.show()
