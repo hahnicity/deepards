@@ -8,6 +8,7 @@ import re
 from imblearn.over_sampling import RandomOverSampler
 import numpy as np
 import pandas as pd
+from scipy.interpolate import CubicSpline
 from scipy.signal import resample
 from sklearn.model_selection import StratifiedKFold
 import torch
@@ -103,6 +104,135 @@ class PatientLevelHomogeneityUndersampler(GenericHomogeneityUndersampler):
                (gt.dtw >= gt.pt_dtw_median-(gt.pt_dtw_std*self.std_factor)), 'usamp_factor'] = self.undersample_factor
 
 
+def magnitude_warp(x, sigma=0.2, knot=4):
+    """
+    :param x: (batch, time steps, chans)
+    """
+    orig_steps = np.arange(x.shape[1])
+
+    random_warps = np.random.normal(loc=1.0, scale=sigma, size=(x.shape[0], knot+2, x.shape[2]))
+    warp_steps = (np.ones((x.shape[2],1))*(np.linspace(0, x.shape[1]-1., num=knot+2))).T
+    for i, pat in enumerate(x):
+        warper = np.array([CubicSpline(warp_steps[:,dim], random_warps[i,:,dim])(orig_steps) for dim in range(x.shape[2])]).T
+        x[i] = pat * warper
+
+    return x
+
+
+def time_warp(x, sigma=0.2, knot=4):
+    """
+    :param x: (batch, time steps, chans)
+    """
+    orig_steps = np.arange(x.shape[1])
+
+    random_warps = np.random.normal(loc=1.0, scale=sigma, size=(x.shape[0], knot+2, x.shape[2]))
+    warp_steps = (np.ones((x.shape[2],1))*(np.linspace(0, x.shape[1]-1., num=knot+2))).T
+
+    for i, pat in enumerate(x):
+        for dim in range(x.shape[2]):
+            time_warp = CubicSpline(warp_steps[:,dim], warp_steps[:,dim] * random_warps[i,:,dim])(orig_steps)
+            scale = (x.shape[1]-1)/time_warp[-1]
+            x[i,:,dim] = torch.from_numpy(np.interp(orig_steps, np.clip(scale*time_warp, 0, x.shape[1]-1), pat[:,dim]).T)
+    return x
+
+
+def window_slice(x, reduce_ratio=0.9):
+    """
+    :param x: (batch, time steps, chans)
+    """
+    # https://halshs.archives-ouvertes.fr/halshs-01357973/document
+    target_len = np.ceil(reduce_ratio*x.shape[1]).astype(int)
+    if target_len >= x.shape[1]:
+        return x
+    starts = np.random.randint(low=0, high=x.shape[1]-target_len, size=(x.shape[0])).astype(int)
+    ends = (target_len + starts).astype(int)
+
+    for i, pat in enumerate(x):
+        for dim in range(x.shape[2]):
+            x[i,:,dim] = torch.from_numpy(np.interp(np.linspace(0, target_len, num=x.shape[1]), np.arange(target_len), pat[starts[i]:ends[i],dim]).T)
+    return x
+
+
+def window_warp(x, window_ratio=0.1, scales=[0.5, 2.]):
+    """
+    :param x: (batch, time steps, chans)
+    """
+    # https://halshs.archives-ouvertes.fr/halshs-01357973/document
+    #warp_scales = np.random.uniform(scales[0], scales[1], size=x.shape[2])
+    warp_scales = np.random.choice(scales, size=x.shape[2])
+    warp_size = np.ceil(window_ratio*x.shape[1]).astype(int)
+    window_steps = np.arange(warp_size)
+
+    window_starts = np.random.randint(low=1, high=x.shape[1]-warp_size-1, size=(x.shape[0])).astype(int)
+    window_ends = (window_starts + warp_size).astype(int)
+
+    for i, pat in enumerate(x):
+        for dim in range(x.shape[2]):
+            start_seg = pat[:window_starts[i],dim]
+            window_seg = np.interp(np.linspace(0, warp_size-1, num=int(warp_size*warp_scales[dim])), window_steps, pat[window_starts[i]:window_ends[i],dim])
+            end_seg = pat[window_ends[i]:,dim]
+            warped = np.concatenate((start_seg, window_seg, end_seg))
+            x[i,:,dim] = torch.from_numpy(np.interp(np.arange(x.shape[1]), np.linspace(0, x.shape[1]-1., num=warped.size), warped).T)
+    return x
+
+
+class RandomWindowSlicing(torch.nn.Module):
+    def __init__(self, p=.5, reduce_ratio=0.9):
+        super().__init__()
+        self.p = p
+        self.reduce_ratio = reduce_ratio
+
+    def forward(self, x):
+        if self.p < np.random.random():
+            return x
+        ret = window_slice(torch.transpose(x, 1, 2), self.reduce_ratio)
+        return torch.transpose(ret, 1, 2)
+
+
+class RandomWindowWarping(torch.nn.Module):
+    def __init__(self, p=.5, window_ratio=.25, scales=[.5, 2]):
+        super().__init__()
+        self.p = p
+        self.window_ratio = window_ratio
+        self.scales = scales
+
+    def forward(self, x):
+        if self.p < np.random.random():
+            return x
+        ret = window_warp(torch.transpose(x, 1, 2), self.window_ratio, self.scales)
+        return torch.transpose(ret, 1, 2)
+
+
+class RandomTimeWarp(torch.nn.Module):
+    def __init__(self, p=.5, sigma=.2, knot=4):
+        super().__init__()
+        self.p = p
+        self.sigma = sigma
+        self.knot = knot
+
+    def forward(self, x):
+        if self.p < np.random.random():
+            return x
+        ret = time_warp(torch.transpose(x, 1, 2), self.sigma, self.knot)
+        return torch.transpose(ret, 1, 2)
+
+
+class RandomMagnitudeWarp(torch.nn.Module):
+    def __init__(self, p=.5, sigma=.2, knot=4):
+        super().__init__()
+        self.p = p
+        self.sigma = sigma
+        self.knot = knot
+
+    def forward(self, x):
+        if self.p < np.random.random():
+            return x
+        ret = magnitude_warp(torch.transpose(x, 1, 2), self.sigma, self.knot)
+        return torch.transpose(ret, 1, 2)
+
+
+# Apparently I forgot there was an augmentation.py module. But I dunno how much
+# I care about re-shuffling code right now
 class RowShuffle(torch.nn.Module):
     def __init__(self, p=0.5):
         """
@@ -141,12 +271,69 @@ class RandomRowHorizontalFlip(torch.nn.Module):
         return x
 
 
+class RandomRowScale(torch.nn.Module):
+    def __init__(self, p=0.5, frac_rows=.25, mag=(.8, 1.2)):
+        super().__init__()
+        self.p = p
+        self.frac_rows = frac_rows
+        self.mag = mag
+
+    def forward(self, x):
+        if self.p < np.random.random():
+            return x
+        chans, seq_size, _ = x.shape
+        idxs = list(range(seq_size))
+        np.random.shuffle(idxs)
+        n_rows = int(seq_size*self.frac_rows)
+        idxs = idxs[:n_rows]
+        warp = np.random.uniform(low=self.mag[0], high=self.mag[1], size=n_rows)
+        warp = np.expand_dims(warp, axis=1)
+        x[:, idxs] = (x[:, idxs] * warp)
+        return x
+
+
+class PatchWindowWarp(torch.nn.Module):
+    def __init__(self, p=0.5, frac_rows=0.5, mag=(0.5, 2), n_obs=(10, 56)):
+        super().__init__()
+        self.p = p
+        self.frac_rows = frac_rows
+        self.mag = mag
+        self.n_obs = n_obs
+
+    def forward(self, x):
+        if self.p < np.random.random():
+            return x
+        chans, seq_size, _ = x.shape
+        # pick a starting row randomly
+        n_rows = int(seq_size*self.frac_rows)
+        start_row = np.random.randint(0, seq_size*frac_rows)
+        rows = x[:, start_row:start_row+n_rows]
+        warp_ratio = np.random.uniform(low=self.mag[0], high=self.mag[1])
+        obs = np.random.randint(self.n_obs[0], self.n_obs[1])
+        start_idx = np.random.randint(0, seq_size-obs)
+
+        # goal is to figure out how many new obs we are adding and then
+        # figure out start end indices for both old and new sections
+        #new_start =
+        #new_end =
+
+        # so now we pick a start obs and end obs and then warp by ratio
+        rows[:, :, start_idx:start_idx+obs]
+        resampd = resample(rows, warp_ratio*obs)
+
+
+
 two_dim_transforms = {
     'row_shuffle': RowShuffle,
     'rand_erase': transforms.RandomErasing,
     'row_horiz_flip': RandomRowHorizontalFlip,
     'horiz_flip': transforms.RandomHorizontalFlip,
     'vert_flip': transforms.RandomVerticalFlip,
+    'scale': RandomRowScale,
+    'mag_warp': RandomMagnitudeWarp,
+    'win_warp': RandomWindowWarping,
+    'win_slice': RandomWindowSlicing,
+    'time_warp': RandomTimeWarp,
 }
 
 
@@ -1421,7 +1608,7 @@ if __name__ == '__main__':
     # jittering doesnt work very well
     #jit = transforms.ColorJitter(brightness=0.00001)
     #trans = transforms.RandomErasing(p=1)
-    trans = RandomRowHorizontalFlip(p=1)
+    trans = RandomTimeWarp(p=1)
     from matplotlib import pyplot as plt
     fig, axes = plt.subplots(nrows=1, ncols=3)
     ax = plt.subplot(1, 3, 1)
