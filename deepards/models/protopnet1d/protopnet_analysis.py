@@ -18,7 +18,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from deepards.dataset import ARDSRawDataset
-from deepards.ppnet_push import viz_single_prototype
+from deepards.models.protopnet1d.ppnet_push import viz_single_prototype
 
 cuda_wrapper = lambda x, is_cuda: x.cuda() if is_cuda else x
 

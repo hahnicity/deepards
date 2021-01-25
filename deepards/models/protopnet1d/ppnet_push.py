@@ -13,9 +13,9 @@ from pathlib import Path
 from scipy.signal import resample
 import torch
 
-from deepards.models.protopnet import compute_rf_prototype
+from deepards.models.protopnet1d.model import compute_rf_prototype
+from deepards.models.protopnet1d.ppnet_helpers import makedir, find_high_activation_crop
 from deepards.patient_gradcam import do_makedirs
-from deepards.ppnet_helpers import makedir, find_high_activation_crop
 
 
 class PrototypeVisualizer(object):

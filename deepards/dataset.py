@@ -153,13 +153,14 @@ def window_slice(x, reduce_ratio=0.9):
     return x
 
 
-def window_warp(x, window_ratio=0.1, scales=[0.5, 2.]):
+def window_warp(x, window_ratio=0.1, scales=[0.5, 2.], by_row=False):
     """
     :param x: (batch, time steps, chans)
     """
     # https://halshs.archives-ouvertes.fr/halshs-01357973/document
     #warp_scales = np.random.uniform(scales[0], scales[1], size=x.shape[2])
-    warp_scales = np.random.choice(scales, size=x.shape[2])
+    warp_dim = 2 if by_row else 0
+    warp_scales = np.random.choice(scales, size=x.shape[warp_dim])
     warp_size = np.ceil(window_ratio*x.shape[1]).astype(int)
     window_steps = np.arange(warp_size)
 
@@ -168,8 +169,9 @@ def window_warp(x, window_ratio=0.1, scales=[0.5, 2.]):
 
     for i, pat in enumerate(x):
         for dim in range(x.shape[2]):
+            warp_dim = dim if by_row else i
             start_seg = pat[:window_starts[i],dim]
-            window_seg = np.interp(np.linspace(0, warp_size-1, num=int(warp_size*warp_scales[dim])), window_steps, pat[window_starts[i]:window_ends[i],dim])
+            window_seg = np.interp(np.linspace(0, warp_size-1, num=int(warp_size*warp_scales[warp_dim])), window_steps, pat[window_starts[i]:window_ends[i],dim])
             end_seg = pat[window_ends[i]:,dim]
             warped = np.concatenate((start_seg, window_seg, end_seg))
             x[i,:,dim] = torch.from_numpy(np.interp(np.arange(x.shape[1]), np.linspace(0, x.shape[1]-1., num=warped.size), warped).T)
@@ -190,16 +192,17 @@ class RandomWindowSlicing(torch.nn.Module):
 
 
 class RandomWindowWarping(torch.nn.Module):
-    def __init__(self, p=.5, window_ratio=.25, scales=[.5, 2]):
+    def __init__(self, p=.5, window_ratio=.25, scales=[.5, 2], by_row=False):
         super().__init__()
         self.p = p
         self.window_ratio = window_ratio
         self.scales = scales
+        self.by_row = by_row
 
     def forward(self, x):
         if self.p < np.random.random():
             return x
-        ret = window_warp(torch.transpose(x, 1, 2), self.window_ratio, self.scales)
+        ret = window_warp(torch.transpose(x, 1, 2), self.window_ratio, self.scales, self.by_row)
         return torch.transpose(ret, 1, 2)
 
 
@@ -1608,7 +1611,8 @@ if __name__ == '__main__':
     # jittering doesnt work very well
     #jit = transforms.ColorJitter(brightness=0.00001)
     #trans = transforms.RandomErasing(p=1)
-    trans = RandomTimeWarp(p=1)
+    #trans = RandomTimeWarp(p=1)
+    trans = RandomWindowWarping(p=1)
     from matplotlib import pyplot as plt
     fig, axes = plt.subplots(nrows=1, ncols=3)
     ax = plt.subplot(1, 3, 1)
