@@ -1,6 +1,7 @@
 import torch
 from torch.autograd import Variable
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class CNNLinearToMean(nn.Module):
@@ -120,4 +121,5 @@ class CNNLinearNetwork2D(nn.Module):
 
     def forward(self, x, metadata):
         x = self.breath_block(x)
-        return self.linear_final(x)
+        x = F.adaptive_avg_pool2d(x, (1, 1))
+        return self.linear_final(torch.flatten(x, 1))

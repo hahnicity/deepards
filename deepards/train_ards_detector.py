@@ -28,6 +28,8 @@ from deepards.models.densenet2d import densenet18 as densenet18_2d
 from deepards.models.lstm_only import DoubleLSTMNetwork, LSTMOnlyNetwork, LSTMOnlyWithPacking
 from deepards.models.protopnet1d.model import construct_PPNet
 from deepards.models.protopnet1d.ppnet_push import prototype_viz, push_prototypes
+from deepards.models.protopnet2d.model import construct_PPNet as construct_PPNet2D
+from deepards.models.protopnet2d.push import Pusher
 from deepards.models.resnet import resnet18, resnet50, resnet101, resnet152
 from deepards.models.senet import senet18, senet154, se_resnet18, se_resnet50, se_resnet101, se_resnet152, se_resnext50_32x4d, se_resnext101_32x4d
 from deepards.models.siamese import SiameseARDSClassifier, SiameseCNNLinearNetwork, SiameseCNNLSTMNetwork, SiameseCNNTransformerNetwork
@@ -1073,19 +1075,8 @@ class SiamesePretrainedModel(PerBreathClassifierMixin, BaseTraining, PatientClas
         return SiameseARDSClassifier(network)
 
 
-class ProtoPNetModel(BaseTraining, PatientClassifierMixin):
-    def __init__(self, args):
-        super(ProtoPNetModel, self).__init__(args)
 
-    def get_network(self, base_network):
-        return construct_PPNet(
-            base_network,
-            self.args.n_sub_batches,
-            prototype_shape=(self.args.n_prototypes*2, 128, 1),
-            batch_size=self.args.batch_size,
-            incorrect_strength=self.args.incorrect_strength,
-            average_linear=self.args.average_linear_layer,
-        )
+class ProtoPNetModel(object):
 
     def get_optimizer(self, model):
         if self.args.optimizer == 'adam':
@@ -1123,36 +1114,23 @@ class ProtoPNetModel(BaseTraining, PatientClassifierMixin):
         last_layer_optimizer = optim_cls(last_layer_optimizer_specs)
         return [warm_optimizer, joint_optimizer, last_layer_optimizer]
 
-    def _process_test_batch_results(self, outputs, target, inputs, fold_num):
-        batch_preds = outputs.argmax(dim=-1).cpu()
-        target = target.argmax(dim=1).cpu()
-        self.record_testing_results(target, batch_preds, fold_num)
-        return batch_preds.tolist()
-
     def calc_loss(self, model, cls_output, target, min_distances):
         # compute loss. change to BCE with logits because of the binary classification
         # problem we are dealing with.
         cls_loss = F.binary_cross_entropy(F.softmax(cls_output, dim=1), target)
-        max_dist = (model.prototype_shape[1] * model.prototype_shape[2])
         label = target.argmax(dim=1)
         # prototypes_of_correct_class is a tensor of shape batch_size * num_prototypes
         # calculate cluster cost
         # just pick which prototypes are relevant for each observation
         prototypes_of_correct_class = self.cuda_wrapper(torch.t(model.prototype_class_identity[:,label]))
-        # XXX if I do averagiing I can do this a few ways.
-        #  1. average the distances and this eq. doesn't change - may be underperforming
-        #  2. dont average the distances and keep a separate un-averaged output var
-        #     to use in the loss function
-        #
-        # for now I should try #1 and #2 if #1 delivers poor perf
-        inverted_distances, _ = torch.max((max_dist - min_distances) * prototypes_of_correct_class, dim=1)
-        cluster_cost = torch.mean(max_dist - inverted_distances)
+        inverted_distances, _ = torch.max((self.max_dist - min_distances) * prototypes_of_correct_class, dim=1)
+        cluster_cost = torch.mean(self.max_dist - inverted_distances)
 
         # calculate separation cost
         prototypes_of_wrong_class = 1 - prototypes_of_correct_class
         inverted_distances_to_nontarget_prototypes, _ = \
-            torch.max((max_dist - min_distances) * prototypes_of_wrong_class, dim=1)
-        separation_cost = torch.mean(max_dist - inverted_distances_to_nontarget_prototypes)
+            torch.max((self.max_dist - min_distances) * prototypes_of_wrong_class, dim=1)
+        separation_cost = torch.mean(self.max_dist - inverted_distances_to_nontarget_prototypes)
 
         # calculate avg cluster cost
         avg_separation_cost = \
@@ -1190,6 +1168,12 @@ class ProtoPNetModel(BaseTraining, PatientClassifierMixin):
         # represented in a single read.
         loss = cls_loss + self.args.clust_lambda * cluster_cost + self.args.sep_lambda * separation_cost + 1e-4 * l1
         return loss, cls_loss, cluster_cost, separation_cost, l1
+
+    def _process_test_batch_results(self, outputs, target, inputs, fold_num):
+        batch_preds = outputs.argmax(dim=-1).cpu()
+        target = target.argmax(dim=1).cpu()
+        self.record_testing_results(target, batch_preds, fold_num)
+        return batch_preds.tolist()
 
     def run_train_epoch(self, model, train_loader, optimizer, epoch_num, fold_num):
         # and then what they start doing is pushing prototypes. I dont know what this
@@ -1239,7 +1223,7 @@ class ProtoPNetModel(BaseTraining, PatientClassifierMixin):
         if epoch_num >= self.args.push_start_epoch and (epoch_num - self.args.push_start_epoch) % self.args.push_every_n == 0:
             # saving prototype push viz isnt that helpful on training because
             # prototypes are subject to change. its more helpful on test
-            push_prototypes(train_loader, model, self.cuda_wrapper)
+            self.push_func(train_loader, model, epoch_num)
             optim = optimizer[2]
             with torch.enable_grad():
                 for iter in range(self.args.n_push_iters):
@@ -1288,6 +1272,7 @@ class ProtoPNetModel(BaseTraining, PatientClassifierMixin):
                 self.preds.extend(batch_preds)
 
         if epoch_num >= self.args.viz_start_epoch and (epoch_num-self.args.viz_start_epoch) % self.args.viz_every_n == 0:
+            # XXX this only works with 1d data.
             prototype_viz(
                 test_loader,
                 model,
@@ -1298,6 +1283,40 @@ class ProtoPNetModel(BaseTraining, PatientClassifierMixin):
             )
 
         self.record_final_epoch_testing_results(fold_num, epoch_num, test_dataset)
+
+
+class ProtoPNet1DModel(ProtoPNetModel, BaseTraining, PatientClassifierMixin):
+    def __init__(self, args):
+        super().__init__(args)
+
+    def get_network(self, base_network):
+        model = construct_PPNet(
+            base_network,
+            sub_batch_size=self.args.n_sub_batches,
+            prototype_shape=(self.args.n_prototypes*2, 128, 1),
+            batch_size=self.args.batch_size,
+            incorrect_strength=self.args.incorrect_strength,
+            average_linear=self.args.average_linear_layer,
+        )
+        self.max_dist = (model.prototype_shape[1] * model.prototype_shape[2])
+        return model
+
+    def push_func(self, train_loader, model, epoch_num):
+        push_prototypes(train_loader, model, self.cuda_wrapper)
+
+
+class ProtoPNet2DModel(ProtoPNetModel, BaseTraining, PatientClassifierMixin):
+    def __init__(self, args):
+        super().__init__(args)
+        self.pusher = Pusher()
+
+    def get_network(self, base_network):
+        model = construct_PPNet2D(base_network, prototype_shape=(self.args.n_prototypes*2, 128, 1, 1))
+        self.max_dist = (model.prototype_shape[1] * model.prototype_shape[2] * model.prototype_shape[3])
+        return model
+
+    def push_func(self, train_loader, model, epoch_num):
+        self.pusher.push_orig(train_loader, model, epoch_num)
 
 
 # Is putting a global in code like this a great idea? probably not, but saves some hassle
@@ -1325,7 +1344,8 @@ network_map = {
     'cnn_to_nested_transformer': CNNToNestedTransformerModel,
     'cnn_linear_compr_to_rf': CNNLinearComprToRFModel,
     'cnn_linear_to_mean': CNNLinearToMeanModel,
-    'protopnet': ProtoPNetModel,
+    'protopnet': ProtoPNet1DModel,
+    'protopnet_2d': ProtoPNet2DModel,
 }
 
 

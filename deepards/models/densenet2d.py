@@ -47,6 +47,9 @@ class _DenseLayer(nn.Module):
         self.drop_rate = float(drop_rate)
         self.memory_efficient = memory_efficient
 
+    def conv_info(self):
+        return [1, 3], [1, 1], [0, 1]
+
     def bn_function(self, inputs: List[Tensor]) -> Tensor:
         concated_features = torch.cat(inputs, 1)
         bottleneck_output = self.conv1(self.relu1(self.norm1(concated_features)))  # noqa: T484
@@ -110,6 +113,11 @@ class _DenseBlock(nn.ModuleDict):
         memory_efficient: bool = False
     ) -> None:
         super(_DenseBlock, self).__init__()
+
+        self.kernel_sizes = []
+        self.strides = []
+        self.paddings = []
+
         for i in range(num_layers):
             layer = _DenseLayer(
                 num_input_features + i * growth_rate,
@@ -118,6 +126,10 @@ class _DenseBlock(nn.ModuleDict):
                 drop_rate=drop_rate,
                 memory_efficient=memory_efficient,
             )
+            lks, ls, lp = layer.conv_info()
+            self.kernel_sizes.extend(lks)
+            self.strides.extend(ls)
+            self.paddings.extend(lp)
             self.add_module('denselayer%d' % (i + 1), layer)
 
     def forward(self, init_features: Tensor) -> Tensor:
@@ -126,6 +138,9 @@ class _DenseBlock(nn.ModuleDict):
             new_features = layer(features)
             features.append(new_features)
         return torch.cat(features, 1)
+
+    def conv_info(self):
+        return self.kernel_sizes, self.strides, self.paddings
 
 
 class _Transition(nn.Sequential):
@@ -136,6 +151,9 @@ class _Transition(nn.Sequential):
         self.add_module('conv', nn.Conv2d(num_input_features, num_output_features,
                                           kernel_size=1, stride=1, bias=False))
         self.add_module('pool', nn.AvgPool2d(kernel_size=2, stride=2))
+
+    def conv_info(self):
+        return [1, 2], [1, 2], [0, 0]
 
 
 class DenseNet(nn.Module):
@@ -172,6 +190,9 @@ class DenseNet(nn.Module):
             ('relu0', nn.ReLU(inplace=True)),
             ('pool0', nn.MaxPool2d(kernel_size=3, stride=2, padding=1)),
         ]))
+        self.kernel_sizes = [7, 3]
+        self.strides = [2, 2]
+        self.paddings = [3, 1]
 
         # Each denseblock
         num_features = num_init_features
@@ -208,11 +229,20 @@ class DenseNet(nn.Module):
                 nn.init.constant_(m.bias, 0)
         self.n_out_filters = num_features
 
+    def update_conv_info(self, obj):
+        bks, bs, bp = obj.conv_info()
+        self.n_layers += obj.num_layers
+        self.kernel_sizes.extend(bks)
+        self.strides.extend(bs)
+        self.paddings.extend(bp)
+
     def forward(self, x: Tensor) -> Tensor:
         features = self.features(x)
         out = F.relu(features, inplace=True)
-        out = F.adaptive_avg_pool2d(out, (1, 1))
-        return torch.flatten(out, 1)
+        return out
+
+    def conv_info(self):
+        return self.kernel_sizes, self.strides, self.paddings
 
 
 def _densenet(
