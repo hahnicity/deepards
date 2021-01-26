@@ -25,6 +25,7 @@ from deepards.models.cnn_to_nested_layer import CNNToNestedLSTMNetwork, CNNToNes
 from deepards.models.cnn_transformer import CNNTransformerNetwork
 from deepards.models.densenet import densenet18, densenet121, densenet161, densenet169, densenet201
 from deepards.models.densenet2d import densenet18 as densenet18_2d
+from deepards.models.densenet2x1d import densenet18 as densenet18_2x1d
 from deepards.models.lstm_only import DoubleLSTMNetwork, LSTMOnlyNetwork, LSTMOnlyWithPacking
 from deepards.models.protopnet1d.model import construct_PPNet
 from deepards.models.protopnet1d.ppnet_push import prototype_viz, push_prototypes
@@ -49,6 +50,7 @@ base_networks = {
     'unet': UNet,
     'densenet18': densenet18,
     'densenet18_2d': densenet18_2d,
+    'densenet18_2x1d': densenet18_2x1d,
     'densenet121': densenet121,
     'densenet161': densenet161,
     'densenet169': densenet169,
@@ -101,8 +103,11 @@ class BaseTraining(object):
             self.n_metadata_inputs = 0
 
         self.is_2d_dataset = "_2d" in self.args.network
-        if self.is_2d_dataset:
+        self.is_2x1d_dataset = "_2x1d" in self.args.network
+        if self.is_2d_dataset and '_2d' not in self.args.base_network:
             self.args.base_network = self.args.base_network + '_2d'
+        elif self.is_2x1d_dataset and '2x1d' not in self.args.base_network:
+            self.args.base_network = self.args.base_network + '_2x1d'
 
         if self.args.unshuffled and self.args.batch_size > 1:
             raise Exception('Currently we can only run unshuffled runs with a batch size of 1!')
@@ -240,7 +245,7 @@ class BaseTraining(object):
                 oversample_minority=False,
             )
 
-        if self.is_2d_dataset:
+        if self.is_2d_dataset or self.is_2x1d_dataset:
             train_dataset = ImgARDSDataset(train_dataset, self.args.two_dim_transforms)
             test_dataset = ImgARDSDataset(test_dataset, self.args.two_dim_transforms)
 
@@ -829,7 +834,7 @@ class CNNLSTMDoubleLinearModel(BaseTraining, PatientClassifierMixin):
 
 class CNNLinearModel2D(BaseTraining, PatientClassifierMixin):
     def __init__(self, args):
-        super(CNNLinearModel2D, self).__init__(args)
+        super().__init__(args)
 
     def calc_loss(self, outputs, target, inputs):
         return self.criterion(outputs, target)
@@ -1073,7 +1078,6 @@ class SiamesePretrainedModel(PerBreathClassifierMixin, BaseTraining, PatientClas
         if isinstance(network, nn.DataParallel):
             network = network.module
         return SiameseARDSClassifier(network)
-
 
 
 class ProtoPNetModel(object):
@@ -1325,6 +1329,7 @@ network_map = {
     'cnn_lstm': CNNLSTMModel,
     'cnn_linear': CNNLinearModel,
     'cnn_linear_2d': CNNLinearModel2D,
+    'cnn_linear_2x1d': CNNLinearModel2D,
     'cnn_regressor': CNNRegressorModel,
     'metadata_only': MetadataOnlyModel,
     'autoencoder': AutoencoderModel,

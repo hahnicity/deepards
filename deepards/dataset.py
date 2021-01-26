@@ -1545,7 +1545,7 @@ class ImgARDSDataset(ARDSRawDataset):
 
             last_hour_obs = seq_hours[-1]
             mat, remainder, remainder_sh = self._append_to_mat(mat, data, sh, seq_hours)
-            if remainder != []:
+            if len(remainder) > 0:
                 mat = self._finish_mat(pt, mat, target, sh)
                 mat, sh = [], []
                 # _, __ because there will be no remainder
@@ -1602,6 +1602,8 @@ class ImgARDSDataset(ARDSRawDataset):
 
 
 if __name__ == '__main__':
+    from matplotlib import pyplot as plt
+
     a = pd.read_pickle('/fastdata/deepards/unpadded_centered_sequences-nb20-kfold.pkl')
     d = ImgARDSDataset(a, [])
     d.set_kfold_indexes_for_fold(0)
@@ -1612,8 +1614,10 @@ if __name__ == '__main__':
     #jit = transforms.ColorJitter(brightness=0.00001)
     #trans = transforms.RandomErasing(p=1)
     #trans = RandomTimeWarp(p=1)
-    trans = RandomWindowWarping(p=1)
-    from matplotlib import pyplot as plt
+    #trans = RandomWindowWarping(p=1)
+    trans = RandomMagnitudeWarp(p=1)
+    #trans = RandomRowScale(p=1)
+    #trans = RandomWindowSlicing(p=1)
     fig, axes = plt.subplots(nrows=1, ncols=3)
     ax = plt.subplot(1, 3, 1)
     ax.imshow(d.all_sequences[0][1].reshape(224, 224))
