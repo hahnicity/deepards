@@ -1277,14 +1277,24 @@ class ProtoPNetModel(object):
 
         if epoch_num >= self.args.viz_start_epoch and (epoch_num-self.args.viz_start_epoch) % self.args.viz_every_n == 0:
             # XXX this only works with 1d data.
-            prototype_viz(
-                test_loader,
-                model,
-                root_dir_for_saving_prototypes=self.args.prototype_results_dir,
-                epoch_num=epoch_num,
-                cuda_wrapper=self.cuda_wrapper,
-                proto_seq_filename_prefix=self.args.prototype_fname_prefix,
-            )
+            if not self.is_2d_dataset and not self.is_2x1d_dataset:
+                prototype_viz(
+                    test_loader,
+                    model,
+                    root_dir_for_saving_prototypes=self.args.prototype_results_dir,
+                    epoch_num=epoch_num,
+                    cuda_wrapper=self.cuda_wrapper,
+                    proto_seq_filename_prefix=self.args.prototype_fname_prefix,
+                )
+            else:
+                self.pusher.prototype_viz(
+                    test_loader,
+                    model,
+                    self.args.prototype_results_dir,
+                    self.args.prototype_fname_prefix,
+                    epoch_num,
+                    self.cuda_wrapper,
+                )
 
         self.record_final_epoch_testing_results(fold_num, epoch_num, test_dataset)
 

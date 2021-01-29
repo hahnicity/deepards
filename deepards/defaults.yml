@@ -47,7 +47,7 @@ n_warm_epochs: 3
 push_start_epoch: 6
 clust_lambda: 0.8
 sep_lambda: 0.2
-viz_start_epoch: 4
+viz_start_epoch: 6
 push_every_n: 6
 n_push_iters: 5
 viz_every_n: 4

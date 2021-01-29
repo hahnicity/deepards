@@ -49,11 +49,12 @@ class Pusher(object):
         # saves the closest distance seen so far
         global_min_proto_dist = np.full(n_prototypes, np.inf)
         # saves the patch representation that gives the current smallest distance
-        global_min_fmap_patches = np.zeros(
-            [n_prototypes,
-             prototype_shape[1],
-             prototype_shape[2],
-             prototype_shape[3]])
+        global_min_fmap_patches = np.zeros([
+            n_prototypes,
+            prototype_shape[1],
+            prototype_shape[2],
+            prototype_shape[3]
+        ])
 
         '''
         proto_rf_boxes and proto_bound_boxes column:
@@ -455,3 +456,230 @@ class Pusher(object):
 
         if self.class_specific:
             del class_to_img_index_dict
+
+    # push each prototype to the nearest patch in the training set
+    def prototype_viz(self,
+                      dataloader, # pytorch dataloader (must be unnormalized in [0,1])
+                      model, # pytorch network with prototype_vectors
+                      root_dir_for_saving_prototypes,
+                      proto_seq_filename_prefix,
+                      epoch_num,
+                      cuda_wrapper,
+                      class_specific=True,
+                      proto_layer_stride=1):
+
+        """
+        """
+        model.eval()
+        prototype_shape = model.prototype_shape
+        n_prototypes = model.num_prototypes
+        proto_rf_boxes = np.full(shape=[n_prototypes, 5],
+                                    fill_value=-1)
+        proto_bound_boxes = np.full(shape=[n_prototypes, 5],
+                                            fill_value=-1)
+
+        if root_dir_for_saving_prototypes != None:
+            if epoch_num != None:
+                proto_epoch_dir = os.path.join(root_dir_for_saving_prototypes,
+                                               'epoch-'+str(epoch_num))
+                try:
+                    makedir(proto_epoch_dir)
+                except OSError:
+                    pass
+            else:
+                proto_epoch_dir = root_dir_for_saving_prototypes
+        else:
+            proto_epoch_dir = None
+
+        search_batch_size = dataloader.batch_size
+        num_classes = model.num_classes
+
+        for batch_idx, (obs_idx, seq, metadata, target) in enumerate(dataloader):
+            # start_index_of_search keeps track of the index of the image
+            # assigned to serve as prototype
+            start_index_of_search_batch = batch_idx * search_batch_size
+            self.viz_proto_batch(seq,
+                                 start_index_of_search_batch,
+                                 model,
+                                 proto_rf_boxes,
+                                 proto_bound_boxes,
+                                 cuda_wrapper,
+                                 class_specific,
+                                 target,
+                                 num_classes,
+                                 proto_layer_stride,
+                                 proto_epoch_dir,
+                                 proto_seq_filename_prefix)
+
+    def viz_proto_batch(self,
+                        seq,
+                        start_index_of_search_batch,
+                        model,
+                        proto_rf_boxes,
+                        proto_bound_boxes,
+                        cuda_wrapper,
+                        class_specific,
+                        target,
+                        num_classes,
+                        proto_layer_stride,
+                        dir_for_saving_prototypes,
+                        proto_seq_filename_prefix):
+        """
+        """
+        model.eval()
+        search_batch = seq
+
+        with torch.no_grad():
+            search_batch = cuda_wrapper(search_batch.float())
+            protoL_input, proto_dist = model.prototype_distances(search_batch)
+
+        protoL_input = np.copy(protoL_input.detach().cpu().numpy())
+        proto_dist = np.copy(proto_dist.detach().cpu().numpy())
+
+        if class_specific:
+            class_to_img_index_dict = {key: [] for key in range(num_classes)}
+            # img_y is the image's integer label
+            for img_index, img_y in enumerate(target):
+                img_label = img_y.argmax().item()
+                class_to_img_index_dict[img_label].append(img_index)
+
+        n_prototypes = model.prototype_shape[0]
+        proto_w = model.prototype_shape[2]
+        max_dist = model.prototype_shape[1] * model.prototype_shape[2] * model.prototype_shape[3]
+
+        prototype_shape = model.prototype_shape
+        n_prototypes = prototype_shape[0]
+        proto_h = prototype_shape[2]
+        proto_w = prototype_shape[3]
+        max_dist = prototype_shape[1] * prototype_shape[2] * prototype_shape[3]
+
+        for j in range(n_prototypes):
+            #if n_prototypes_per_class != None:
+            if self.class_specific:
+                # target_class is the class of the class_specific prototype
+                target_class = torch.argmax(model.prototype_class_identity[j]).item()
+                # if there is not images of the target_class from this batch
+                # we go on to the next prototype
+                if len(class_to_img_index_dict[target_class]) == 0:
+                    continue
+                proto_dist_j = proto_dist[class_to_img_index_dict[target_class]][:,j,:,:]
+            else:
+                # if it is not class specific, then we will search through
+                # every example
+                proto_dist_j = proto_dist[:,j,:,:]
+
+            batch_min_proto_dist_j = np.amin(proto_dist_j)
+            batch_argmin_proto_dist_j = \
+                list(np.unravel_index(np.argmin(proto_dist_j, axis=None),
+                                      proto_dist_j.shape))
+            if self.class_specific:
+                '''
+                change the argmin index from the index among
+                images of the target class to the index in the entire search
+                batch
+                '''
+                batch_argmin_proto_dist_j[0] = class_to_img_index_dict[target_class][batch_argmin_proto_dist_j[0]]
+
+            # retrieve the corresponding feature map patch
+            img_index_in_batch = batch_argmin_proto_dist_j[0]
+            fmap_height_start_index = batch_argmin_proto_dist_j[1] * self.prototype_layer_stride
+            fmap_height_end_index = fmap_height_start_index + proto_h
+            fmap_width_start_index = batch_argmin_proto_dist_j[2] * self.prototype_layer_stride
+            fmap_width_end_index = fmap_width_start_index + proto_w
+
+            batch_min_fmap_patch_j = protoL_input[img_index_in_batch,
+                                                  :,
+                                                  fmap_height_start_index:fmap_height_end_index,
+                                                  fmap_width_start_index:fmap_width_end_index]
+
+            # get the receptive field boundary of the image patch
+            # that generates the representation
+            protoL_rf_info = model.proto_layer_rf_info
+            rf_prototype_j = compute_rf_prototype(search_batch.size(2), batch_argmin_proto_dist_j, protoL_rf_info)
+
+            # get the whole image
+            original_img_j = search_batch[rf_prototype_j[0]]
+            original_img_j = original_img_j.cpu().numpy()
+            original_img_j = np.transpose(original_img_j, (1, 2, 0))
+            original_img_j = original_img_j - original_img_j.min()
+            original_img_j = original_img_j / original_img_j.max()
+            original_img_size = original_img_j.shape[0]
+
+            # crop out the receptive field
+            rf_img_j = original_img_j[rf_prototype_j[1]:rf_prototype_j[2],
+                                      rf_prototype_j[3]:rf_prototype_j[4], :]
+
+            # save the prototype receptive field information
+            proto_rf_boxes[j, 0] = rf_prototype_j[0] + start_index_of_search_batch
+            proto_rf_boxes[j, 1] = rf_prototype_j[1]
+            proto_rf_boxes[j, 2] = rf_prototype_j[2]
+            proto_rf_boxes[j, 3] = rf_prototype_j[3]
+            proto_rf_boxes[j, 4] = rf_prototype_j[4]
+            if proto_rf_boxes.shape[1] == 6 and search_y is not None:
+                proto_rf_boxes[j, 5] = search_y[rf_prototype_j[0]].argmax().item()
+
+            # find the highly activated region of the original image
+            proto_dist_img_j = proto_dist[img_index_in_batch, j, :, :]
+            if model.prototype_activation_function == 'log':
+                proto_act_img_j = np.log((proto_dist_img_j + 1) / (proto_dist_img_j + model.epsilon))
+            elif model.prototype_activation_function == 'linear':
+                proto_act_img_j = max_dist - proto_dist_img_j
+            else:
+                proto_act_img_j = self.prototype_activation_function_in_numpy(proto_dist_img_j)
+            upsampled_act_img_j = cv2.resize(proto_act_img_j, dsize=(original_img_size, original_img_size),
+                                             interpolation=cv2.INTER_CUBIC)
+            proto_bound_j = find_high_activation_crop(upsampled_act_img_j)
+            # crop out the image patch with high activation as prototype image
+            proto_img_j = original_img_j[proto_bound_j[0]:proto_bound_j[1],
+                                         proto_bound_j[2]:proto_bound_j[3]]
+
+            # save the prototype boundary (rectangular boundary of highly activated region)
+            proto_bound_boxes[j, 0] = proto_rf_boxes[j, 0]
+            proto_bound_boxes[j, 1] = proto_bound_j[0]
+            proto_bound_boxes[j, 2] = proto_bound_j[1]
+            proto_bound_boxes[j, 3] = proto_bound_j[2]
+            proto_bound_boxes[j, 4] = proto_bound_j[3]
+            if proto_bound_boxes.shape[1] == 6 and search_y is not None:
+                proto_bound_boxes[j, 5] = search_y[rf_prototype_j[0]].argmax().item()
+
+            # save the whole image containing the prototype as png
+            original_img_j = original_img_j.reshape(224,224)
+            plt.imsave(os.path.join(dir_for_saving_prototypes,
+                                    proto_seq_filename_prefix + '-original' + str(j) + '.png'),
+                       original_img_j,
+                       vmin=0.0,
+                       vmax=1.0)
+            # overlay (upsampled) self activation on original image and save the result
+            rescaled_act_img_j = upsampled_act_img_j - np.amin(upsampled_act_img_j)
+            rescaled_act_img_j = rescaled_act_img_j / np.amax(rescaled_act_img_j)
+            heatmap = np.uint8(255*rescaled_act_img_j)
+            heatmap = np.float32(heatmap) / 255
+            overlayed_original_img_j = 0.5 * original_img_j + 0.3 * heatmap
+            plt.imsave(os.path.join(dir_for_saving_prototypes,
+                                    proto_seq_filename_prefix + '-original_with_self_act' + str(j) + '.png'),
+                       overlayed_original_img_j,
+                       vmin=0.0,
+                       vmax=1.0)
+
+            # if different from the original (whole) image, save the prototype receptive field as png
+            if rf_img_j.shape[0] != original_img_size or rf_img_j.shape[1] != original_img_size:
+                rf_img_j = rf_img_j.reshape(rf_img_j.shape[0:2])
+                plt.imsave(os.path.join(dir_for_saving_prototypes,
+                                        proto_seq_filename_prefix + '-receptive_field' + str(j) + '.png'),
+                           rf_img_j,
+                           vmin=0.0,
+                           vmax=1.0)
+                overlayed_rf_img_j = overlayed_original_img_j[rf_prototype_j[1]:rf_prototype_j[2],
+                                                              rf_prototype_j[3]:rf_prototype_j[4]]
+                plt.imsave(os.path.join(dir_for_saving_prototypes,
+                                        proto_seq_filename_prefix + '-receptive_field_with_self_act' + str(j) + '.png'),
+                           overlayed_rf_img_j,
+                           vmin=0.0,
+                           vmax=1.0)
+
+            # save the prototype image (highly activated region of the whole image)
+            plt.imsave(os.path.join(dir_for_saving_prototypes,
+                                    proto_seq_filename_prefix + str(j) + '.png'),
+                       proto_img_j.reshape(proto_img_j.shape[0:2]),
+                       vmin=0.0,
+                       vmax=1.0)
