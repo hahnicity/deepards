@@ -17,6 +17,8 @@ from deepards.models.protopnet2d.receptive_field import compute_rf_prototype
 # interesting item to implement first, but they both have similar implementation in code
 class Pusher(object):
     def __init__(self,
+                 cuda_wrapper,
+                 experiment_name,
                  bank_size=1,
                  class_specific=True,
                  preprocess_input_function=None, # normalize if needed
@@ -28,6 +30,8 @@ class Pusher(object):
                  save_prototype_class_identity=True, # which class the prototype image comes from
                  log=print,
                  prototype_activation_function_in_numpy=None):
+        self.experiment_name = 'testing' if not experiment_name else experiment_name
+        self.cuda_wrapper = cuda_wrapper
         self.class_specific = class_specific
         self.preprocess_input_function = preprocess_input_function
         self.prototype_layer_stride = prototype_layer_stride
@@ -406,54 +410,6 @@ class Pusher(object):
                 if proto_bound_boxes.shape[1] == 6 and search_y is not None:
                     proto_bound_boxes[j, 5] = search_y[rf_prototype_j[0]].argmax().item()
 
-                if self.dir_for_saving_prototypes is not None:
-                    if self.prototype_self_act_filename_prefix is not None:
-                        # save the numpy array of the prototype self activation
-                        np.save(os.path.join(self.dir_for_saving_prototypes,
-                                             self.prototype_self_act_filename_prefix + str(j) + '.npy'),
-                                proto_act_img_j)
-                    if self.prototype_img_filename_prefix is not None:
-                        # save the whole image containing the prototype as png
-                        plt.imsave(os.path.join(self.dir_for_saving_prototypes,
-                                                self.prototype_img_filename_prefix + '-original' + str(j) + '.png'),
-                                   original_img_j,
-                                   vmin=0.0,
-                                   vmax=1.0)
-                        # overlay (upsampled) self activation on original image and save the result
-                        rescaled_act_img_j = upsampled_act_img_j - np.amin(upsampled_act_img_j)
-                        rescaled_act_img_j = rescaled_act_img_j / np.amax(rescaled_act_img_j)
-                        heatmap = cv2.applyColorMap(np.uint8(255*rescaled_act_img_j), cv2.COLORMAP_JET)
-                        heatmap = np.float32(heatmap) / 255
-                        heatmap = heatmap[...,::-1]
-                        overlayed_original_img_j = 0.5 * original_img_j + 0.3 * heatmap
-                        plt.imsave(os.path.join(self.dir_for_saving_prototypes,
-                                                self.prototype_img_filename_prefix + '-original_with_self_act' + str(j) + '.png'),
-                                   overlayed_original_img_j,
-                                   vmin=0.0,
-                                   vmax=1.0)
-
-                        # if different from the original (whole) image, save the prototype receptive field as png
-                        if rf_img_j.shape[0] != original_img_size or rf_img_j.shape[1] != original_img_size:
-                            plt.imsave(os.path.join(self.dir_for_saving_prototypes,
-                                                    self.prototype_img_filename_prefix + '-receptive_field' + str(j) + '.png'),
-                                       rf_img_j,
-                                       vmin=0.0,
-                                       vmax=1.0)
-                            overlayed_rf_img_j = overlayed_original_img_j[rf_prototype_j[1]:rf_prototype_j[2],
-                                                                          rf_prototype_j[3]:rf_prototype_j[4]]
-                            plt.imsave(os.path.join(self.dir_for_saving_prototypes,
-                                                    self.prototype_img_filename_prefix + '-receptive_field_with_self_act' + str(j) + '.png'),
-                                       overlayed_rf_img_j,
-                                       vmin=0.0,
-                                       vmax=1.0)
-
-                        # save the prototype image (highly activated region of the whole image)
-                        plt.imsave(os.path.join(self.dir_for_saving_prototypes,
-                                                self.prototype_img_filename_prefix + str(j) + '.png'),
-                                   proto_img_j,
-                                   vmin=0.0,
-                                   vmax=1.0)
-
         if self.class_specific:
             del class_to_img_index_dict
 
@@ -464,8 +420,7 @@ class Pusher(object):
                       root_dir_for_saving_prototypes,
                       proto_seq_filename_prefix,
                       epoch_num,
-                      cuda_wrapper,
-                      class_specific=True,
+                      fold_num,
                       proto_layer_stride=1):
 
         """
@@ -481,9 +436,10 @@ class Pusher(object):
         if root_dir_for_saving_prototypes != None:
             if epoch_num != None:
                 proto_epoch_dir = os.path.join(root_dir_for_saving_prototypes,
-                                               'epoch-'+str(epoch_num))
+                                               self.experiment_name,
+                                               'epoch-{}-fold-{}'.format(epoch_num, fold_num))
                 try:
-                    makedir(proto_epoch_dir)
+                    os.makedirs(proto_epoch_dir)
                 except OSError:
                     pass
             else:
@@ -503,8 +459,6 @@ class Pusher(object):
                                  model,
                                  proto_rf_boxes,
                                  proto_bound_boxes,
-                                 cuda_wrapper,
-                                 class_specific,
                                  target,
                                  num_classes,
                                  proto_layer_stride,
@@ -517,8 +471,6 @@ class Pusher(object):
                         model,
                         proto_rf_boxes,
                         proto_bound_boxes,
-                        cuda_wrapper,
-                        class_specific,
                         target,
                         num_classes,
                         proto_layer_stride,
@@ -530,13 +482,13 @@ class Pusher(object):
         search_batch = seq
 
         with torch.no_grad():
-            search_batch = cuda_wrapper(search_batch.float())
+            search_batch = self.cuda_wrapper(search_batch.float())
             protoL_input, proto_dist = model.prototype_distances(search_batch)
 
         protoL_input = np.copy(protoL_input.detach().cpu().numpy())
         proto_dist = np.copy(proto_dist.detach().cpu().numpy())
 
-        if class_specific:
+        if self.class_specific:
             class_to_img_index_dict = {key: [] for key in range(num_classes)}
             # img_y is the image's integer label
             for img_index, img_y in enumerate(target):

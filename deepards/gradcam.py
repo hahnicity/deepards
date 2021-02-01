@@ -178,7 +178,6 @@ def get_sequence(filename, ards, c, fold):
     data = pickle.load(open(filename, "rb"))
     data.set_kfold_indexes_for_fold(fold)
     data.transforms = None
-    #print(len(data))
     first_seq = None
     count = 0
     for i, d in enumerate(data.all_sequences):
@@ -188,11 +187,7 @@ def get_sequence(filename, ards, c, fold):
                 break
             count = count + 1
             continue
-    #first_seq = data[1]
-    #print(first_seq[2])
     br = first_seq[1]
-    #br = np.expand_dims(br, 0)
-    #br = torch.from_numpy(br)
     br = torch.FloatTensor(br).cuda()
     return br
 

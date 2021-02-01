@@ -1276,7 +1276,6 @@ class ProtoPNetModel(object):
                 self.preds.extend(batch_preds)
 
         if epoch_num >= self.args.viz_start_epoch and (epoch_num-self.args.viz_start_epoch) % self.args.viz_every_n == 0:
-            # XXX this only works with 1d data.
             if not self.is_2d_dataset and not self.is_2x1d_dataset:
                 prototype_viz(
                     test_loader,
@@ -1293,7 +1292,7 @@ class ProtoPNetModel(object):
                     self.args.prototype_results_dir,
                     self.args.prototype_fname_prefix,
                     epoch_num,
-                    self.cuda_wrapper,
+                    fold_num,
                 )
 
         self.record_final_epoch_testing_results(fold_num, epoch_num, test_dataset)
@@ -1322,7 +1321,7 @@ class ProtoPNet1DModel(ProtoPNetModel, BaseTraining, PatientClassifierMixin):
 class ProtoPNet2DModel(ProtoPNetModel, BaseTraining, PatientClassifierMixin):
     def __init__(self, args):
         super().__init__(args)
-        self.pusher = Pusher()
+        self.pusher = Pusher(self.cuda_wrapper, self.args.experiment_name)
 
     def get_network(self, base_network):
         model = construct_PPNet2D(base_network, prototype_shape=(self.args.n_prototypes*2, 128, 1, 1))

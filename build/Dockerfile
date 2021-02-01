@@ -18,7 +18,8 @@ RUN pip3 install deepards-2.0.tar.gz
 
 # setup ML
 COPY static/unpadded_centered_sequences-nb20-kfold.pkl unpadded_centered_sequences-nb20-kfold.pkl
-RUN mkdir config
+RUN mkdir -p config
+COPY static/cohort-description.csv config
 COPY src/evaluate.py evaluate.py
 RUN mkdir -p saved_models/experiment_files_unpadded_centered_nb20_cnn_linear
 COPY models/* saved_models/experiment_files_unpadded_centered_nb20_cnn_linear/
