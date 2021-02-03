@@ -2,6 +2,9 @@
 Created on Thu Oct 26 11:06:51 2017
 @author: Utku Ozbulak - github.com/utkuozbulak
 """
+import csv
+from pathlib import Path
+
 import numpy as np
 import torch
 import argparse
@@ -221,27 +224,36 @@ if __name__ == "__main__":
     dat = dataset.ImgARDSDataset(pkl_dataset, [])
     dat.train = False
     dat.set_kfold_indexes_for_fold(0)
-    idx = np.random.randint(0, len(dat))
+    target_map = {0: 'non-ards', 1: 'ards'}
 
-    idx, seq, _, target = dat[idx]
-    input = seq.unsqueeze(dim=0).to(dev)
-    cam, out = g.generate_cam(input)
-    seq_size = input.shape[2]
-    img = img_process(input)
-    cam = cam_process(cam, seq_size)
-    fig, axes = plt.subplots(nrows=1, ncols=3)
+    for i in range(6):
+        output_dir = Path('gradcam_results/tmp_storage/')
+        idx = np.random.randint(0, len(dat))
+        idx, seq, _, target = dat[idx]
+        target_name = target_map[int(target.argmax())]
+        with open(output_dir.joinpath('gradcam2d-seq-{}-{}.csv'.format(target_name, i)), 'w') as f:
+            writer = csv.writer(f)
+            writer.writerows(seq.squeeze().cpu().numpy().tolist())
 
-    ax = plt.subplot(1, 3, 1)
-    ax.imshow(img)
-    ax.set_title('orig')
+        input = seq.unsqueeze(dim=0).to(dev)
+        cam, out = g.generate_cam(input)
+        seq_size = input.shape[2]
+        img = img_process(input)
+        cam = cam_process(cam, seq_size)
+        fig, axes = plt.subplots(nrows=1, ncols=3)
 
-    ax = plt.subplot(1, 3, 2)
-    ax.imshow(cam, cmap='inferno')
-    ax.set_title('cam')
+        ax = plt.subplot(1, 3, 1)
+        ax.imshow(img)
+        ax.set_title('orig')
 
-    ax = plt.subplot(1, 3, 3)
-    ax.imshow(img)
-    ax.imshow(cam, cmap='inferno', alpha=0.6)
-    ax.set_title('cam overlay')
-    plt.suptitle('patient: {}, target: {}, pred: {}'.format(dat.all_sequences[idx][0], target.argmax(), F.softmax(out).argmax()))
-    plt.show()
+        ax = plt.subplot(1, 3, 2)
+        ax.imshow(cam, cmap='inferno')
+        ax.set_title('cam')
+
+        ax = plt.subplot(1, 3, 3)
+        ax.imshow(img)
+        ax.imshow(cam, cmap='inferno', alpha=0.6)
+        ax.set_title('cam overlay')
+        plt.suptitle('patient: {}, target: {}, pred: {}'.format(dat.all_sequences[idx][0], target.argmax(), F.softmax(out).argmax()))
+        plt.savefig(output_dir.joinpath('gradcam2d-{}-{}.png'.format(target_name, i)), dpi=200)
+        plt.show()
