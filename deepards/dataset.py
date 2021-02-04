@@ -1483,12 +1483,6 @@ class ImgARDSDataset(ARDSRawDataset):
         self.train = self.raw.train
         self.train_transforms = transforms.Compose([
             transforms.ToTensor(),
-            # resize cant be done with an empty first dim otherwise it pukes
-            # and blows up the machine's memory
-            #
-            # Also consider RandomPerspective later if you want to try things out
-            transforms.Resize(256),
-            transforms.RandomCrop(224),
         ] + [two_dim_transforms[trans]() for trans in extra_transforms]
         )
         self.test_transforms = transforms.Compose([transforms.ToTensor(),])
