@@ -95,7 +95,7 @@ class DenseNet(nn.Module):
 
     def __init__(self, growth_rate=32, block_config=(6, 12, 24, 16),
                  num_init_features=64, bn_size=4, drop_rate=0.2, num_classes=1000,
-                 track_running_stats=False):
+                 track_running_stats=False, with_fft=False):
 
         super(DenseNet, self).__init__()
         self.kernel_sizes = []
@@ -106,8 +106,9 @@ class DenseNet(nn.Module):
         self.drop_rate = drop_rate
 
         # First convolution
+        initial_chans = 1 if not with_fft else 3
         self.features = nn.Sequential(OrderedDict([
-            ('conv0', nn.Conv1d(1, num_init_features, kernel_size=7, stride=2,
+            ('conv0', nn.Conv1d(initial_chans, num_init_features, kernel_size=7, stride=2,
                                 padding=3, bias=False)),
             ('norm0', nn.BatchNorm1d(num_init_features, track_running_stats=track_running_stats)),
             ('relu0', nn.ReLU(inplace=True)),

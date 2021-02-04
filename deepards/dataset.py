@@ -1454,21 +1454,22 @@ class SiameseNetworkDataset(ARDSRawDataset):
 
 
 class ImgARDSDataset(ARDSRawDataset):
-    def __init__(self, raw_dataset_obj, extra_transforms):
+    def __init__(self, raw_dataset_obj, extra_transforms, with_fft):
         """
         Create an ARDS dataset composed of 2D images. Operates off an ARDSRawDataset
         object because it has done most of the hard work for us already.
 
         :param raw_dataset_obj: instance of ARDSRawDataset
         :param extra_transforms: list of 2d transforms you want to use
+        :param with_fft: whether or not to add fft to the img
         """
         self.raw = raw_dataset_obj
         self.all_sequences = []
+        self.with_fft = with_fft
         # XXX I'm kinda doing planning for the case that i want to redo the dataset
         # from fresh data files. this does have advantage of being able to go up to
         # 256. But then again it might just be easier to modify the raw dataset for
         # 256 instead.
-        self.make_dataset_from_raw()
         self.total_kfolds = self.raw.total_kfolds
         try:
             self.oversample_minority = self.raw.oversample_minority
@@ -1478,7 +1479,6 @@ class ImgARDSDataset(ARDSRawDataset):
             self.oversample_all_factor = self.raw.oversample_all_factor
         except AttributeError:  # if this was unset then it was 1.0
             self.oversample_all_factor = 1
-        self.dataset_type = self.raw.dataset_type
         self.seq_hours = dict()
         self.train = self.raw.train
         self.train_transforms = transforms.Compose([
@@ -1492,8 +1492,10 @@ class ImgARDSDataset(ARDSRawDataset):
         ] + [two_dim_transforms[trans]() for trans in extra_transforms]
         )
         self.test_transforms = transforms.Compose([transforms.ToTensor(),])
+        self.dataset_type = self.raw.dataset_type
         if self.dataset_type == 'padded_breath_by_breath':
             raise NotImplementedError('padded dataset types not implemented yet!')
+        self.make_dataset_from_raw()
         self.derive_scaling_factors()
 
     def _append_to_mat(self, mat, new_data, seq_hours, new_seq_hours):
@@ -1514,17 +1516,62 @@ class ImgARDSDataset(ARDSRawDataset):
             seq_hours.extend(new_seq_hours[:n_hrs])
             return mat, new_data[n_rows:], new_seq_hours[n_hrs:]
 
-    def _finish_mat(self, pt, mat, target, seq_hours):
-        if len(mat) == 0:
+    def _finish_mat(self, pt, img, target, seq_hours):
+        if len(img) == 0:
             return
-        existing_rows = sum([m.shape[0] for m in mat])
-        seq_size = mat[0].shape[1]
+        existing_rows = sum([m.shape[0] for m in img])
+        seq_size = img[0].shape[1]
         remaining_rows = seq_size - existing_rows
 
         if remaining_rows != 0:
-            mat.append(np.zeros((remaining_rows, seq_size)))
+            img.append(np.zeros((remaining_rows, seq_size)))
 
-        self.all_sequences.append([pt, np.concatenate(mat), target, seq_hours])
+        img = np.expand_dims(np.concatenate(img), axis=-1)
+        if self.with_fft:
+            trans = np.fft.fft(img, axis=1)
+            img = np.concatenate([img, trans.real, trans.imag], axis=-1)
+
+        self.all_sequences.append([pt, img, target, seq_hours])
+
+    def _get_scaling_factors_for_indices(self, indices):
+        """
+        Get mu and std for a specific set of indices
+        """
+        chans = self.all_sequences[0][1].shape[-1]
+        std_sum = np.array([0] * chans, dtype=np.float)
+        mean_sum = np.array([0] * chans, dtype=np.float)
+        obs_count = 0
+
+        for idx in indices:
+            obs = self.all_sequences[idx][1]
+            obs_count += np.prod(obs.shape[0:2])
+            mean_sum += obs.sum(axis=0).sum(axis=0)
+        mu = mean_sum / obs_count
+        mu = mu.reshape(1, 1, chans).repeat(224, axis=0).repeat(224, axis=1)
+
+        # calculate std
+        for idx in indices:
+            obs = self.all_sequences[idx][1]
+            std_sum += ((obs - mu) ** 2).sum(axis=0).sum(axis=0)
+        std = np.sqrt(std_sum / obs_count)
+        std = std.reshape(1, 1, chans).repeat(224, axis=0).repeat(224, axis=1)
+        # mu/std should be returned in a matrix of shape (224,224,chans) this will
+        # allow us to easily standardize matrices of variable chan size
+        return mu, std
+
+    def derive_scaling_factors(self):
+        if self.total_kfolds is not None:
+            indices = {
+                kfold_num: self.get_kfold_indexes_for_fold(kfold_num)
+                for kfold_num in range(self.total_kfolds)
+            }
+        else:
+            raise NotImplementedError('holdout is not supported yet for Img datasets')
+
+        self.scaling_factors = {
+            kfold_num: self._get_scaling_factors_for_indices(idxs)
+            for kfold_num, idxs in indices.items()
+        }
 
     def make_dataset_from_raw(self):
         # this could probably be a recursive function but oh well.
@@ -1577,13 +1624,19 @@ class ImgARDSDataset(ARDSRawDataset):
                 'Scaling factors not found for dataset. You must derive them using '
                 'the `derive_scaling_factors` function.'
             )
+        data = (data - mu) / std
 
+        # XXX fft logic must be incorporated into transforms too. This will be a
+        # bit hard tho, because need to duplicate all ops on one chan into another
+        # chan. And even then... your FFT op would probably be corrupted anyhow if
+        # you were doing something like window slicing or window warping and you'd
+        # have to re-compute the fft in order to get a proper value. So there are
+        # probably a number of transforms that I will have to fail on if FFT is
+        # asked for
         if self.train:
             data = self.train_transforms(data)
         else:
             data = self.test_transforms(data)
-
-        data = (data - mu) / std
 
         # this will return absolute index of data, the data, metadata, and target
         # by absolute index we mean the indexing in self.all_sequences
@@ -1601,11 +1654,24 @@ class ImgARDSDataset(ARDSRawDataset):
         raise NotImplementedError('cant get 2d dataset from pickle yet')
 
 
+def rescale_to_img(img):
+    chans = len(img.shape)
+    minima = img.min(axis=0).min(axis=0)
+    if chans == 2:
+        maxima = (img - minima).max()
+        return np.uint8(((img - minima) / maxima) * 255)
+    elif chans == 3:
+        minima = minima.reshape(1, 1, chans).repeat(224, axis=0).repeat(224, axis=1)
+        maxima = (img - minima).max(axis=0).max(axis=0)
+        maxima = maxima.reshape(1, 1, chans).repeat(224, axis=0).repeat(224, axis=1)
+        return np.uint8(((img - minima) / maxima) * 255)
+
+
 if __name__ == '__main__':
     from matplotlib import pyplot as plt
 
     a = pd.read_pickle('/fastdata/deepards/unpadded_centered_sequences-nb20-kfold.pkl')
-    d = ImgARDSDataset(a, [])
+    d = ImgARDSDataset(a, [], with_fft=True)
     d.set_kfold_indexes_for_fold(0)
     idx, seq, meta, target = d[0]
     #distort = transforms.RandomPerspective(distortion_scale=.1, p=1)
@@ -1615,17 +1681,24 @@ if __name__ == '__main__':
     #trans = transforms.RandomErasing(p=1)
     #trans = RandomTimeWarp(p=1)
     #trans = RandomWindowWarping(p=1)
-    trans = RandomMagnitudeWarp(p=1)
+    #trans = RandomMagnitudeWarp(p=1)
     #trans = RandomRowScale(p=1)
     #trans = RandomWindowSlicing(p=1)
+    trans = RowShuffle(p=1)
     fig, axes = plt.subplots(nrows=1, ncols=3)
     ax = plt.subplot(1, 3, 1)
-    ax.imshow(d.all_sequences[0][1].reshape(224, 224))
+    if seq.shape[0] == 1:
+        shape_op = lambda x: x.reshape(224,224)
+    else:
+        # imshow needs things in (h,w,c) whereas torch likes (c,h,w)
+        shape_op = lambda x: np.rollaxis(x, 0, 3)
+
+    ax.imshow(rescale_to_img(d.all_sequences[idx][1][:, :, 0].reshape(224, 224)))
     ax.set_title('original')
     ax = plt.subplot(1, 3, 2)
-    ax.imshow(seq.numpy().reshape(224,224))
+    ax.imshow(rescale_to_img(shape_op(seq.numpy())))
     ax.set_title('dataset out')
     ax = plt.subplot(1, 3, 3)
-    ax.imshow(trans(seq).numpy().reshape(224,224))
+    ax.imshow(rescale_to_img(shape_op(trans(seq.numpy()))))
     ax.set_title('trans modified')
     plt.show()

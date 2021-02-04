@@ -246,8 +246,8 @@ class BaseTraining(object):
             )
 
         if self.is_2d_dataset or self.is_2x1d_dataset:
-            train_dataset = ImgARDSDataset(train_dataset, self.args.two_dim_transforms)
-            test_dataset = ImgARDSDataset(test_dataset, self.args.two_dim_transforms)
+            train_dataset = ImgARDSDataset(train_dataset, self.args.two_dim_transforms, self.args.with_fft)
+            test_dataset = ImgARDSDataset(test_dataset, self.args.two_dim_transforms, self.args.with_fft)
 
         return train_dataset, test_dataset
 
@@ -332,8 +332,8 @@ class BaseTraining(object):
             )
         elif 'unet' in self.args.base_network:
             base_network = base_network(1)
-        else:
-            base_network = base_network()
+        else:  # this is becoming our defacto densenet logic
+            base_network = base_network(with_fft=self.args.with_fft, block_kernel_size=self.args.block_kernel_size)
 
         if self.args.freeze_base_network:
             for param in base_network.parameters():
@@ -1487,6 +1487,8 @@ def build_parser():
     true_false_flag('--use-l1', 'add an l1 regularization for ppnet')
     true_false_flag('--print-progress', 'print progress for batch losses. This will override --no-print-progress flag if set')
     parser.add_argument('-2dt', '--two-dim-transforms', nargs='*', choices=two_dim_transforms.keys())
+    true_false_flag('--with-fft', 'add FFT transforms to a 2d dataset')
+    parser.add_argument('-bks', '--block-kernel-size', type=int, help='kernel size of the main dense block convolution')
     return parser
 
 
