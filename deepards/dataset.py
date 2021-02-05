@@ -1454,18 +1454,19 @@ class SiameseNetworkDataset(ARDSRawDataset):
 
 
 class ImgARDSDataset(ARDSRawDataset):
-    def __init__(self, raw_dataset_obj, extra_transforms, with_fft):
+    def __init__(self, raw_dataset_obj, extra_transforms, add_fft, fft_only):
         """
         Create an ARDS dataset composed of 2D images. Operates off an ARDSRawDataset
         object because it has done most of the hard work for us already.
 
         :param raw_dataset_obj: instance of ARDSRawDataset
         :param extra_transforms: list of 2d transforms you want to use
-        :param with_fft: whether or not to add fft to the img
+        :param add_fft: whether or not to add fft to the img
         """
         self.raw = raw_dataset_obj
         self.all_sequences = []
-        self.with_fft = with_fft
+        self.add_fft = add_fft
+        self.fft_only = fft_only
         # XXX I'm kinda doing planning for the case that i want to redo the dataset
         # from fresh data files. this does have advantage of being able to go up to
         # 256. But then again it might just be easier to modify the raw dataset for
@@ -1521,9 +1522,12 @@ class ImgARDSDataset(ARDSRawDataset):
             img.append(np.zeros((remaining_rows, seq_size)))
 
         img = np.expand_dims(np.concatenate(img), axis=-1)
-        if self.with_fft:
+        if self.add_fft:
             trans = np.fft.fft(img, axis=1)
             img = np.concatenate([img, trans.real, trans.imag], axis=-1)
+        elif self.fft_only:
+            trans = np.fft.fft(img, axis=1)
+            img = np.concatenate([trans.real, trans.imag], axis=-1)
 
         self.all_sequences.append([pt, img, target, seq_hours])
 
@@ -1649,23 +1653,27 @@ class ImgARDSDataset(ARDSRawDataset):
 
 
 def rescale_to_img(img):
-    chans = len(img.shape)
+    dims = len(img.shape)
     minima = img.min(axis=0).min(axis=0)
-    if chans == 2:
+    if dims == 2:
         maxima = (img - minima).max()
         return np.uint8(((img - minima) / maxima) * 255)
-    elif chans == 3:
+    elif dims == 3:
+        chans = img.shape[-1]
         minima = minima.reshape(1, 1, chans).repeat(224, axis=0).repeat(224, axis=1)
         maxima = (img - minima).max(axis=0).max(axis=0)
         maxima = maxima.reshape(1, 1, chans).repeat(224, axis=0).repeat(224, axis=1)
-        return np.uint8(((img - minima) / maxima) * 255)
+        img = np.uint8(((img - minima) / maxima) * 255)
+        if chans == 2:
+            img = np.dstack((img, np.ones((224,224,1))))
+        return img
 
 
 if __name__ == '__main__':
     from matplotlib import pyplot as plt
 
     a = pd.read_pickle('/fastdata/deepards/unpadded_centered_sequences-nb20-kfold.pkl')
-    d = ImgARDSDataset(a, [], with_fft=True)
+    d = ImgARDSDataset(a, [], add_fft=False, fft_only=True)
     d.set_kfold_indexes_for_fold(0)
     idx, seq, meta, target = d[0]
     #distort = transforms.RandomPerspective(distortion_scale=.1, p=1)

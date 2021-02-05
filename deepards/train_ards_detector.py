@@ -246,8 +246,8 @@ class BaseTraining(object):
             )
 
         if self.is_2d_dataset or self.is_2x1d_dataset:
-            train_dataset = ImgARDSDataset(train_dataset, self.args.two_dim_transforms, self.args.with_fft)
-            test_dataset = ImgARDSDataset(test_dataset, self.args.two_dim_transforms, self.args.with_fft)
+            train_dataset = ImgARDSDataset(train_dataset, self.args.two_dim_transforms, self.args.with_fft, self.args.only_fft)
+            test_dataset = ImgARDSDataset(test_dataset, self.args.two_dim_transforms, self.args.with_fft, self.args.only_fft)
 
         return train_dataset, test_dataset
 
@@ -1488,6 +1488,7 @@ def build_parser():
     true_false_flag('--print-progress', 'print progress for batch losses. This will override --no-print-progress flag if set')
     parser.add_argument('-2dt', '--two-dim-transforms', nargs='*', choices=two_dim_transforms.keys())
     true_false_flag('--with-fft', 'add FFT transforms to a 2d dataset')
+    true_false_flag('--only-fft', 'only use FFT when using a 2d dataset. if you use this with --with-fft then --with-fft will take precedence and you will have a 3 chan input')
     parser.add_argument('-bks', '--block-kernel-size', type=int, help='kernel size of the main dense block convolution')
     return parser
 

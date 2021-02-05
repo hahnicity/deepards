@@ -188,12 +188,18 @@ class DenseNet(nn.Module):
         memory_efficient: bool = False,
         block_kernel_size: int = 3,
         with_fft: bool = False,
+        only_fft: bool = False,
     ) -> None:
 
         super(DenseNet, self).__init__()
 
         # First convolution
-        initial_chans = 1 if not with_fft else 3
+        if with_fft:
+            initial_chans = 3
+        elif only_fft:
+            initial_chans = 2
+        else:
+            initial_chans = 1
         self.features = nn.Sequential(OrderedDict([
             ('conv0', nn.Conv2d(initial_chans, num_init_features, kernel_size=7, stride=2,
                                 padding=3, bias=False)),
