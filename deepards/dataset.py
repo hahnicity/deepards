@@ -1608,8 +1608,8 @@ class ImgARDSDataset(ARDSRawDataset):
             row_end = row_start + n_rows
             data[row_start:row_end] = seq_slice
             chunks = [
-                [0, row_start, int_target],
-                [row_start, row_end, (int_target+1)%2],
+                [0, row_start-1, int_target],
+                [row_start, row_end-1, (int_target+1)%2],
                 [row_end, seq_size, int_target]
             ]
 
