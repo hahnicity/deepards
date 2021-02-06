@@ -1210,7 +1210,6 @@ class ARDSRawDataset(Dataset):
             _, data, m, mm, target, seq_hours = seq
             meta = np.array([m, mm])
 
-        # XXX pack_padded_sequence
         self.seq_hours[index] = seq_hours
         try:
             mu, std = self.scaling_factors[self.kfold_num]
@@ -1304,7 +1303,6 @@ class SiameseNetworkDataset(ARDSRawDataset):
         self.total_kfolds = None
         self.all_sequences = all_sequences
         self.n_sub_batches = n_sub_batches if all_sequences == [] else all_sequences[0][1].shape[0]
-        # XXX enable ability to split to main if wanted.
         data_subdir = 'prototrain' if train else 'prototest'
         raw_dir = os.path.join(data_path, 'experiment{}'.format(experiment_num), data_subdir, 'raw')
         self.dataset_type = dataset_type
@@ -1427,7 +1425,6 @@ class SiameseNetworkDataset(ARDSRawDataset):
         neg_idx = np.random.choice(pt_available_neg)
         neg_compr = self.all_sequences[neg_idx][1]
         mu, std = self.scaling_factors[None]  # this dataset is not meant to be run with kfold
-        # XXX need to accomodate unpadded dataset types
         if 'padded_breath_by_breath' in self.dataset_type:
             seq_padding_mask = self._get_padding_mask(seq, mu)
             pos_compr_padding_mask = self._get_padding_mask(pos_compr, mu)
@@ -1454,7 +1451,7 @@ class SiameseNetworkDataset(ARDSRawDataset):
 
 
 class ImgARDSDataset(ARDSRawDataset):
-    def __init__(self, raw_dataset_obj, extra_transforms, add_fft, fft_only):
+    def __init__(self, raw_dataset_obj, extra_transforms, add_fft, fft_only, bbox):
         """
         Create an ARDS dataset composed of 2D images. Operates off an ARDSRawDataset
         object because it has done most of the hard work for us already.
@@ -1462,11 +1459,14 @@ class ImgARDSDataset(ARDSRawDataset):
         :param raw_dataset_obj: instance of ARDSRawDataset
         :param extra_transforms: list of 2d transforms you want to use
         :param add_fft: whether or not to add fft to the img
+        :param fft_only:
+        :param bbox:
         """
         self.raw = raw_dataset_obj
         self.all_sequences = []
         self.add_fft = add_fft
         self.fft_only = fft_only
+        self.bbox = bbox
         # XXX I'm kinda doing planning for the case that i want to redo the dataset
         # from fresh data files. this does have advantage of being able to go up to
         # 256. But then again it might just be easier to modify the raw dataset for
@@ -1492,6 +1492,12 @@ class ImgARDSDataset(ARDSRawDataset):
             raise NotImplementedError('padded dataset types not implemented yet!')
         self.make_dataset_from_raw()
         self.derive_scaling_factors()
+        # this will work for train segments of the dataset, however if we want
+        # to test on a whole img then it needs to be modified. Possible that we
+        # can save items in two competing datasets. But for now lets just focus
+        # on the simple bbox problem and then we can work on other items
+        if self.bbox:
+            self.make_bbox_dataset()
 
     def _append_to_mat(self, mat, new_data, seq_hours, new_seq_hours):
         len_win, chans, seq_size = new_data.shape
@@ -1571,6 +1577,55 @@ class ImgARDSDataset(ARDSRawDataset):
             for kfold_num, idxs in indices.items()
         }
 
+    def make_bbox_dataset(self):
+        kfold_indices = {
+            kfold_num: self.get_kfold_indexes_for_fold(kfold_num)
+            for kfold_num in range(self.total_kfolds)
+        }
+        reverse_indices = {
+            i: kfold_num for kfold_num, idxs in kfold_indices.items() for i in idxs
+        }
+        gt = self._get_all_sequence_ground_truth()
+        last_pt = None
+        for idx, (pt, data, target, seq_hours) in enumerate(self.all_sequences):
+            # If I use data from another patient then I have to be sure they're not
+            # in cross-over kfolds
+            int_target = target.argmax()
+            if last_pt != pt:
+                pt_fold = reverse_indices[idx]
+                fold_idxs = set(kfold_indices[pt_fold])
+                pt_idxs = gt[gt.patient == pt].index
+                non_pt_fold_idxs = fold_idxs.difference(pt_idxs)
+                mask = gt.loc[non_pt_fold_idxs, 'y'] != int_target
+                avail_idxs = mask[mask==True].index
+            # randomly choose sequence and then choose n rows that is 1/4-1/3 of 224
+            rand_seq_idx = np.random.choice(avail_idxs)
+            seq_size = data.shape[0]
+            n_rows = np.random.randint(seq_size//4, seq_size//3)
+            # -1 for 0 offset. At minimum have 10 rows to start/end with.
+            row_start = np.random.randint(10, seq_size-n_rows-1-10)
+            seq_slice = self.all_sequences[rand_seq_idx][1][row_start:row_start+n_rows]
+            row_end = row_start + n_rows
+            data[row_start:row_end] = seq_slice
+            chunks = [
+                [0, row_start, int_target],
+                [row_start, row_end, (int_target+1)%2],
+                [row_end, seq_size, int_target]
+            ]
+
+            # So in the main retinanet work the bbox is structured like:
+            #
+            # [x1, y1, x2, y2, cls]
+            #
+            # The overall annotation structure is [Nx5] where N is the
+            # number of annotations in a single img
+            new_target = []
+            for rs, re, target in chunks:
+                new_target.append([0, rs, seq_size, re+1, target])
+            self.all_sequences[idx].insert(2, data)
+            self.all_sequences[idx].insert(-2, new_target)
+            last_pt = pt
+
     def make_dataset_from_raw(self):
         # this could probably be a recursive function but oh well.
         last_pt = None
@@ -1611,7 +1666,11 @@ class ImgARDSDataset(ARDSRawDataset):
         if self.kfold_num is not None:
             index = self.kfold_indexes[index]
         seq = self.all_sequences[index]
-        _, data, target, seq_hours = seq
+        # XXX will need to change this for bbox datasets
+        if len(seq) == 4:
+            _, data, target, seq_hours = seq
+        elif len(seq) == 6:
+            _, orig_data, data, target, one_class_target, seq_hours = seq
         meta = np.nan
 
         self.seq_hours[index] = seq_hours
@@ -1669,11 +1728,9 @@ def rescale_to_img(img):
         return img
 
 
-if __name__ == '__main__':
+def non_bbox_viz(a):
     from matplotlib import pyplot as plt
-
-    a = pd.read_pickle('/fastdata/deepards/unpadded_centered_sequences-nb20-kfold.pkl')
-    d = ImgARDSDataset(a, [], add_fft=False, fft_only=True)
+    d = ImgARDSDataset(a, [], add_fft=False, fft_only=True, bbox=False)
     d.set_kfold_indexes_for_fold(0)
     idx, seq, meta, target = d[0]
     #distort = transforms.RandomPerspective(distortion_scale=.1, p=1)
@@ -1704,3 +1761,39 @@ if __name__ == '__main__':
     ax.imshow(rescale_to_img(shape_op(trans(seq.numpy()))))
     ax.set_title('trans modified')
     plt.show()
+
+
+def bbox_viz(a):
+    from matplotlib import pyplot as plt
+    from matplotlib.patches import Rectangle
+    d = ImgARDSDataset(a, [], add_fft=False, fft_only=False, bbox=True)
+    d.set_kfold_indexes_for_fold(0)
+    idx, seq, meta, target = d[0]
+    fig, axes = plt.subplots(nrows=1, ncols=3)
+    fig.set_figheight(8)
+    fig.set_figwidth(12)
+    ax = plt.subplot(1, 3, 1)
+    if seq.shape[0] == 1:
+        shape_op = lambda x: x.reshape(224,224)
+    else:
+        # imshow needs things in (h,w,c) whereas torch likes (c,h,w)
+        shape_op = lambda x: np.rollaxis(x, 0, 3)
+
+    ax.imshow(rescale_to_img(d.all_sequences[idx][1][:, :, 0].reshape(224, 224)))
+    ax.set_title('original')
+    ax = plt.subplot(1, 3, 2)
+    ax.imshow(rescale_to_img(shape_op(seq.numpy())))
+    ax.set_title('dataset out')
+    ax = plt.subplot(1, 3, 3)
+    for x1, y1, x2, y2, cls in target:
+        r = Rectangle((x1,y1), x2-x1, y2-y1, fill=False, edgecolor='r', lw=.75)
+        ax.add_patch(r)
+        ax.annotate(str(cls), (x1+((x2-x1)/2), y1+((y2-y1)/2)), color='r', fontsize=16)
+    ax.imshow(rescale_to_img(shape_op(seq.numpy())))
+    ax.set_title('with annotations')
+    plt.show()
+
+
+if __name__ == '__main__':
+    a = pd.read_pickle('/fastdata/deepards/unpadded_centered_sequences-nb20-kfold.pkl')
+    bbox_viz(a)

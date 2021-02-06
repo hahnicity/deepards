@@ -246,8 +246,8 @@ class BaseTraining(object):
             )
 
         if self.is_2d_dataset or self.is_2x1d_dataset:
-            train_dataset = ImgARDSDataset(train_dataset, self.args.two_dim_transforms, self.args.with_fft, self.args.only_fft)
-            test_dataset = ImgARDSDataset(test_dataset, self.args.two_dim_transforms, self.args.with_fft, self.args.only_fft)
+            train_dataset = ImgARDSDataset(train_dataset, self.args.two_dim_transforms, self.args.with_fft, self.args.only_fft, False)
+            test_dataset = ImgARDSDataset(test_dataset, self.args.two_dim_transforms, self.args.with_fft, self.args.only_fft, False)
 
         return train_dataset, test_dataset
 
@@ -333,7 +333,11 @@ class BaseTraining(object):
         elif 'unet' in self.args.base_network:
             base_network = base_network(1)
         else:  # this is becoming our defacto densenet logic
-            base_network = base_network(with_fft=self.args.with_fft, block_kernel_size=self.args.block_kernel_size)
+            base_network = base_network(
+                with_fft=self.args.with_fft,
+                block_kernel_size=self.args.block_kernel_size,
+                only_fft=self.args.only_fft
+            )
 
         if self.args.freeze_base_network:
             for param in base_network.parameters():
