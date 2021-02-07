@@ -1,0 +1,13 @@
+cuda_no_dp: true
+clip_val: 0.01
+clip_grad: true
+dataset_type: unpadded_centered_sequences
+oversample: true
+kfolds: 5
+#no_print_progress: true
+epochs: 10
+batch_size: 2
+network: faster_rcnn_2d
+train_from_pickle: /fastdata/deepards/unpadded_centered_sequences-nb20-kfold.pkl
+n_sub_batches: 20
+data_path: /fastdata/ardsdetection

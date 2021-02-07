@@ -1467,10 +1467,6 @@ class ImgARDSDataset(ARDSRawDataset):
         self.add_fft = add_fft
         self.fft_only = fft_only
         self.bbox = bbox
-        # XXX I'm kinda doing planning for the case that i want to redo the dataset
-        # from fresh data files. this does have advantage of being able to go up to
-        # 256. But then again it might just be easier to modify the raw dataset for
-        # 256 instead.
         self.total_kfolds = self.raw.total_kfolds
         try:
             self.oversample_minority = self.raw.oversample_minority
@@ -1619,9 +1615,15 @@ class ImgARDSDataset(ARDSRawDataset):
             #
             # The overall annotation structure is [Nx5] where N is the
             # number of annotations in a single img
-            new_target = []
+            bboxes = []
+            labels = []
             for rs, re, target in chunks:
-                new_target.append([0, rs, seq_size, re+1, target])
+                bboxes.append([0, rs, seq_size, re+1])
+                labels.append(target)
+            new_target = {
+                'boxes': torch.FloatTensor(bboxes),
+                'labels': torch.IntTensor(labels).type(torch.int64),
+            }
             self.all_sequences[idx].insert(2, data)
             self.all_sequences[idx].insert(-2, new_target)
             last_pt = pt
@@ -1666,9 +1668,10 @@ class ImgARDSDataset(ARDSRawDataset):
         if self.kfold_num is not None:
             index = self.kfold_indexes[index]
         seq = self.all_sequences[index]
-        # XXX will need to change this for bbox datasets
         if len(seq) == 4:
             _, data, target, seq_hours = seq
+        elif len(seq) == 6 and not self.train:
+            _, data, bbox_data, bbox_target, target, seq_hours = seq
         elif len(seq) == 6:
             _, orig_data, data, target, one_class_target, seq_hours = seq
         meta = np.nan
@@ -1785,7 +1788,8 @@ def bbox_viz(a):
     ax.imshow(rescale_to_img(shape_op(seq.numpy())))
     ax.set_title('dataset out')
     ax = plt.subplot(1, 3, 3)
-    for x1, y1, x2, y2, cls in target:
+    for idx, (x1, y1, x2, y2) in enumerate(target['boxes']):
+        cls = target['labels'][idx].item()
         r = Rectangle((x1,y1), x2-x1, y2-y1, fill=False, edgecolor='r', lw=.75)
         ax.add_patch(r)
         ax.annotate(str(cls), (x1+((x2-x1)/2), y1+((y2-y1)/2)), color='r', fontsize=16)

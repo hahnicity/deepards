@@ -14,6 +14,8 @@ from torch import nn, Tensor
 from torch.nn import functional as F
 import torchvision
 from torchvision.models.detection import backbone_utils, retinanet
+from torchvision.models.detection.anchor_utils import AnchorGenerator
+from torchvision.models.detection.faster_rcnn import FasterRCNN, resnet_fpn_backbone
 from torchvision.models.detection.image_list import ImageList
 from torchvision.models.detection.roi_heads import paste_masks_in_image
 from torchvision.ops.feature_pyramid_network import LastLevelP6P7
@@ -296,8 +298,31 @@ class RetinaNetMain(nn.Module):
         backbone = backbone_utils.BackboneWithFPN(
             backbone.features, return_layers, in_channels_list, out_channels, extra_blocks=extra_blocks
         )
-        self.retinanet = retinanet.RetinaNet(backbone, 2, detections_per_img=16)
-        self.retinanet.transform = CNNTransform(800, 1333)
+        # detections_per_img saves n detections per cls.
+        self.detector = retinanet.RetinaNet(backbone, 2, detections_per_img=8, score_thresh=0.25)
+        self.detector.transform = CNNTransform(224, 256)
 
-    def forward(self, x, targets):
-        return self.retinanet(x, targets)
+    def forward(self, x, target):
+        return self.detector(x, target)
+
+
+class FasterRCNNMain(nn.Module):
+    def __init__(self, backbone):
+        super().__init__()
+
+        # only works with densenet
+        backbone.out_channels = 128
+        #anchor_generator = AnchorGenerator(sizes=((128, 128, 128),), aspect_ratios=((.5, 1.0, 2.0),))
+        #self.detector = FasterRCNN(backbone, 2, box_detections_per_img=8, rpn_anchor_generator=anchor_generator)
+        # XXX debug for now
+        #
+        # XXX should I pretrain the backbone first??
+        #
+        # XXX ugh this is not working. everything is just predicted as ARDS.
+        backbone = resnet_fpn_backbone('resnet18', False, trainable_layers=5)
+        backbone.body.conv1 = nn.Conv2d(1, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
+        self.detector = FasterRCNN(backbone, 2, )
+        self.detector.transform = CNNTransform(224, 256)
+
+    def forward(self, x, target):
+        return self.detector(x, target)

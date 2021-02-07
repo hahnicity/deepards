@@ -12,6 +12,7 @@ from torch.autograd import Variable
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+from torchvision.ops import box_area
 from torchvision.transforms import Compose
 
 from deepards.augmentation import IEWindowWarping, IEWindowWarpingIEProgrammable,  NaiveWindowWarping
@@ -26,6 +27,7 @@ from deepards.models.cnn_transformer import CNNTransformerNetwork
 from deepards.models.densenet import densenet18, densenet121, densenet161, densenet169, densenet201
 from deepards.models.densenet2d import densenet18 as densenet18_2d
 from deepards.models.densenet2x1d import densenet18 as densenet18_2x1d
+from deepards.models.detection import FasterRCNNMain, RetinaNetMain
 from deepards.models.lstm_only import DoubleLSTMNetwork, LSTMOnlyNetwork, LSTMOnlyWithPacking
 from deepards.models.protopnet1d.model import construct_PPNet
 from deepards.models.protopnet1d.ppnet_push import prototype_viz, push_prototypes
@@ -70,6 +72,10 @@ base_networks = {
 saved_models_default_dir = os.path.join(os.path.dirname(__file__), 'saved_models')
 
 
+def detection_collate_fn(batch):
+    return tuple(zip(*batch))
+
+
 class BaseTraining(object):
     clip_odd_batches = False
 
@@ -108,6 +114,11 @@ class BaseTraining(object):
             self.args.base_network = self.args.base_network + '_2d'
         elif self.is_2x1d_dataset and '2x1d' not in self.args.base_network:
             self.args.base_network = self.args.base_network + '_2x1d'
+
+        if self.args.network in ['retinanet_2d', 'faster_rcnn_2d']:
+            self.bbox = True
+        else:
+            self.bbox = False
 
         if self.args.unshuffled and self.args.batch_size > 1:
             raise Exception('Currently we can only run unshuffled runs with a batch size of 1!')
@@ -246,13 +257,14 @@ class BaseTraining(object):
             )
 
         if self.is_2d_dataset or self.is_2x1d_dataset:
-            train_dataset = ImgARDSDataset(train_dataset, self.args.two_dim_transforms, self.args.with_fft, self.args.only_fft, False)
-            test_dataset = ImgARDSDataset(test_dataset, self.args.two_dim_transforms, self.args.with_fft, self.args.only_fft, False)
+            train_dataset = ImgARDSDataset(train_dataset, self.args.two_dim_transforms, self.args.with_fft, self.args.only_fft, self.bbox)
+            test_dataset = ImgARDSDataset(test_dataset, self.args.two_dim_transforms, self.args.with_fft, self.args.only_fft, self.bbox)
 
         return train_dataset, test_dataset
 
     def get_splits(self):
         train_dataset, test_dataset = self.get_base_datasets()
+        collate_fn = None if not self.bbox else detection_collate_fn
         for i in range(self.n_kfolds):
             if self.args.kfolds is not None:
                 print('--- Run Fold {} ---'.format(i+1))
@@ -264,6 +276,7 @@ class BaseTraining(object):
                 shuffle=True if not self.args.unshuffled else False,
                 pin_memory=self.args.cuda,
                 num_workers=self.args.loader_threads,
+                collate_fn=collate_fn,
             )
             test_loader = DataLoader(
                 test_dataset,
@@ -271,6 +284,7 @@ class BaseTraining(object):
                 shuffle=False,
                 pin_memory=self.args.cuda,
                 num_workers=self.args.loader_threads,
+                collate_fn=collate_fn,
             )
             yield train_dataset, train_loader, test_dataset, test_loader
 
@@ -1336,6 +1350,100 @@ class ProtoPNet2DModel(ProtoPNetModel, BaseTraining, PatientClassifierMixin):
         self.pusher.push_orig(train_loader, model, epoch_num)
 
 
+class DetectionModel(BaseTraining, PatientClassifierMixin):
+    def run_train_epoch(self, model, train_loader, optimizer, epoch_num, fold_num):
+        print('train instances: {}'.format(len(train_loader)))
+        with torch.enable_grad():
+            print("\nrun epoch {}\n".format(epoch_num))
+            model.train()
+            model.detector.training = True
+            total_batches = len(train_loader)
+            for batch_idx, (obs_idx, seq, _, target) in enumerate(train_loader):
+                model.zero_grad()
+                inputs = [self.cuda_wrapper(Variable(s.float())) for s in seq]
+                for idx, dict in enumerate(target):
+                    for k, v in dict.items():
+                        target[idx][k] = self.cuda_wrapper(Variable(v))
+                out = model(inputs, target)
+                loss, out = self.calc_loss(out)
+                loss.backward()
+                optimizer.step()
+                self.results.update_meter('loss_epoch_{}'.format(epoch_num), fold_num, loss)
+                self.results.update_meter('cls_epoch_{}'.format(epoch_num), fold_num, out['classification'].data)
+                self.results.update_meter('bbox_epoch_{}'.format(epoch_num), fold_num, out['bbox_regression'].data)
+                if not self.args.no_print_progress or self.args.print_progress:
+                    print("batch num: {}/{}, avg loss: {}, cls_loss: {} reg_loss: {}\r".format(
+                        batch_idx,
+                        total_batches,
+                        self.results.get_meter('loss_epoch_{}'.format(epoch_num), fold_num),
+                        self.results.get_meter('cls_epoch_{}'.format(epoch_num), fold_num),
+                        self.results.get_meter('bbox_epoch_{}'.format(epoch_num), fold_num),
+                        end=""
+                    ))
+                if self.args.debug:
+                    break
+
+    def run_test_epoch(self, epoch_num, model, test_dataset, test_loader, fold_num):
+        print('test instances: {}'.format(len(test_loader)))
+        self.pred_idx = []
+        self.preds = []
+        with torch.no_grad():
+            print("\nrun test epoch {}\n".format(epoch_num))
+            model.eval()
+            model.detector.training = False
+            total_batches = len(test_loader)
+            for batch_idx, (obs_idx, seq, _, target) in enumerate(test_loader):
+                inputs = [self.cuda_wrapper(s.float()) for s in seq]
+                outputs = model(inputs, None)
+                batch_preds = self._process_test_batch_results(outputs, target, fold_num)
+                self.pred_idx.extend(self.transform_obs_idx(obs_idx, outputs))
+                self.preds.extend(batch_preds)
+        self.record_final_epoch_testing_results(fold_num, epoch_num, test_dataset)
+
+    def _process_test_batch_results(self, outputs, target, fold_num):
+        batch_preds = []
+        for idx, item in enumerate(outputs):
+            other_pred = box_area(item['boxes'][item['labels'] == 0]).sum()
+            ards_pred = box_area(item['boxes'][item['labels'] == 1]).sum()
+            if ards_pred >= other_pred:
+                batch_preds.append(1)
+            else:
+                batch_preds.append(0)
+        target = np.array([t.argmax() for t in target])
+        batch_preds = np.array(batch_preds)
+        self.record_testing_results(target, batch_preds, fold_num)
+        return batch_preds.tolist()
+
+    def transform_obs_idx(self, obs_idx, outputs):
+        return list(obs_idx)
+
+
+class RetinaNetBBoxModel(DetectionModel):
+    def __init__(self, args):
+        super().__init__(args)
+
+    def calc_loss(self, output):
+        loss = output['classification'] + output['bbox_regression']
+        return loss, output
+
+    def get_network(self, base_network):
+        return RetinaNetMain(base_network)
+
+
+class FasterRCNNBBoxModel(DetectionModel):
+    def __init__(self, args):
+        super().__init__(args)
+
+    def calc_loss(self, output):
+        loss = sum(output.values())
+        output['classification'] = output['loss_classifier']
+        output['bbox_regression'] = output['loss_rpn_box_reg']
+        return loss, output
+
+    def get_network(self, base_network):
+        return FasterRCNNMain(base_network)
+
+
 # Is putting a global in code like this a great idea? probably not, but saves some hassle
 # on outside scripting
 network_map = {
@@ -1364,6 +1472,8 @@ network_map = {
     'cnn_linear_to_mean': CNNLinearToMeanModel,
     'protopnet': ProtoPNet1DModel,
     'protopnet_2d': ProtoPNet2DModel,
+    'retinanet_2d': RetinaNetBBoxModel,
+    'faster_rcnn_2d': FasterRCNNBBoxModel,
 }
 
 
