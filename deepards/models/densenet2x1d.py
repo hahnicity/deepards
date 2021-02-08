@@ -25,11 +25,16 @@ class _DenseLayer(nn.Module):
         growth_rate: int,
         bn_size: int,
         drop_rate: float,
-        memory_efficient: bool = False
+        memory_efficient: bool = False,
+        block_kernel_size: int = 3,
     ) -> None:
         super(_DenseLayer, self).__init__()
         self.norm1: nn.BatchNorm2d
         self.add_module('norm1', nn.BatchNorm2d(num_input_features))
+        self.kernel_size = block_kernel_size
+        # this ensures the padding will be an appropriate size so that
+        # output size will not change
+        self.padding_size = int((-1 + block_kernel_size) / 2)
         self.relu1: nn.ReLU
         self.add_module('relu1', nn.ReLU(inplace=True))
         self.conv1: nn.Conv2d
@@ -42,13 +47,13 @@ class _DenseLayer(nn.Module):
         self.add_module('relu2', nn.ReLU(inplace=True))
         self.conv2: nn.Conv2d
         self.add_module('conv2', nn.Conv2d(bn_size * growth_rate, growth_rate,
-                                           kernel_size=(1, 3), stride=1, padding=(0,1),
+                                           kernel_size=self.kernel_size, stride=1, padding=self.padding_size,
                                            bias=False))
         self.drop_rate = float(drop_rate)
         self.memory_efficient = memory_efficient
 
     def conv_info(self):
-        return [1, 3], [1, 1], [0, 1]
+        return [1, self.kernel_size], [1, 1], [0, self.padding_size]
 
     def bn_function(self, inputs: List[Tensor]) -> Tensor:
         concated_features = torch.cat(inputs, 1)
@@ -110,7 +115,8 @@ class _DenseBlock(nn.ModuleDict):
         bn_size: int,
         growth_rate: int,
         drop_rate: float,
-        memory_efficient: bool = False
+        memory_efficient: bool = False,
+        block_kernel_size: int = 3,
     ) -> None:
         super(_DenseBlock, self).__init__()
 
@@ -125,6 +131,7 @@ class _DenseBlock(nn.ModuleDict):
                 bn_size=bn_size,
                 drop_rate=drop_rate,
                 memory_efficient=memory_efficient,
+                block_kernel_size=block_kernel_size,
             )
             lks, ls, lp = layer.conv_info()
             self.kernel_sizes.extend(lks)
@@ -177,14 +184,23 @@ class DenseNet(nn.Module):
         num_init_features: int = 64,
         bn_size: int = 4,
         drop_rate: float = 0,
-        memory_efficient: bool = False
+        memory_efficient: bool = False,
+        block_kernel_size: int = 3,
+        with_fft: bool = False,
+        only_fft: bool = False,
     ) -> None:
 
         super(DenseNet, self).__init__()
 
+        if with_fft:
+            initial_chans = 3
+        elif only_fft:
+            initial_chans = 2
+        else:
+            initial_chans = 1
         # First convolution
         self.features = nn.Sequential(OrderedDict([
-            ('conv0', nn.Conv2d(1, num_init_features, kernel_size=(1, 7), stride=2,
+            ('conv0', nn.Conv2d(initial_chans, num_init_features, kernel_size=(1, 7), stride=2,
                                 padding=(0,3), bias=False)),
             ('norm0', nn.BatchNorm2d(num_init_features)),
             ('relu0', nn.ReLU(inplace=True)),
@@ -205,7 +221,8 @@ class DenseNet(nn.Module):
                 bn_size=bn_size,
                 growth_rate=growth_rate,
                 drop_rate=drop_rate,
-                memory_efficient=memory_efficient
+                memory_efficient=memory_efficient,
+                block_kernel_size=block_kernel_size,
             )
             self.features.add_module('denseblock%d' % (i + 1), block)
             num_features = num_features + num_layers * growth_rate
