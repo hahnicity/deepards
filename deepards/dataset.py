@@ -1772,10 +1772,10 @@ def bbox_viz(a):
     d = ImgARDSDataset(a, [], add_fft=False, fft_only=False, bbox=True)
     d.set_kfold_indexes_for_fold(0)
     idx, seq, meta, target = d[0]
-    fig, axes = plt.subplots(nrows=1, ncols=3)
+    fig, axes = plt.subplots(nrows=1, ncols=2)
     fig.set_figheight(8)
     fig.set_figwidth(12)
-    ax = plt.subplot(1, 3, 1)
+    ax = plt.subplot(1, 2, 1)
     if seq.shape[0] == 1:
         shape_op = lambda x: x.reshape(224,224)
     else:
@@ -1784,10 +1784,7 @@ def bbox_viz(a):
 
     ax.imshow(rescale_to_img(d.all_sequences[idx][1][:, :, 0].reshape(224, 224)))
     ax.set_title('original')
-    ax = plt.subplot(1, 3, 2)
-    ax.imshow(rescale_to_img(shape_op(seq.numpy())))
-    ax.set_title('dataset out')
-    ax = plt.subplot(1, 3, 3)
+    ax = plt.subplot(1, 2, 2)
     for idx, (x1, y1, x2, y2) in enumerate(target['boxes']):
         cls = target['labels'][idx].item()
         r = Rectangle((x1,y1), x2-x1, y2-y1, fill=False, edgecolor='r', lw=.75)
