@@ -2,32 +2,23 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 from torch.autograd import Variable
+from torchvision.ops.focal_loss import sigmoid_focal_loss
 
 
 class FocalLoss(nn.Module):
-    def __init__(self, gamma=0, alpha=None, size_average=True):
+    def __init__(self, gamma=2, alpha=None, size_average=False):
         super(FocalLoss, self).__init__()
         self.gamma = gamma
         self.alpha = alpha
-        if isinstance(alpha,(float,int,long)): self.alpha = torch.Tensor([alpha,1-alpha])
-        if isinstance(alpha,list): self.alpha = torch.Tensor(alpha)
-        self.size_average = size_average
+        if not size_average:
+            self.reduction = 'sum'
+        else:
+            self.reduction = 'mean'
 
     def forward(self, input, target):
-        logpt = F.log_softmax(input, dim=-1)
-        logpt = logpt.gather(-1,target.long())
-        logpt = logpt.view(-1)
-        pt = Variable(logpt.data.exp())
-
-        if self.alpha is not None:
-            if self.alpha.type()!=input.data.type():
-                self.alpha = self.alpha.type_as(input.data)
-            at = self.alpha.gather(0,target.data.view(-1).long())
-            logpt = logpt * Variable(at)
-
-        loss = -1 * (1-pt)**self.gamma * logpt
-        if self.size_average: return loss.mean()
-        else: return loss.sum()
+        # dont do any transform on input because the sigmoid_focal_loss func
+        # is performing F.binary_cross_entropy_with_logits
+        return sigmoid_focal_loss(input, target, reduction=self.reduction)
 
 
 class VacillatingLoss(nn.Module):

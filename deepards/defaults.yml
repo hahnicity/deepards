@@ -35,6 +35,10 @@ clip_val: 0.01
 time_series_hidden_units: 16
 transformer_blocks: 2
 
+# focal loss. Use defaults as given in torchvision.ops.focal_loss
+fl_gamma: 2.0
+fl_alpha: 0.25
+
 # stop if loss too high
 stop_thresh: 1.5
 stop_after_epoch: 1
