@@ -15,30 +15,17 @@ Now go to the deepards directory and make a results directory so that your model
 results for future analysis.
 
     cd deepards
-    mkdir results
+    mkdir -p {results,gradcam_results,prototype_results}
 
 ## Quickstart
 
-Make sure you have the ardsdetection dataset in a known path. If the path is unknown to you then you can
-always download it from our [data repository.](https://ucdavis.app.box.com/folder/67693436232) Once you have the dataset you can run training. For now
-we will just showcase a single model with a single network. For this model, we will feed each breath individually
-to a CNN, and then output its processed features to an LSTM. The LSTM will then be able to make a determination
-on whether the breath looks like it belongs to an ARDS patient or not. We will use some hyperparameters with the model,
-including: batch size of 32, learning rate of .001 and we will run for 5 kfolds.
+We will just showcase a single model with a single network. Here we can just run an
+experiment with a standard cnn_linear network. First download our anonymous dataset
+from [box.](https://ucdavis.box.com/s/yuawpixlokf25bt71doz6g3mzdqr0ehj) Then run the training script
 
-    cd deepards
-    python train_ards_detector.py -dp /path/to/ards/dataset -n cnn_lstm --cuda -b 32 -lr .001 --kfolds 5 -dt padded_breath_by_breath
-
-By default, after each epoch the model will run a testing epoch to evaluate training progress. If you don't
-want this to happen in the future you can provide the `--no-test-after-epochs` to the training CLI.
-You may have to wait for awhile for the model to finish. So feel free to do other work while it runs.
-
-If you want to run an experiment to test a number of different parameters you should do so by passing the `-exp` flag to the `train_ards_detector.py` script.
-This will allow the results reporting to understand that you wish to compare different runs in the same cluster of experiments to each other. Example
-
-    python train_ards_detector.py -lr .001 --kfolds 5 -exp test_learning_rate_changes
-    python train_ards_detector.py -lr .0001 --kfolds 5 -exp test_learning_rate_changes
-    python train_ards_detector.py -lr .00001 --kfolds 5 -exp test_learning_rate_changes
+    python train_ards_detector.py \
+    -co experiment_files/unpadded_centered_nb20_cnn_linear.yml \
+    --train-from-pickle anon-unpadded_centered_sequences-nb20-kfold.pkl
 
 ## Running with Config File
 
@@ -75,7 +62,7 @@ an experiment file.
 
 ## Dataset Types
 
-You may have noticed the `-dt` flag we specified above. This stands for `--dataset-type`. Different
+The `train_ards_detector.py` has a flag named `-dt`. This stands for `--dataset-type`. Different
 dataset types correspond with different ways for modeling the ARDS detection problem. These different methods
 all use relatively the same data, but in a variety of different ways. As of 2019-05-10 types are:
 
@@ -100,7 +87,7 @@ Note that the spaced padding is zoomed so you can see what's happening.
 ![](img/unpadded_sequences.png)
 
 ### Best Performers
-We have found that `unpadded_centered_sequences` performs best across all of the datasets. We are currently investigating why.
+We have found that `unpadded_centered_sequences` performs best across all of the datasets.
 
 ## GradCam
 Gradcam can be used for explaining model predictions. The main script that we use for this is
