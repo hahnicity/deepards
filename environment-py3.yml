@@ -24,6 +24,11 @@ dependencies:
   - pip:
     - pathlib
     - lime
+    - build/static/ucdpvanalysis-1.5.tar.gz
+    - git+git://github.com/lukauskas/dtwco.git#egg=dtwco
+    - imbalanced-learn
+    - mock
+    - prettytable
 channels:
   - pytorch
   - conda-forge
