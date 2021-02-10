@@ -1594,6 +1594,7 @@ class ImgARDSDataset(ARDSRawDataset):
                 non_pt_fold_idxs = fold_idxs.difference(pt_idxs)
                 mask = gt.loc[non_pt_fold_idxs, 'y'] != int_target
                 avail_idxs = mask[mask==True].index
+            new_data = data.copy()
             # randomly choose sequence and then choose n rows that is 1/4-1/3 of 224
             rand_seq_idx = np.random.choice(avail_idxs)
             seq_size = data.shape[0]
@@ -1602,7 +1603,7 @@ class ImgARDSDataset(ARDSRawDataset):
             row_start = np.random.randint(10, seq_size-n_rows-1-10)
             seq_slice = self.all_sequences[rand_seq_idx][1][row_start:row_start+n_rows]
             row_end = row_start + n_rows
-            data[row_start:row_end] = seq_slice
+            new_data[row_start:row_end] = seq_slice
             chunks = [
                 [0, row_start-1, int_target],
                 [row_start, row_end-1, (int_target+1)%2],
@@ -1624,7 +1625,7 @@ class ImgARDSDataset(ARDSRawDataset):
                 'boxes': torch.FloatTensor(bboxes),
                 'labels': torch.IntTensor(labels).type(torch.int64),
             }
-            self.all_sequences[idx].insert(2, data)
+            self.all_sequences[idx].insert(2, new_data)
             self.all_sequences[idx].insert(-2, new_target)
             last_pt = pt
 
@@ -1692,7 +1693,9 @@ class ImgARDSDataset(ARDSRawDataset):
         # you were doing something like window slicing or window warping and you'd
         # have to re-compute the fft in order to get a proper value. So there are
         # probably a number of transforms that I will have to fail on if FFT is
-        # asked for
+        # asked for.
+        #
+        # Alright. I'm not gonna do this.
         if self.train:
             data = self.train_transforms(data)
         else:
@@ -1735,6 +1738,7 @@ def non_bbox_viz(a):
     from matplotlib import pyplot as plt
     d = ImgARDSDataset(a, [], add_fft=False, fft_only=True, bbox=False)
     d.set_kfold_indexes_for_fold(0)
+    kfold_idx = d.kfold_idx
     idx, seq, meta, target = d[0]
     #distort = transforms.RandomPerspective(distortion_scale=.1, p=1)
     #aff = transforms.RandomAffine(25)
@@ -1769,22 +1773,29 @@ def non_bbox_viz(a):
 def bbox_viz(a):
     from matplotlib import pyplot as plt
     from matplotlib.patches import Rectangle
+    rel_idx = 0
     d = ImgARDSDataset(a, [], add_fft=False, fft_only=False, bbox=True)
+    d.train = True
     d.set_kfold_indexes_for_fold(0)
-    idx, seq, meta, target = d[0]
-    fig, axes = plt.subplots(nrows=1, ncols=2)
-    fig.set_figheight(8)
-    fig.set_figwidth(12)
-    ax = plt.subplot(1, 2, 1)
+    idx, seq, meta, target = d[rel_idx]
+    d.train = False
+    pt, orig_seq, _, __ = d[rel_idx]
+    fig, axes = plt.subplots(nrows=1, ncols=3)
+    fig.set_figheight(10)
+    fig.set_figwidth(14)
     if seq.shape[0] == 1:
         shape_op = lambda x: x.reshape(224,224)
     else:
         # imshow needs things in (h,w,c) whereas torch likes (c,h,w)
         shape_op = lambda x: np.rollaxis(x, 0, 3)
 
-    ax.imshow(rescale_to_img(d.all_sequences[idx][1][:, :, 0].reshape(224, 224)))
+    ax = plt.subplot(1, 3, 1)
+    ax.imshow(shape_op(orig_seq))
     ax.set_title('original')
-    ax = plt.subplot(1, 2, 2)
+    ax = plt.subplot(1, 3, 2)
+    ax.imshow(shape_op(seq))
+    ax.set_title('bbox modified ')
+    ax = plt.subplot(1, 3, 3)
     for idx, (x1, y1, x2, y2) in enumerate(target['boxes']):
         cls = target['labels'][idx].item()
         r = Rectangle((x1,y1), x2-x1, y2-y1, fill=False, edgecolor='r', lw=.75)
