@@ -115,7 +115,7 @@ class BaseTraining(object):
         elif self.is_2x1d_dataset and '2x1d' not in self.args.base_network:
             self.args.base_network = self.args.base_network + '_2x1d'
 
-        if self.args.network in ['retinanet_2d', 'faster_rcnn_2d']:
+        if self.args.network in ['retinanet_2d', 'retinanet_2x1d', 'faster_rcnn_2d']:
             self.bbox = True
         else:
             self.bbox = False
@@ -1473,6 +1473,7 @@ network_map = {
     'protopnet': ProtoPNet1DModel,
     'protopnet_2d': ProtoPNet2DModel,
     'retinanet_2d': RetinaNetBBoxModel,
+    'retinanet_2x1d': RetinaNetBBoxModel,
     'faster_rcnn_2d': FasterRCNNBBoxModel,
 }
 

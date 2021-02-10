@@ -1796,13 +1796,15 @@ def bbox_viz(a):
     ax.imshow(shape_op(seq))
     ax.set_title('bbox modified ')
     ax = plt.subplot(1, 3, 3)
+    patho_map = {'0': 'Non-ARDS', '1': 'ARDS'}
     for idx, (x1, y1, x2, y2) in enumerate(target['boxes']):
         cls = target['labels'][idx].item()
         r = Rectangle((x1,y1), x2-x1, y2-y1, fill=False, edgecolor='r', lw=.75)
         ax.add_patch(r)
-        ax.annotate(str(cls), (x1+((x2-x1)/2), y1+((y2-y1)/2)), color='r', fontsize=16)
+        #ax.annotate(patho_map[str(cls)], (x1+((x2-x1)/2)-25, y1+((y2-y1)/2)), color='r', fontsize=16)
     ax.imshow(rescale_to_img(shape_op(seq.numpy())))
     ax.set_title('with annotations')
+    plt.savefig('bbox-img.png', dpi=300)
     plt.show()
 
 
