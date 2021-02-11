@@ -301,9 +301,23 @@ class RetinaNetMain(nn.Module):
         # detections_per_img saves n detections per cls.
         self.detector = retinanet.RetinaNet(backbone, 2, detections_per_img=8, score_thresh=0.25)
         self.detector.transform = CNNTransform(224, 256)
+        self.classifier = nn.Linear(128, 2)
+
+    def freeze_backbone(self):
+        for param in self.detector.backbone.parameters():
+            param.requires_grad = False
 
     def forward(self, x, target):
         return self.detector(x, target)
+
+    def backbone_classify(self, x):
+        """
+        Only perform classification with backbone and linear layer
+        """
+        x = self.detector.transform(x)[0].tensors
+        out = self.detector.backbone(x)['p7']
+        out = F.adaptive_avg_pool2d(out, (1, 1)).view(x.size(0), -1)
+        return self.classifier(out)
 
 
 class FasterRCNNMain(nn.Module):

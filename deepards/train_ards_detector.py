@@ -1364,22 +1364,35 @@ class DetectionModel(BaseTraining, PatientClassifierMixin):
                 for idx, dict in enumerate(target):
                     for k, v in dict.items():
                         target[idx][k] = self.cuda_wrapper(Variable(v))
-                out = model(inputs, target)
-                loss, out = self.calc_loss(out)
+
+                # XXX need to figure out what to do here.
+                if epoch_num % 2 == 1:
+                    tmp = torch.zeros(len(target), 2)
+                    for idx, t in enumerate(target):
+                        # this code will not work if you do >3 bboxes
+                        cls = 1 if t['labels'].sum() > 1 else 0
+                        tmp[idx, cls] = 1
+                    out = model.backbone_classify(inputs)
+                    loss = F.binary_cross_entropy_with_logits(out, self.cuda_wrapper(tmp))
+                else:
+                    out = model(inputs, target)
+                    loss, out = self.calc_loss(out)
                 loss.backward()
                 optimizer.step()
                 self.results.update_meter('loss_epoch_{}'.format(epoch_num), fold_num, loss)
-                self.results.update_meter('cls_epoch_{}'.format(epoch_num), fold_num, out['classification'].data)
-                self.results.update_meter('bbox_epoch_{}'.format(epoch_num), fold_num, out['bbox_regression'].data)
-                if not self.args.no_print_progress or self.args.print_progress:
-                    print("batch num: {}/{}, avg loss: {}, cls_loss: {} reg_loss: {}\r".format(
-                        batch_idx,
-                        total_batches,
-                        self.results.get_meter('loss_epoch_{}'.format(epoch_num), fold_num),
-                        self.results.get_meter('cls_epoch_{}'.format(epoch_num), fold_num),
-                        self.results.get_meter('bbox_epoch_{}'.format(epoch_num), fold_num),
-                        end=""
-                    ))
+                # XXX need to figure out what to do here.
+                #
+                #self.results.update_meter('cls_epoch_{}'.format(epoch_num), fold_num, out['classification'].data)
+                #self.results.update_meter('bbox_epoch_{}'.format(epoch_num), fold_num, out['bbox_regression'].data)
+#                if not self.args.no_print_progress or self.args.print_progress:
+#                    print("batch num: {}/{}, avg loss: {}, cls_loss: {} reg_loss: {}\r".format(
+#                        batch_idx,
+#                        total_batches,
+#                        self.results.get_meter('loss_epoch_{}'.format(epoch_num), fold_num),
+#                        self.results.get_meter('cls_epoch_{}'.format(epoch_num), fold_num),
+#                        self.results.get_meter('bbox_epoch_{}'.format(epoch_num), fold_num),
+#                        end=""
+#                    ))
                 if self.args.debug:
                     break
 
@@ -1394,13 +1407,18 @@ class DetectionModel(BaseTraining, PatientClassifierMixin):
             total_batches = len(test_loader)
             for batch_idx, (obs_idx, seq, _, target) in enumerate(test_loader):
                 inputs = [self.cuda_wrapper(s.float()) for s in seq]
-                outputs = model(inputs, None)
+                outputs = model.backbone_classify(inputs)
                 batch_preds = self._process_test_batch_results(outputs, target, fold_num)
                 self.pred_idx.extend(self.transform_obs_idx(obs_idx, outputs))
                 self.preds.extend(batch_preds)
         self.record_final_epoch_testing_results(fold_num, epoch_num, test_dataset)
 
     def _process_test_batch_results(self, outputs, target, fold_num):
+        batch_preds = outputs.argmax(dim=-1).cpu()
+        target = np.array([t.argmax() for t in target])
+        self.record_testing_results(target, batch_preds, fold_num)
+        return batch_preds.tolist()
+        # XXX
         batch_preds = []
         for idx, item in enumerate(outputs):
             other_pred = box_area(item['boxes'][item['labels'] == 0]).sum()
