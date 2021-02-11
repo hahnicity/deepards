@@ -1358,43 +1358,48 @@ class DetectionModel(BaseTraining, PatientClassifierMixin):
             model.train()
             model.detector.training = True
             total_batches = len(train_loader)
-            for batch_idx, (obs_idx, seq, _, target) in enumerate(train_loader):
+            for batch_idx, (obs_idx, seq, _, bbox_target) in enumerate(train_loader):
                 model.zero_grad()
                 inputs = [self.cuda_wrapper(Variable(s.float())) for s in seq]
-                for idx, dict in enumerate(target):
-                    for k, v in dict.items():
-                        target[idx][k] = self.cuda_wrapper(Variable(v))
-
-                # XXX need to figure out what to do here.
-                if epoch_num % 2 == 1:
-                    tmp = torch.zeros(len(target), 2)
-                    for idx, t in enumerate(target):
-                        # this code will not work if you do >3 bboxes
-                        cls = 1 if t['labels'].sum() > 1 else 0
-                        tmp[idx, cls] = 1
+                if epoch_num > self.args.bbox_train_epochs:
+                    label_target = self.get_label_target(bbox_target)
                     out = model.backbone_classify(inputs)
-                    loss = F.binary_cross_entropy_with_logits(out, self.cuda_wrapper(tmp))
+                    out = {
+                        'classification': F.binary_cross_entropy_with_logits(out, label_target),
+                        'bbox_regression': torch.tensor(0, requires_grad=False),
+                    }
                 else:
-                    out = model(inputs, target)
-                    loss, out = self.calc_loss(out)
+                    for idx, dict in enumerate(bbox_target):
+                        for k, v in dict.items():
+                            bbox_target[idx][k] = self.cuda_wrapper(Variable(v))
+
+                    out = model(inputs, bbox_target)
+
+                loss, out = self.calc_loss(out)
                 loss.backward()
                 optimizer.step()
                 self.results.update_meter('loss_epoch_{}'.format(epoch_num), fold_num, loss)
-                # XXX need to figure out what to do here.
-                #
-                #self.results.update_meter('cls_epoch_{}'.format(epoch_num), fold_num, out['classification'].data)
-                #self.results.update_meter('bbox_epoch_{}'.format(epoch_num), fold_num, out['bbox_regression'].data)
-#                if not self.args.no_print_progress or self.args.print_progress:
-#                    print("batch num: {}/{}, avg loss: {}, cls_loss: {} reg_loss: {}\r".format(
-#                        batch_idx,
-#                        total_batches,
-#                        self.results.get_meter('loss_epoch_{}'.format(epoch_num), fold_num),
-#                        self.results.get_meter('cls_epoch_{}'.format(epoch_num), fold_num),
-#                        self.results.get_meter('bbox_epoch_{}'.format(epoch_num), fold_num),
-#                        end=""
-#                    ))
+                self.results.update_meter('cls_epoch_{}'.format(epoch_num), fold_num, out['classification'].data)
+                self.results.update_meter('bbox_epoch_{}'.format(epoch_num), fold_num, out['bbox_regression'].data)
+                if not self.args.no_print_progress or self.args.print_progress:
+                    print("batch num: {}/{}, avg loss: {}, cls_loss: {} reg_loss: {}\r".format(
+                        batch_idx,
+                        total_batches,
+                        self.results.get_meter('loss_epoch_{}'.format(epoch_num), fold_num),
+                        self.results.get_meter('cls_epoch_{}'.format(epoch_num), fold_num),
+                        self.results.get_meter('bbox_epoch_{}'.format(epoch_num), fold_num),
+                        end=""
+                    ))
                 if self.args.debug:
                     break
+
+    def get_label_target(self, bbox_target):
+        label_target = torch.zeros(len(bbox_target), 2)
+        for idx, t in enumerate(bbox_target):
+            # this code will not work if you do >3 bboxes
+            cls = 1 if t['labels'].sum() > 1 else 0
+            label_target[idx, cls] = 1
+        return self.cuda_wrapper(label_target)
 
     def run_test_epoch(self, epoch_num, model, test_dataset, test_loader, fold_num):
         print('test instances: {}'.format(len(test_loader)))
@@ -1407,8 +1412,12 @@ class DetectionModel(BaseTraining, PatientClassifierMixin):
             total_batches = len(test_loader)
             for batch_idx, (obs_idx, seq, _, target) in enumerate(test_loader):
                 inputs = [self.cuda_wrapper(s.float()) for s in seq]
-                outputs = model.backbone_classify(inputs)
-                batch_preds = self._process_test_batch_results(outputs, target, fold_num)
+                if epoch_num > self.args.bbox_train_epochs:
+                    outputs = model.backbone_classify(inputs)
+                    batch_preds = self._process_test_batch_results(outputs, target, fold_num)
+                else:
+                    outputs = model(inputs, None)
+                    batch_preds = self._process_bbox_test_batch_results(outputs, target, fold_num)
                 self.pred_idx.extend(self.transform_obs_idx(obs_idx, outputs))
                 self.preds.extend(batch_preds)
         self.record_final_epoch_testing_results(fold_num, epoch_num, test_dataset)
@@ -1418,7 +1427,8 @@ class DetectionModel(BaseTraining, PatientClassifierMixin):
         target = np.array([t.argmax() for t in target])
         self.record_testing_results(target, batch_preds, fold_num)
         return batch_preds.tolist()
-        # XXX
+
+    def _process_bbox_test_batch_results(self, outputs, target, fold_num):
         batch_preds = []
         for idx, item in enumerate(outputs):
             other_pred = box_area(item['boxes'][item['labels'] == 0]).sum()
@@ -1446,20 +1456,6 @@ class RetinaNetBBoxModel(DetectionModel):
 
     def get_network(self, base_network):
         return RetinaNetMain(base_network)
-
-
-class FasterRCNNBBoxModel(DetectionModel):
-    def __init__(self, args):
-        super().__init__(args)
-
-    def calc_loss(self, output):
-        loss = sum(output.values())
-        output['classification'] = output['loss_classifier']
-        output['bbox_regression'] = output['loss_rpn_box_reg']
-        return loss, output
-
-    def get_network(self, base_network):
-        return FasterRCNNMain(base_network)
 
 
 # Is putting a global in code like this a great idea? probably not, but saves some hassle
@@ -1492,7 +1488,6 @@ network_map = {
     'protopnet_2d': ProtoPNet2DModel,
     'retinanet_2d': RetinaNetBBoxModel,
     'retinanet_2x1d': RetinaNetBBoxModel,
-    'faster_rcnn_2d': FasterRCNNBBoxModel,
 }
 
 
@@ -1623,6 +1618,7 @@ def build_parser():
     true_false_flag('--with-fft', 'add FFT transforms to a 2d dataset')
     true_false_flag('--only-fft', 'only use FFT when using a 2d dataset. if you use this with --with-fft then --with-fft will take precedence and you will have a 3 chan input')
     parser.add_argument('-bks', '--block-kernel-size', type=int, help='kernel size of the main dense block convolution')
+    parser.add_argument('--bbox-train-epochs', type=int)
     return parser
 
 
