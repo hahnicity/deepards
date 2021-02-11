@@ -100,7 +100,7 @@ def do_fold_graphing(start_times, only_aggregate):
     for df in df_patient_results_list:
         df_stats = computeMetricsFromPatientResults(df, df_stats)
 
-    for metric in ['AUC', 'Accuracy', 'sensitivity', 'specificity']:
+    for metric in ['Accuracy', 'f1', 'sensitivity', 'specificity', 'AUC']:
         if not only_aggregate:
             _do_fold_graphing(df_stats, metric)
         else:

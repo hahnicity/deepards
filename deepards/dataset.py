@@ -1492,7 +1492,7 @@ class ImgARDSDataset(ARDSRawDataset):
         # to test on a whole img then it needs to be modified. Possible that we
         # can save items in two competing datasets. But for now lets just focus
         # on the simple bbox problem and then we can work on other items
-        if self.bbox:
+        if self.bbox and self.train:
             self.make_bbox_dataset()
 
     def _append_to_mat(self, mat, new_data, seq_hours, new_seq_hours):
@@ -1574,26 +1574,36 @@ class ImgARDSDataset(ARDSRawDataset):
         }
 
     def make_bbox_dataset(self):
-        kfold_indices = {
+        train_kfold_idxs = {
             kfold_num: self.get_kfold_indexes_for_fold(kfold_num)
             for kfold_num in range(self.total_kfolds)
         }
+        test_kfold_idxs = dict()
+        # have to perform additional processing on this to get the true kfold
+        # indices. the current kfold indices that we have are actually train
+        # indices for each kfold.
+        for i in range(5):
+            test_kfold_idxs[i] = train_kfold_idxs[(i+1)%4].difference(train_kfold_idxs[i]).copy()
+        # now can perform reverse indexing
         reverse_indices = {
-            i: kfold_num for kfold_num, idxs in kfold_indices.items() for i in idxs
+            i: kfold_num for kfold_num, idxs in test_kfold_idxs.items() for i in idxs
         }
         gt = self._get_all_sequence_ground_truth()
         last_pt = None
+        # wait reverse indices isnt perfect because an index can be in multiple
+        # folds. So its not like theres really a perfect 1-1 correlation here
+        #
         for idx, (pt, data, target, seq_hours) in enumerate(self.all_sequences):
             # If I use data from another patient then I have to be sure they're not
             # in cross-over kfolds
             int_target = target.argmax()
             if last_pt != pt:
                 pt_fold = reverse_indices[idx]
-                fold_idxs = set(kfold_indices[pt_fold])
+                fold_idxs = set(test_kfold_idxs[pt_fold])
                 pt_idxs = gt[gt.patient == pt].index
                 non_pt_fold_idxs = fold_idxs.difference(pt_idxs)
                 mask = gt.loc[non_pt_fold_idxs, 'y'] != int_target
-                avail_idxs = mask[mask==True].index
+                avail_idxs = mask[mask].index
             new_data = data.copy()
             # randomly choose sequence and then choose n rows that is 1/4-1/3 of 224
             rand_seq_idx = np.random.choice(avail_idxs)
@@ -1671,8 +1681,6 @@ class ImgARDSDataset(ARDSRawDataset):
         seq = self.all_sequences[index]
         if len(seq) == 4:
             _, data, target, seq_hours = seq
-        elif len(seq) == 6 and not self.train:
-            _, data, bbox_data, bbox_target, target, seq_hours = seq
         elif len(seq) == 6:
             _, orig_data, data, target, one_class_target, seq_hours = seq
         meta = np.nan
@@ -1773,13 +1781,16 @@ def non_bbox_viz(a):
 def bbox_viz(a):
     from matplotlib import pyplot as plt
     from matplotlib.patches import Rectangle
-    rel_idx = 0
+    a.train = True
     d = ImgARDSDataset(a, [], add_fft=False, fft_only=False, bbox=True)
+    rel_idx = 0
     d.train = True
     d.set_kfold_indexes_for_fold(0)
+    abs_idx = d.kfold_indexes[rel_idx]
+
     idx, seq, meta, target = d[rel_idx]
     d.train = False
-    pt, orig_seq, _, __ = d[rel_idx]
+    pt, orig_seq, _, __, ___, ____ = d.all_sequences[abs_idx]
     fig, axes = plt.subplots(nrows=1, ncols=3)
     fig.set_figheight(10)
     fig.set_figwidth(14)
