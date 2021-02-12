@@ -1365,7 +1365,14 @@ class DetectionModel(BaseTraining, PatientClassifierMixin):
                 for idx, dict in enumerate(bbox_target):
                     for k, v in dict.items():
                         bbox_target[idx][k] = self.cuda_wrapper(Variable(v))
-                bbox_loss, out = model.multitarget_classify(inputs, bbox_target)
+                if epoch_num > self.args.multitask_epochs:
+                    out = model.backbone_classify(inputs)
+                    bbox_loss = {
+                        'classification': torch.tensor(0, requires_grad=False),
+                        'bbox_regression': torch.tensor(0, requires_grad=False),
+                    }
+                else:
+                    bbox_loss, out = model.multitarget_classify(inputs, bbox_target)
                 loss = self.calc_loss(bbox_loss, out, label_target)
                 loss.backward()
                 optimizer.step()
@@ -1403,12 +1410,8 @@ class DetectionModel(BaseTraining, PatientClassifierMixin):
             total_batches = len(test_loader)
             for batch_idx, (obs_idx, seq, _, target) in enumerate(test_loader):
                 inputs = [self.cuda_wrapper(s.float()) for s in seq]
-                if epoch_num > self.args.bbox_train_epochs:
-                    outputs = model.backbone_classify(inputs)
-                    batch_preds = self._process_test_batch_results(outputs, target, fold_num)
-                else:
-                    outputs = model(inputs, None)
-                    batch_preds = self._process_bbox_test_batch_results(outputs, target, fold_num)
+                outputs = model.backbone_classify(inputs)
+                batch_preds = self._process_test_batch_results(outputs, target, fold_num)
                 self.pred_idx.extend(self.transform_obs_idx(obs_idx, outputs))
                 self.preds.extend(batch_preds)
         self.record_final_epoch_testing_results(fold_num, epoch_num, test_dataset)
@@ -1609,6 +1612,7 @@ def build_parser():
     true_false_flag('--with-fft', 'add FFT transforms to a 2d dataset')
     true_false_flag('--only-fft', 'only use FFT when using a 2d dataset. if you use this with --with-fft then --with-fft will take precedence and you will have a 3 chan input')
     parser.add_argument('-bks', '--block-kernel-size', type=int, help='kernel size of the main dense block convolution')
+    parser.add_argument('--multitask-epochs', type=int)
     return parser
 
 

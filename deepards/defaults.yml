@@ -71,4 +71,4 @@ undersample_factor: -1
 undersample_std_factor: 0.2
 two_dim_transforms: []
 block_kernel_size: 3
-bbox_train_epochs: 15
+multitask_epochs: 15
