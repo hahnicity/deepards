@@ -11,3 +11,4 @@ network: retinanet_2d
 train_from_pickle: /fastdata/deepards/unpadded_centered_sequences-nb20-kfold.pkl
 n_sub_batches: 20
 data_path: /fastdata/ardsdetection
+epochs: 20
