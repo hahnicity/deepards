@@ -1,8 +1,8 @@
 """
-deepards.models.retinanet
+deepards.models.detection
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Is an adaptation of retinanet for our purposes
+Is all base transform model code for deepards.
 
 All transform code has been lifted from torchvision.models.detection.transform and
 modified for our purposes
@@ -13,13 +13,15 @@ import torch
 from torch import nn, Tensor
 from torch.nn import functional as F
 import torchvision
-from torchvision.models.detection import backbone_utils, retinanet
+from torchvision.models.detection import backbone_utils
 from torchvision.models.detection.anchor_utils import AnchorGenerator
 from torchvision.models.detection.faster_rcnn import FasterRCNN, resnet_fpn_backbone
 from torchvision.models.detection.image_list import ImageList
 from torchvision.models.detection.roi_heads import paste_masks_in_image
 from torchvision.ops.feature_pyramid_network import LastLevelP6P7
 from typing import List, Tuple, Dict, Optional
+
+from deepards.models import retinanet
 
 
 @torch.jit.unused
@@ -308,7 +310,12 @@ class RetinaNetMain(nn.Module):
             param.requires_grad = False
 
     def forward(self, x, target):
-        return self.detector(x, target)
+        return self.detector(x, target)[1]
+
+    def multitarget_classify(self, x, bbox_target):
+        features, detection_loss = self.detector(x, bbox_target)
+        out = F.adaptive_avg_pool2d(features[-1], (1, 1)).view(features[-1].size(0), -1)
+        return detection_loss, self.classifier(out)
 
     def backbone_classify(self, x):
         """

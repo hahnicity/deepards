@@ -1361,26 +1361,17 @@ class DetectionModel(BaseTraining, PatientClassifierMixin):
             for batch_idx, (obs_idx, seq, _, bbox_target) in enumerate(train_loader):
                 model.zero_grad()
                 inputs = [self.cuda_wrapper(Variable(s.float())) for s in seq]
-                if epoch_num > self.args.bbox_train_epochs:
-                    label_target = self.get_label_target(bbox_target)
-                    out = model.backbone_classify(inputs)
-                    out = {
-                        'classification': F.binary_cross_entropy_with_logits(out, label_target),
-                        'bbox_regression': torch.tensor(0, requires_grad=False),
-                    }
-                else:
-                    for idx, dict in enumerate(bbox_target):
-                        for k, v in dict.items():
-                            bbox_target[idx][k] = self.cuda_wrapper(Variable(v))
-
-                    out = model(inputs, bbox_target)
-
-                loss, out = self.calc_loss(out)
+                label_target = self.get_label_target(bbox_target)
+                for idx, dict in enumerate(bbox_target):
+                    for k, v in dict.items():
+                        bbox_target[idx][k] = self.cuda_wrapper(Variable(v))
+                bbox_loss, out = model.multitarget_classify(inputs, bbox_target)
+                loss = self.calc_loss(bbox_loss, out, label_target)
                 loss.backward()
                 optimizer.step()
                 self.results.update_meter('loss_epoch_{}'.format(epoch_num), fold_num, loss)
-                self.results.update_meter('cls_epoch_{}'.format(epoch_num), fold_num, out['classification'].data)
-                self.results.update_meter('bbox_epoch_{}'.format(epoch_num), fold_num, out['bbox_regression'].data)
+                self.results.update_meter('cls_epoch_{}'.format(epoch_num), fold_num, bbox_loss['classification'].data)
+                self.results.update_meter('bbox_epoch_{}'.format(epoch_num), fold_num, bbox_loss['bbox_regression'].data)
                 if not self.args.no_print_progress or self.args.print_progress:
                     print("batch num: {}/{}, avg loss: {}, cls_loss: {} reg_loss: {}\r".format(
                         batch_idx,
@@ -1450,9 +1441,9 @@ class RetinaNetBBoxModel(DetectionModel):
     def __init__(self, args):
         super().__init__(args)
 
-    def calc_loss(self, output):
-        loss = output['classification'] + output['bbox_regression']
-        return loss, output
+    def calc_loss(self, bbox_loss, output, label_target):
+        cls_loss = F.binary_cross_entropy_with_logits(output, label_target)
+        return bbox_loss['classification'] + bbox_loss['bbox_regression'] + cls_loss
 
     def get_network(self, base_network):
         return RetinaNetMain(base_network)
@@ -1618,7 +1609,6 @@ def build_parser():
     true_false_flag('--with-fft', 'add FFT transforms to a 2d dataset')
     true_false_flag('--only-fft', 'only use FFT when using a 2d dataset. if you use this with --with-fft then --with-fft will take precedence and you will have a 3 chan input')
     parser.add_argument('-bks', '--block-kernel-size', type=int, help='kernel size of the main dense block convolution')
-    parser.add_argument('--bbox-train-epochs', type=int)
     return parser
 
 
