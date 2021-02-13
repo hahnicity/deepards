@@ -266,7 +266,6 @@ class BaseTraining(object):
         train_dataset, test_dataset = self.get_base_datasets()
         collate_fn = None if not self.bbox else detection_collate_fn
         if self.args.kfolds is not None:
-            print('--- Run Fold {} ---'.format(fold_num+1))
             train_dataset.set_kfold_indexes_for_fold(fold_num)
             test_dataset.set_kfold_indexes_for_fold(fold_num)
         train_loader = DataLoader(
@@ -290,6 +289,7 @@ class BaseTraining(object):
     def train_and_test(self):
         saved_models_dir = saved_models_default_dir if not self.args.saved_models_dir else self.args.saved_models_dir
         for fold_num in range(self.n_kfolds):
+            print('--- Run Fold {} ---'.format(fold_num+1))
             if fold_num == 0:
                 train_dataset, train_loader, test_dataset, test_loader = self.get_splits(fold_num)
             if self.args.only_fold and fold_num != self.args.only_fold:
