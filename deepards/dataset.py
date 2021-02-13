@@ -1451,7 +1451,7 @@ class SiameseNetworkDataset(ARDSRawDataset):
 
 
 class ImgARDSDataset(ARDSRawDataset):
-    def __init__(self, raw_dataset_obj, extra_transforms, add_fft, fft_only, bbox):
+    def __init__(self, raw_dataset_obj, extra_transforms, add_fft, fft_only, fft_real_only, bbox, same_patho_mix):
         """
         Create an ARDS dataset composed of 2D images. Operates off an ARDSRawDataset
         object because it has done most of the hard work for us already.
@@ -1459,8 +1459,10 @@ class ImgARDSDataset(ARDSRawDataset):
         :param raw_dataset_obj: instance of ARDSRawDataset
         :param extra_transforms: list of 2d transforms you want to use
         :param add_fft: whether or not to add fft to the img
-        :param fft_only:
-        :param bbox:
+        :param fft_only: Only use FFT data
+        :param fft_real_only: only use real component of fft data
+        :param bbox: run with bounding box data mixing
+        :param same_patho_mix: mix training patient data with data from same patho
         """
         self.raw = raw_dataset_obj
         self.all_sequences = []
@@ -1468,6 +1470,7 @@ class ImgARDSDataset(ARDSRawDataset):
         self.fft_only = fft_only
         self.bbox = bbox
         self.total_kfolds = self.raw.total_kfolds
+        self.fft_real_only = fft_real_only
         try:
             self.oversample_minority = self.raw.oversample_minority
         except AttributeError:
@@ -1494,6 +1497,8 @@ class ImgARDSDataset(ARDSRawDataset):
         # on the simple bbox problem and then we can work on other items
         if self.bbox and self.train:
             self.make_bbox_dataset()
+        if same_patho_mix and self.train:
+            self.make_patho_mix_dataset()
 
     def _append_to_mat(self, mat, new_data, seq_hours, new_seq_hours):
         len_win, chans, seq_size = new_data.shape
@@ -1524,12 +1529,13 @@ class ImgARDSDataset(ARDSRawDataset):
             img.append(np.zeros((remaining_rows, seq_size)))
 
         img = np.expand_dims(np.concatenate(img), axis=-1)
+        if self.add_fft or self.fft_only:
+            trans = np.abs(np.fft.fftshift(np.fft.fft(img, axis=1)))
+            fft_chans = [trans.real, trans.imag] if not self.fft_real_only else [trans.real]
         if self.add_fft:
-            trans = np.fft.fft(img, axis=1)
-            img = np.concatenate([img, trans.real, trans.imag], axis=-1)
+            img = np.concatenate([img]+fft_chans, axis=-1)
         elif self.fft_only:
-            trans = np.fft.fft(img, axis=1)
-            img = np.concatenate([trans.real, trans.imag], axis=-1)
+            img = np.concatenate(fft_chans, axis=-1)
 
         self.all_sequences.append([pt, img, target, seq_hours])
 
@@ -1559,6 +1565,23 @@ class ImgARDSDataset(ARDSRawDataset):
         # allow us to easily standardize matrices of variable chan size
         return mu, std
 
+    def _get_test_and_reverse_kfold_idxs(self):
+        train_kfold_idxs = {
+            kfold_num: self.get_kfold_indexes_for_fold(kfold_num)
+            for kfold_num in range(self.total_kfolds)
+        }
+        test_kfold_idxs = dict()
+        # have to perform additional processing on this to get the true kfold
+        # indices. the current kfold indices that we have are actually train
+        # indices for each kfold.
+        for i in range(5):
+            test_kfold_idxs[i] = train_kfold_idxs[(i+1)%4].difference(train_kfold_idxs[i])
+        # now can perform reverse indexing
+        reverse_indices = {
+            i: kfold_num for kfold_num, idxs in test_kfold_idxs.items() for i in idxs
+        }
+        return test_kfold_idxs, reverse_indices
+
     def derive_scaling_factors(self):
         if self.total_kfolds is not None:
             indices = {
@@ -1574,25 +1597,10 @@ class ImgARDSDataset(ARDSRawDataset):
         }
 
     def make_bbox_dataset(self):
-        train_kfold_idxs = {
-            kfold_num: self.get_kfold_indexes_for_fold(kfold_num)
-            for kfold_num in range(self.total_kfolds)
-        }
-        test_kfold_idxs = dict()
-        # have to perform additional processing on this to get the true kfold
-        # indices. the current kfold indices that we have are actually train
-        # indices for each kfold.
-        for i in range(5):
-            test_kfold_idxs[i] = train_kfold_idxs[(i+1)%4].difference(train_kfold_idxs[i]).copy()
-        # now can perform reverse indexing
-        reverse_indices = {
-            i: kfold_num for kfold_num, idxs in test_kfold_idxs.items() for i in idxs
-        }
         gt = self._get_all_sequence_ground_truth()
         last_pt = None
-        # wait reverse indices isnt perfect because an index can be in multiple
-        # folds. So its not like theres really a perfect 1-1 correlation here
-        #
+        test_kfold_idxs, reverse_indices = self._get_test_and_reverse_kfold_idxs()
+
         for idx, (pt, data, target, seq_hours) in enumerate(self.all_sequences):
             # If I use data from another patient then I have to be sure they're not
             # in cross-over kfolds
@@ -1668,6 +1676,72 @@ class ImgARDSDataset(ARDSRawDataset):
 
         self._finish_mat(pt, mat, last_target, sh)
 
+    def make_patho_mix_dataset(self):
+        gt = self._get_all_sequence_ground_truth()
+        last_pt = None
+        test_kfold_idxs, reverse_indices = self._get_test_and_reverse_kfold_idxs()
+        # want to further subdivide reverse indices into equally divisible chunks
+        # so that chunks can be mixed across dataset. We can just divide up chunks
+        # first and then we can just construct them afterwards
+
+        n_chunks = 8
+        mix_prob = 0.5
+        subdivided_pt_seqs = dict()
+        # set all potential chunks as available for use
+        potential_mix_chunks = set([
+            "{},{}".format(idx, c)
+            for idx, _ in enumerate(self.all_sequences)
+            for c in range(n_chunks)
+        ])
+        # so this makes determination of which seqs go where
+        for seq_idx, (pt, data, target, seq_hours) in enumerate(self.all_sequences):
+            subdivided_pt_seqs[seq_idx] = []
+            int_target = target.argmax()
+            if last_pt != pt:
+                pt_fold = reverse_indices[seq_idx]
+                fold_idxs = set(test_kfold_idxs[pt_fold])
+                pt_idxs = gt[gt.patient == pt].index
+                non_pt_fold_idxs = fold_idxs.difference(pt_idxs)
+                mask = gt.loc[non_pt_fold_idxs, 'y'] == int_target
+                avail_idxs = mask[mask].index
+                all_non_pt_chunks = set([
+                    '{},{}'.format(a_idx, c)
+                    for a_idx in avail_idxs for c in range(n_chunks)
+                ])
+                avail_chunks = potential_mix_chunks.intersection(all_non_pt_chunks)
+
+            # sequences are moved off the list of potentials if they are chosen and
+            # kept on list of potentials if they are replaced. this way we should
+            # have all data be used by end of algorithm
+            for c_idx in range(n_chunks):
+                prob = np.random.rand()
+                if prob > mix_prob:  # mix
+                    chosen = np.random.choice(list(avail_chunks), replace=False)
+                    avail_chunks = avail_chunks.difference([chosen])
+                    potential_mix_chunks = potential_mix_chunks.difference([chosen])
+                    subdivided_pt_seqs[seq_idx].append(chosen)
+                else:  # dont mix
+                    chunk_name = '{},{}'.format(seq_idx, c_idx)
+                    potential_mix_chunks = potential_mix_chunks.difference([chunk_name])
+                    subdivided_pt_seqs[seq_idx].append(chunk_name)
+
+            last_pt = pt
+
+        row_per_chunk = self.seq_len // n_chunks
+        # so this performs the sequence map
+        for seq_idx, (pt, data, target, seq_hours) in enumerate(self.all_sequences):
+            new_data = data.copy()
+            for c_idx in range(n_chunks):
+                cur_chunk = subdivided_pt_seqs[seq_idx][c_idx]
+                target_seq, target_c = map(lambda x: int(x), cur_chunk.split(','))
+                start_idx = c_idx * row_per_chunk
+                end_idx = ((c_idx+1) * row_per_chunk)-1
+                if target_seq != seq_idx:
+                    target_start = target_c * row_per_chunk
+                    target_end = ((target_c+1) * row_per_chunk)-1
+                    new_data[start_idx:end_idx+1] = self.all_sequences[target_seq][1][target_start:target_end+1]
+            self.all_sequences[seq_idx].insert(2, new_data)
+
     def set_kfold_indexes_for_fold(self, kfold_num):
         self.kfold_num = kfold_num
         self.kfold_indexes = self.get_kfold_indexes_for_fold(kfold_num)
@@ -1681,6 +1755,8 @@ class ImgARDSDataset(ARDSRawDataset):
         seq = self.all_sequences[index]
         if len(seq) == 4:
             _, data, target, seq_hours = seq
+        elif len(seq) == 5:
+            _, orig_data, data, target, seq_hours = seq
         elif len(seq) == 6:
             _, orig_data, data, target, one_class_target, seq_hours = seq
         meta = np.nan
@@ -1738,15 +1814,14 @@ def rescale_to_img(img):
         maxima = maxima.reshape(1, 1, chans).repeat(224, axis=0).repeat(224, axis=1)
         img = np.uint8(((img - minima) / maxima) * 255)
         if chans == 2:
-            img = np.dstack((img, np.ones((224,224,1))))
+            img = np.dstack((img, np.ones((224,224,1))*255))
         return img
 
 
 def non_bbox_viz(a):
     from matplotlib import pyplot as plt
-    d = ImgARDSDataset(a, [], add_fft=False, fft_only=True, bbox=False)
+    d = ImgARDSDataset(a, [], add_fft=False, fft_only=True, fft_real_only=True, bbox=False, same_patho_mix=False)
     d.set_kfold_indexes_for_fold(0)
-    kfold_idx = d.kfold_idx
     idx, seq, meta, target = d[0]
     #distort = transforms.RandomPerspective(distortion_scale=.1, p=1)
     #aff = transforms.RandomAffine(25)
@@ -1782,7 +1857,7 @@ def bbox_viz(a):
     from matplotlib import pyplot as plt
     from matplotlib.patches import Rectangle
     a.train = True
-    d = ImgARDSDataset(a, [], add_fft=False, fft_only=False, bbox=True)
+    d = ImgARDSDataset(a, [], add_fft=False, fft_only=False, fft_real_only=False, bbox=True, same_patho_mix=False)
     rel_idx = 0
     d.train = True
     d.set_kfold_indexes_for_fold(0)
@@ -1805,7 +1880,6 @@ def bbox_viz(a):
     ax.set_title('original')
     ax = plt.subplot(1, 3, 2)
     ax.imshow(shape_op(seq))
-    ax.set_title('bbox modified ')
     ax = plt.subplot(1, 3, 3)
     patho_map = {'0': 'Non-ARDS', '1': 'ARDS'}
     for idx, (x1, y1, x2, y2) in enumerate(target['boxes']):
@@ -1816,9 +1890,40 @@ def bbox_viz(a):
     ax.imshow(rescale_to_img(shape_op(seq.numpy())))
     ax.set_title('with annotations')
     plt.savefig('bbox-img.png', dpi=300)
+    ax.set_title('modified ')
+    plt.show()
+
+
+def row_mix_viz(a):
+    from matplotlib import pyplot as plt
+    a.train = True
+    d = ImgARDSDataset(a, [], add_fft=False, fft_only=False, fft_real_only=False, bbox=False, same_patho_mix=True)
+    rel_idx = 0
+    d.train = True
+    d.set_kfold_indexes_for_fold(0)
+    abs_idx = d.kfold_indexes[rel_idx]
+
+    idx, seq, meta, target = d[rel_idx]
+    d.train = False
+    pt, orig_seq, _, __, ___ = d.all_sequences[abs_idx]
+    fig, axes = plt.subplots(nrows=1, ncols=2)
+    fig.set_figheight(10)
+    fig.set_figwidth(14)
+    if seq.shape[0] == 1:
+        shape_op = lambda x: x.reshape(224,224)
+    else:
+        # imshow needs things in (h,w,c) whereas torch likes (c,h,w)
+        shape_op = lambda x: np.rollaxis(x, 0, 3)
+
+    ax = plt.subplot(1, 2, 1)
+    ax.imshow(shape_op(orig_seq))
+    ax.set_title('original')
+    ax = plt.subplot(1, 2, 2)
+    ax.imshow(shape_op(seq))
+    ax.set_title('bbox modified ')
     plt.show()
 
 
 if __name__ == '__main__':
     a = pd.read_pickle('/fastdata/deepards/unpadded_centered_sequences-nb20-kfold.pkl')
-    bbox_viz(a)
+    non_bbox_viz(a)

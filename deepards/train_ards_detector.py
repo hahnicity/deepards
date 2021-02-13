@@ -257,8 +257,8 @@ class BaseTraining(object):
             )
 
         if self.is_2d_dataset or self.is_2x1d_dataset:
-            train_dataset = ImgARDSDataset(train_dataset, self.args.two_dim_transforms, self.args.with_fft, self.args.only_fft, self.bbox)
-            test_dataset = ImgARDSDataset(test_dataset, self.args.two_dim_transforms, self.args.with_fft, self.args.only_fft, self.bbox)
+            train_dataset = ImgARDSDataset(train_dataset, self.args.two_dim_transforms, self.args.with_fft, self.args.only_fft, self.args.fft_real_only, self.bbox, self.args.row_mix)
+            test_dataset = ImgARDSDataset(test_dataset, self.args.two_dim_transforms, self.args.with_fft, self.args.only_fft, self.args.fft_real_only, self.bbox, self.args.row_mix)
 
         return train_dataset, test_dataset
 
@@ -1613,6 +1613,8 @@ def build_parser():
     true_false_flag('--only-fft', 'only use FFT when using a 2d dataset. if you use this with --with-fft then --with-fft will take precedence and you will have a 3 chan input')
     parser.add_argument('-bks', '--block-kernel-size', type=int, help='kernel size of the main dense block convolution')
     parser.add_argument('--multitask-epochs', type=int)
+    true_false_flag('--row-mix', 'mix row segments together from patients of the same pathophysiology')
+    true_false_flag('--fft-real-only', 'Only incorporate the real component of FFT')
     return parser
 
 
