@@ -188,14 +188,17 @@ class DenseNet(nn.Module):
         block_kernel_size: int = 3,
         with_fft: bool = False,
         only_fft: bool = False,
+        fft_real_only: bool = False,
     ) -> None:
 
         super(DenseNet, self).__init__()
 
+        fft_real_only_mod = 0 if not fft_real_only else -1
+        # First convolution
         if with_fft:
-            initial_chans = 3
+            initial_chans = 3 + fft_real_only_mod
         elif only_fft:
-            initial_chans = 2
+            initial_chans = 2 + fft_real_only_mod
         else:
             initial_chans = 1
         # First convolution

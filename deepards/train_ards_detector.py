@@ -350,7 +350,8 @@ class BaseTraining(object):
             base_network = base_network(
                 with_fft=self.args.with_fft,
                 block_kernel_size=self.args.block_kernel_size,
-                only_fft=self.args.only_fft
+                only_fft=self.args.only_fft,
+                fft_real_only=self.args.fft_real_only,
             )
 
         if self.args.freeze_base_network:
