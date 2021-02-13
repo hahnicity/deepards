@@ -4,6 +4,7 @@ import math
 import os
 from pathlib import Path
 import re
+import warnings
 
 from imblearn.over_sampling import RandomOverSampler
 import numpy as np
@@ -1530,8 +1531,8 @@ class ImgARDSDataset(ARDSRawDataset):
 
         img = np.expand_dims(np.concatenate(img), axis=-1)
         if self.add_fft or self.fft_only:
-            trans = np.abs(np.fft.fftshift(np.fft.fft(img, axis=1)))
-            fft_chans = [trans.real, trans.imag] if not self.fft_real_only else [trans.real]
+            trans = np.fft.fftshift(np.fft.fft(img, axis=1))
+            fft_chans = [np.abs(trans.real), np.abs(trans.imag)] if not self.fft_real_only else [np.abs(trans.real)]
         if self.add_fft:
             img = np.concatenate([img]+fft_chans, axis=-1)
         elif self.fft_only:
