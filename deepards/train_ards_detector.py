@@ -262,35 +262,36 @@ class BaseTraining(object):
 
         return train_dataset, test_dataset
 
-    def get_splits(self):
+    def get_splits(self, fold_num):
         train_dataset, test_dataset = self.get_base_datasets()
         collate_fn = None if not self.bbox else detection_collate_fn
-        for i in range(self.n_kfolds):
-            if self.args.kfolds is not None:
-                print('--- Run Fold {} ---'.format(i+1))
-                train_dataset.set_kfold_indexes_for_fold(i)
-                test_dataset.set_kfold_indexes_for_fold(i)
-            train_loader = DataLoader(
-                train_dataset,
-                batch_size=self.args.batch_size,
-                shuffle=True if not self.args.unshuffled else False,
-                pin_memory=self.args.cuda,
-                num_workers=self.args.loader_threads,
-                collate_fn=collate_fn,
-            )
-            test_loader = DataLoader(
-                test_dataset,
-                batch_size=self.args.batch_size,
-                shuffle=False,
-                pin_memory=self.args.cuda,
-                num_workers=self.args.loader_threads,
-                collate_fn=collate_fn,
-            )
-            yield train_dataset, train_loader, test_dataset, test_loader
+        if self.args.kfolds is not None:
+            print('--- Run Fold {} ---'.format(fold_num+1))
+            train_dataset.set_kfold_indexes_for_fold(fold_num)
+            test_dataset.set_kfold_indexes_for_fold(fold_num)
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=self.args.batch_size,
+            shuffle=True if not self.args.unshuffled else False,
+            pin_memory=self.args.cuda,
+            num_workers=self.args.loader_threads,
+            collate_fn=collate_fn,
+        )
+        test_loader = DataLoader(
+            test_dataset,
+            batch_size=self.args.batch_size,
+            shuffle=False,
+            pin_memory=self.args.cuda,
+            num_workers=self.args.loader_threads,
+            collate_fn=collate_fn,
+        )
+        return train_dataset, train_loader, test_dataset, test_loader
 
     def train_and_test(self):
         saved_models_dir = saved_models_default_dir if not self.args.saved_models_dir else self.args.saved_models_dir
-        for fold_num, (train_dataset, train_loader, test_dataset, test_loader) in enumerate(self.get_splits()):
+        for fold_num in range(self.n_kfolds):
+            if fold_num == 0:
+                train_dataset, train_loader, test_dataset, test_loader = self.get_splits(fold_num)
             if self.args.only_fold and fold_num != self.args.only_fold:
                 continue
             model = self.get_model()
@@ -314,6 +315,10 @@ class BaseTraining(object):
                     )
                     torch.save(model, model_path)
 
+                if self.args.reload_dataset_per_epoch:
+                    print('reload dataset')
+                    train_dataset, train_loader, test_dataset, test_loader = self.get_splits(fold_num)
+
             if self.args.save_model:
                 model_path = os.path.join(
                     saved_models_dir,
@@ -325,7 +330,6 @@ class BaseTraining(object):
                 torch.save(model, model_path)
 
         self.perform_post_modeling_actions()
-        # XXX will not work with kfold as it currently is
         self.perform_plotting(test_dataset)
         print('Run start time: {}'.format(self.start_time))
 
@@ -1616,6 +1620,7 @@ def build_parser():
     parser.add_argument('--multitask-epochs', type=int)
     true_false_flag('--row-mix', 'mix row segments together from patients of the same pathophysiology')
     true_false_flag('--fft-real-only', 'Only incorporate the real component of FFT')
+    true_false_flag('--reload-dataset-per-epoch', 'Reload your dataset for each epoch. Is useful in cases like the bounding box transforms and row mixing, because data is saved on loading rather than being performed ad-hoc.')
     return parser
 
 
