@@ -9,7 +9,7 @@ from imblearn.over_sampling import RandomOverSampler
 import numpy as np
 import pandas as pd
 from scipy.interpolate import CubicSpline
-from scipy.signal import resample
+from scipy.signal import butter, filtfilt, resample
 from sklearn.model_selection import StratifiedKFold
 import torch
 from torch.nn.utils.rnn import pack_padded_sequence
@@ -368,7 +368,8 @@ class ARDSRawDataset(Dataset):
                  truncate_e_lim=None,
                  undersample_factor=-1,
                  undersample_std_factor=0.2,
-                 oversample_all_factor=1.0):
+                 oversample_all_factor=1.0,
+                 butter_filter=None):
         """
         Dataset to generate sequences of data for ARDS Detection
         """
@@ -392,6 +393,12 @@ class ARDSRawDataset(Dataset):
         self.train_patient_fraction = train_patient_fraction
         self.transforms = transforms
         self.drop_if_under_r2 = drop_if_under_r2
+        if butter_filter is not None:
+            b, a = butter(1, butter_filter)
+            self.butter_filter = lambda x: filtfilt(b, a, x, axis=-1)
+        else:
+            self.butter_filter = None
+
         if drop_i_lim and drop_e_lim:
             raise Exception('You cannot drop both I and E lims!')
         if truncate_e_lim and drop_e_lim:
@@ -622,7 +629,7 @@ class ARDSRawDataset(Dataset):
         return test_dataset
 
     @classmethod
-    def from_pickle(cls, data_path, oversample_minority, train_patient_fraction, transforms, undersample_factor, undersample_std_factor, oversample_all_factor):
+    def from_pickle(cls, data_path, oversample_minority, train_patient_fraction, transforms, undersample_factor, undersample_std_factor, oversample_all_factor, butter_filter):
         dataset = pd.read_pickle(data_path)
         if not isinstance(dataset, ARDSRawDataset) and not isinstance(dataset, deepards.dataset.ARDSRawDataset):
             raise ValueError('The pickle file you have specified is out-of-date. Please re-process your dataset and save the new pickled dataset.')
@@ -637,6 +644,11 @@ class ARDSRawDataset(Dataset):
         dataset.undersample_factor = undersample_factor
         dataset.undersample_std_factor = undersample_std_factor
         dataset.oversample_all_factor = oversample_all_factor
+        if butter_filter is not None:
+            b, a = butter(1, butter_filter)
+            dataset.butter_filter = lambda x: filtfilt(b, a, x, axis=-1)
+        else:
+            dataset.butter_filter = None
         return dataset
 
     def set_kfold_indexes_for_fold(self, kfold_num):
@@ -1229,6 +1241,8 @@ class ARDSRawDataset(Dataset):
         else:
             data = (data - mu) / std
 
+        if self.butter_filter is not None:
+            data = self.butter_filter(data)
         # this will return absolute index of data, the data, metadata, and target
         # by absolute index we mean the indexing in self.all_sequences
         return index, data, meta, target
@@ -1451,7 +1465,7 @@ class SiameseNetworkDataset(ARDSRawDataset):
 
 
 class ImgARDSDataset(ARDSRawDataset):
-    def __init__(self, raw_dataset_obj, extra_transforms, add_fft, fft_only, bbox):
+    def __init__(self, raw_dataset_obj, extra_transforms, add_fft, fft_only, bbox, butter_filter=None):
         """
         Create an ARDS dataset composed of 2D images. Operates off an ARDSRawDataset
         object because it has done most of the hard work for us already.
@@ -1461,6 +1475,7 @@ class ImgARDSDataset(ARDSRawDataset):
         :param add_fft: whether or not to add fft to the img
         :param fft_only:
         :param bbox:
+        :param butter_filter:
         """
         self.raw = raw_dataset_obj
         self.all_sequences = []
@@ -1468,6 +1483,11 @@ class ImgARDSDataset(ARDSRawDataset):
         self.fft_only = fft_only
         self.bbox = bbox
         self.total_kfolds = self.raw.total_kfolds
+        if butter_filter is not None:
+            b, a = butter(1, butter_filter)
+            self.butter_filter = lambda x: filtfilt(b, a, x, axis=1)
+        else:
+            self.butter_filter = None
         try:
             self.oversample_minority = self.raw.oversample_minority
         except AttributeError:
@@ -1693,8 +1713,6 @@ class ImgARDSDataset(ARDSRawDataset):
                 'Scaling factors not found for dataset. You must derive them using '
                 'the `derive_scaling_factors` function.'
             )
-        data = (data - mu) / std
-
         # XXX fft logic must be incorporated into transforms too. This will be a
         # bit hard tho, because need to duplicate all ops on one chan into another
         # chan. And even then... your FFT op would probably be corrupted anyhow if
@@ -1702,12 +1720,15 @@ class ImgARDSDataset(ARDSRawDataset):
         # have to re-compute the fft in order to get a proper value. So there are
         # probably a number of transforms that I will have to fail on if FFT is
         # asked for.
-        #
-        # Alright. I'm not gonna do this.
+
+        data = (data - mu) / std
+        if self.butter_filter is not None:
+            data = self.butter_filter(data)
+
         if self.train:
-            data = self.train_transforms(data)
+            data = self.train_transforms(data.copy())
         else:
-            data = self.test_transforms(data)
+            data = self.test_transforms(data.copy())
 
         # this will return absolute index of data, the data, metadata, and target
         # by absolute index we mean the indexing in self.all_sequences
