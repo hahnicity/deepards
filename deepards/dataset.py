@@ -1898,7 +1898,7 @@ def bbox_viz(a):
 def row_mix_viz(a):
     from matplotlib import pyplot as plt
     a.train = True
-    d = ImgARDSDataset(a, [], add_fft=False, fft_only=False, fft_real_only=False, bbox=False, same_patho_mix=True)
+    d = ImgARDSDataset(a, [], add_fft=True, fft_only=False, fft_real_only=True, bbox=False, same_patho_mix=True)
     rel_idx = 0
     d.train = True
     d.set_kfold_indexes_for_fold(0)
@@ -1907,7 +1907,7 @@ def row_mix_viz(a):
     idx, seq, meta, target = d[rel_idx]
     d.train = False
     pt, orig_seq, _, __, ___ = d.all_sequences[abs_idx]
-    fig, axes = plt.subplots(nrows=1, ncols=2)
+    fig, axes = plt.subplots(nrows=1, ncols=4)
     fig.set_figheight(10)
     fig.set_figwidth(14)
     if seq.shape[0] == 1:
@@ -1916,15 +1916,21 @@ def row_mix_viz(a):
         # imshow needs things in (h,w,c) whereas torch likes (c,h,w)
         shape_op = lambda x: np.rollaxis(x, 0, 3)
 
-    ax = plt.subplot(1, 2, 1)
-    ax.imshow(shape_op(orig_seq))
-    ax.set_title('original')
-    ax = plt.subplot(1, 2, 2)
-    ax.imshow(shape_op(seq))
-    ax.set_title('bbox modified ')
+    ax = plt.subplot(1, 4, 1)
+    ax.imshow(orig_seq[:, :, 0])
+    ax.set_title('original vwd')
+    ax = plt.subplot(1, 4, 2)
+    ax.imshow(orig_seq[:, :, 1])
+    ax.set_title('original fft')
+    ax = plt.subplot(1, 4, 3)
+    ax.imshow(seq.numpy()[0])
+    ax.set_title('vwd')
+    ax = plt.subplot(1, 4, 4)
+    ax.imshow(seq.numpy()[1])
+    ax.set_title('fft')
     plt.show()
 
 
 if __name__ == '__main__':
     a = pd.read_pickle('/fastdata/deepards/unpadded_centered_sequences-nb20-kfold.pkl')
-    non_bbox_viz(a)
+    row_mix_viz(a)
