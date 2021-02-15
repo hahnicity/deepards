@@ -348,12 +348,14 @@ class BaseTraining(object):
             )
         elif 'unet' in self.args.base_network:
             base_network = base_network(1)
-        else:  # this is becoming our defacto densenet logic
+        elif self.is_2d_dataset or self.is_2x1d_dataset:  # this is becoming our defacto densenet logic
             base_network = base_network(
                 with_fft=self.args.with_fft,
                 block_kernel_size=self.args.block_kernel_size,
                 only_fft=self.args.only_fft
             )
+        else:
+            base_network = base_network()
 
         if self.args.freeze_base_network:
             for param in base_network.parameters():
