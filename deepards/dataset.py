@@ -369,7 +369,10 @@ class ARDSRawDataset(Dataset):
                  undersample_factor=-1,
                  undersample_std_factor=0.2,
                  oversample_all_factor=1.0,
-                 butter_filter=None):
+                 butter_filter=None,
+                 add_fft=False,
+                 only_fft=False,
+                 fft_real_only=False,):
         """
         Dataset to generate sequences of data for ARDS Detection
         """
@@ -393,6 +396,9 @@ class ARDSRawDataset(Dataset):
         self.train_patient_fraction = train_patient_fraction
         self.transforms = transforms
         self.drop_if_under_r2 = drop_if_under_r2
+        self.only_fft = only_fft
+        self.add_fft = add_fft
+        self.fft_real_only = fft_real_only
         if butter_filter is not None:
             b, a = butter(1, butter_filter)
             self.butter_filter = lambda x: filtfilt(b, a, x, axis=-1)
@@ -506,6 +512,7 @@ class ARDSRawDataset(Dataset):
             self.get_unpadded_sequences_dataset_with_bm_data(self._unpadded_centered_processing, self._pathophysiology_target)
         else:
             raise Exception('Unknown dataset type: {}'.format(dataset_type))
+        self._perform_fft()
         self.finalize_dataset_create(to_pickle, kfold_num)
 
     def finalize_dataset_create(self, to_pickle, kfold_num):
@@ -629,17 +636,23 @@ class ARDSRawDataset(Dataset):
         return test_dataset
 
     @classmethod
-    def from_pickle(cls, data_path, oversample_minority, train_patient_fraction, transforms, undersample_factor, undersample_std_factor, oversample_all_factor, butter_filter):
+    def from_pickle(cls,
+                    data_path,
+                    oversample_minority,
+                    train_patient_fraction,
+                    transforms,
+                    undersample_factor,
+                    undersample_std_factor,
+                    oversample_all_factor,
+                    butter_filter,
+                    add_fft,
+                    only_fft,
+                    fft_real_only,):
         dataset = pd.read_pickle(data_path)
         if not isinstance(dataset, ARDSRawDataset) and not isinstance(dataset, deepards.dataset.ARDSRawDataset):
             raise ValueError('The pickle file you have specified is out-of-date. Please re-process your dataset and save the new pickled dataset.')
         dataset.oversample_minority = oversample_minority
         dataset.train_patient_fraction = train_patient_fraction
-        # paranoia
-        try:
-            dataset.scaling_factors
-        except AttributeError:
-            dataset.derive_scaling_factors()
         dataset.transforms = transforms
         dataset.undersample_factor = undersample_factor
         dataset.undersample_std_factor = undersample_std_factor
@@ -649,6 +662,22 @@ class ARDSRawDataset(Dataset):
             dataset.butter_filter = lambda x: filtfilt(b, a, x, axis=-1)
         else:
             dataset.butter_filter = None
+        try:
+            dataset.add_fft
+        except AttributeError:
+            dataset.add_fft = False
+            dataset.only_fft = False
+        # xor
+        if (add_fft or only_fft) and not (dataset.add_fft or dataset.only_fft):
+            run_new_fft = True
+        else:
+            run_new_fft = False
+        dataset.add_fft = add_fft
+        dataset.only_fft = only_fft
+        dataset.fft_real_only = fft_real_only
+        if run_new_fft:
+            dataset._perform_fft()
+            dataset.derive_scaling_factors()
         return dataset
 
     def set_kfold_indexes_for_fold(self, kfold_num):
@@ -679,29 +708,26 @@ class ARDSRawDataset(Dataset):
         """
         Get mu and std for a specific set of indices
         """
-        std_sum = 0
-        mean_sum = 0
+        # XXX need to do is_padded.
+        # XXX need to test this
+        chans = self.all_sequences[0][1].shape[1]
+        std_sum = np.array([0] * chans, dtype=np.float)
+        mean_sum = np.array([0] * chans, dtype=np.float)
         obs_count = 0
 
         for idx in indices:
             obs = self.all_sequences[idx][1]
-            if is_padded:  # clear off 0's used for padding
-                obs = obs.ravel()
-                obs = obs[obs != 0]
-                obs_count += len(obs)
-            else:
-                obs_count += np.prod(obs.shape)
-            mean_sum += obs.sum()
+            obs_count += np.prod(obs.shape[0:2])
+            mean_sum += obs.sum(axis=-1).sum(axis=0)
         mu = mean_sum / obs_count
+        mu = mu.reshape(1, chans, 1).repeat(self.seq_len, axis=-1).repeat(self.n_sub_batches, axis=0)
 
         # calculate std
         for idx in indices:
             obs = self.all_sequences[idx][1]
-            if is_padded:  # clear off 0's used for padding
-                obs = obs.ravel()
-                obs = obs[obs != 0]
-            std_sum += ((obs - mu) ** 2).sum()
+            std_sum += ((obs - mu) ** 2).sum(axis=-1).sum(axis=0)
         std = np.sqrt(std_sum / obs_count)
+        std = std.reshape(1, chans, 1).repeat(self.seq_len, axis=-1).repeat(self.n_sub_batches, axis=0)
         return mu, std
 
     def _get_breath_by_breath_with_flow_time_features(self, process_breath_func, bm_features):
@@ -1203,6 +1229,18 @@ class ARDSRawDataset(Dataset):
 
         return False
 
+    def _perform_fft(self):
+        if not self.add_fft and not self.only_fft:
+            return
+        for idx, (pt, seq, _, __) in enumerate(self.all_sequences):
+            trans = np.fft.fft(seq, axis=-1)
+            fft_chans = [trans.real] if self.fft_real_only else [trans.real, trans.imag]
+            if self.add_fft:
+                new_seq = np.concatenate([seq]+fft_chans, axis=1)
+            elif self.fft_only:
+                new_seq = np.concatenate(fft_chans, axis=1)
+            self.all_sequences[idx][1] = new_seq
+
     def __getitem__(self, index):
         # This is a bit tricky because pytorch will just assume that indexing
         # goes from 0 ... __len__ - 1. But this is not the case for kfold. So you
@@ -1473,9 +1511,9 @@ class ImgARDSDataset(ARDSRawDataset):
         :param raw_dataset_obj: instance of ARDSRawDataset
         :param extra_transforms: list of 2d transforms you want to use
         :param add_fft: whether or not to add fft to the img
-        :param fft_only:
-        :param bbox:
-        :param butter_filter:
+        :param fft_only: True/False only return bounding box data
+        :param bbox: True/False create bounding box mixed dataset
+        :param butter_filter: A Hz bandwidth cutoff where 0 < Hz < 1
         """
         self.raw = raw_dataset_obj
         self.all_sequences = []
