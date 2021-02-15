@@ -219,17 +219,33 @@ class BaseTraining(object):
                 truncate_e_lim=self.args.truncate_e_lim,
                 undersample_factor=self.args.undersample_factor,
                 undersample_std_factor=self.args.undersample_std_factor,
+                butter_filter=self.args.butter_freq,
+                add_fft=self.args.with_fft,
+                only_fft=self.args.only_fft,
+                fft_real_only=self.args.fft_real_only,
             )
         else:
             train_dataset = ARDSRawDataset.from_pickle(
-                self.args.train_from_pickle, oversample_minority, self.args.train_pt_frac, transforms, self.args.undersample_factor, self.args.undersample_std_factor, self.args.oversample_all_factor
+                self.args.train_from_pickle,
+                oversample_minority,
+                self.args.train_pt_frac,
+                transforms,
+                self.args.undersample_factor,
+                self.args.undersample_std_factor,
+                self.args.oversample_all_factor,
+                butter_filter=self.args.butter_freq,
+                add_fft=self.args.with_fft,
+                only_fft=self.args.only_fft,
+                fft_real_only=self.args.fft_real_only,
             )
 
         self.n_sub_batches = train_dataset.n_sub_batches
         if not self.args.test_from_pickle and (self.args.kfolds is not None):
             test_dataset = ARDSRawDataset.make_test_dataset_if_kfold(train_dataset)
         elif self.args.test_from_pickle:
-            test_dataset = ARDSRawDataset.from_pickle(self.args.test_from_pickle, False, 1.0, None, -1, None, 1.0)
+            if self.args.with_fft or self.args.only_fft:
+                raise NotImplementedError('havent implemented test set only and FFT. would need to redo scaling factor derivation')
+            test_dataset = ARDSRawDataset.from_pickle(self.args.test_from_pickle, False, 1.0, None, -1, None, 1.0, butter_filter=self.args.butter_freq, add_fft=False, only_fft=False, fft_real_only=False)
         else:  # holdout, no pickle, no kfold
             # there is a really bizarre bug where my default arg is being overwritten by
             # the state of the train_dataset obj. I checked pointer references and there was
@@ -254,11 +270,15 @@ class BaseTraining(object):
                 truncate_e_lim=self.args.truncate_e_lim,
                 undersample_factor=-1,
                 oversample_minority=False,
+                butter_filter=self.args.butter_freq,
+                add_fft=self.args.with_fft,
+                only_fft=self.args.only_fft,
+                fft_real_only=self.args.fft_real_only,
             )
 
         if self.is_2d_dataset or self.is_2x1d_dataset:
-            train_dataset = ImgARDSDataset(train_dataset, self.args.two_dim_transforms, self.args.with_fft, self.args.only_fft, self.args.fft_real_only, self.bbox, self.args.row_mix)
-            test_dataset = ImgARDSDataset(test_dataset, self.args.two_dim_transforms, self.args.with_fft, self.args.only_fft, self.args.fft_real_only, self.bbox, self.args.row_mix)
+            train_dataset = ImgARDSDataset(train_dataset, self.args.two_dim_transforms, self.args.with_fft, self.args.only_fft, self.args.fft_real_only, self.bbox, self.args.row_mix, butter_filter=self.args.butter_freq)
+            test_dataset = ImgARDSDataset(test_dataset, self.args.two_dim_transforms, self.args.with_fft, self.args.only_fft, self.args.fft_real_only, self.bbox, self.args.row_mix, butter_filter=self.args.butter_freq)
 
         return train_dataset, test_dataset
 
@@ -355,10 +375,16 @@ class BaseTraining(object):
             )
         elif 'unet' in self.args.base_network:
             base_network = base_network(1)
-        else:  # this is becoming our defacto densenet logic
+        elif self.is_2d_dataset or self.is_2x1d_dataset:  # this is becoming our defacto densenet logic
             base_network = base_network(
                 with_fft=self.args.with_fft,
                 block_kernel_size=self.args.block_kernel_size,
+                only_fft=self.args.only_fft,
+                fft_real_only=self.args.fft_real_only,
+            )
+        else:
+            base_network = base_network(
+                with_fft=self.args.with_fft,
                 only_fft=self.args.only_fft,
                 fft_real_only=self.args.fft_real_only,
             )
@@ -1621,11 +1647,13 @@ def build_parser():
     parser.add_argument('-2dt', '--two-dim-transforms', nargs='*', choices=two_dim_transforms.keys())
     true_false_flag('--with-fft', 'add FFT transforms to a 2d dataset')
     true_false_flag('--only-fft', 'only use FFT when using a 2d dataset. if you use this with --with-fft then --with-fft will take precedence and you will have a 3 chan input')
+    true_false_flag('--fft-real-only', 'only use real valued component of the FFT')
     parser.add_argument('-bks', '--block-kernel-size', type=int, help='kernel size of the main dense block convolution')
     parser.add_argument('--multitask-epochs', type=int)
     true_false_flag('--row-mix', 'mix row segments together from patients of the same pathophysiology')
     true_false_flag('--fft-real-only', 'Only incorporate the real component of FFT')
     true_false_flag('--reload-dataset-per-epoch', 'Reload your dataset for each epoch. Is useful in cases like the bounding box transforms and row mixing, because data is saved on loading rather than being performed ad-hoc.')
+    parser.add_argument('--butter-freq', type=float)
     return parser
 
 
