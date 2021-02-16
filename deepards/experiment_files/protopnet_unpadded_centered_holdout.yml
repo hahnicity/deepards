@@ -3,7 +3,7 @@ clip_val: 0.01
 clip_grad: true
 dataset_type: unpadded_centered_sequences
 loader_threads: 0
-oversample: true
+oversample_minority: true
 #no_print_progress: true
 epochs: 20
 batch_size: 16

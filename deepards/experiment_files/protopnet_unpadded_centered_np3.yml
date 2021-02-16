@@ -2,7 +2,7 @@ cuda_no_dp: true
 clip_val: 0.01
 clip_grad: true
 dataset_type: unpadded_centered_with_bm
-oversample: true
+oversample_minority: true
 kfolds: 5
 no_print_progress: true
 epochs: 40
