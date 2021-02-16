@@ -424,7 +424,10 @@ class DeepARDSResults(object):
         for _, pt_rows in self.pred_to_hour_frame.groupby('patient'):
             pt = pt_rows.iloc[0].patient
             dtw_scores = dtw_lib.analyze_patient(pt, test_dataset, dtw_cache_dir, copy_pred_to_hour)
-            copy_pred_to_hour.loc[copy_pred_to_hour.patient==pt, 'dtw'] = dtw_scores.sort_index().dtw
+            try:
+                copy_pred_to_hour.loc[copy_pred_to_hour.patient==pt, 'dtw'] = dtw_scores.sort_index().dtw
+            except:
+                import IPython; IPython.embed()
 
         copy_pred_to_hour.to_pickle(os.path.join(dtw_cache_dir, 'dtw_{}_nb{}_{}_predictions.pkl'.format(
             test_dataset.dataset_type,
@@ -635,7 +638,8 @@ class DeepARDSResults(object):
         self.pred_to_hour_frame = predictions.to_frame(name='pred')
         for idx in self.pred_to_hour_frame.index.unique():
             hrs = pred_hour[idx]
-            if isinstance(self.pred_to_hour_frame.loc[idx, 'pred'], int):
+            pred = self.pred_to_hour_frame.loc[idx, 'pred']
+            if isinstance(pred, int) or isinstance(pred, np.int64):
                 self.pred_to_hour_frame.loc[idx, 'hour'] = hrs[0]
             else:
                 self.pred_to_hour_frame.loc[idx, 'hour'] = hrs

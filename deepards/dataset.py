@@ -1025,9 +1025,9 @@ class ARDSRawDataset(Dataset):
 
     def get_abs_bs_dt(self, breath):
         try:
-            breath_time = pd.to_datetime(breath['abs_bs'], format='%Y-%m-%d %H-%M-%S.%f')
+            breath_time = pd.to_datetime(breath['abs_bs'].decode(), format='%Y-%m-%d %H-%M-%S.%f')
         except:
-            breath_time = pd.to_datetime(breath['abs_bs'], format='%Y-%m-%d %H:%M:%S.%f')
+            breath_time = pd.to_datetime(breath['abs_bs'].decode(), format='%Y-%m-%d %H:%M:%S.%f')
         return breath_time
 
 
