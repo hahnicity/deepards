@@ -4,7 +4,6 @@ clip_grad: true
 dataset_type: unpadded_centered_sequences
 oversample_minority: true
 kfolds: 5
-no_print_progress: true
 epochs: 10
 batch_size: 16
 network: cnn_linear

@@ -1649,7 +1649,6 @@ def build_parser():
     parser.add_argument('-2dt', '--two-dim-transforms', nargs='*', choices=two_dim_transforms.keys())
     true_false_flag('--with-fft', 'add FFT transforms to a 2d dataset')
     true_false_flag('--only-fft', 'only use FFT when using a 2d dataset. if you use this with --with-fft then --with-fft will take precedence and you will have a 3 chan input')
-    true_false_flag('--fft-real-only', 'only use real valued component of the FFT')
     parser.add_argument('-bks', '--block-kernel-size', type=int, help='kernel size of the main dense block convolution')
     parser.add_argument('--multitask-epochs', type=int)
     true_false_flag('--row-mix', 'mix row segments together from patients of the same pathophysiology')
