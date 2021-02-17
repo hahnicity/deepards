@@ -8,7 +8,7 @@ no_print_progress: true
 epochs: 30
 batch_size: 16
 network: cnn_linear
-train_from_pickle: unpadded_downsampled_sequences-nb20-kfold.pkl
-#train_to_pickle: unpadded_downsampled_sequences-nb20-kfold.pkl
+train_from_pickle: /fastdata/deepards/unpadded_downsampled_sequences-nb20-kfold.pkl
+#train_to_pickle: /fastdata/deepards/unpadded_downsampled_sequences-nb20-kfold.pkl
 n_sub_batches: 20
-data_path: /home/grehm/workspace/datasets/ardsdetection/
+data_path: /fastdata/ardsdetection
