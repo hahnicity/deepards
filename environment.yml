@@ -5,7 +5,7 @@ dependencies:
   - ipython
   - numpy
   - pandas
-  - pytorch
+  - pytorch<1.2
   - torchvision
   - cudatoolkit=11.0
   - seaborn

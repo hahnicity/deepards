@@ -905,7 +905,7 @@ class ARDSRawDataset(Dataset):
     def _get_patient_id_from_file(self, filename):
         pt_id = filename.split('/')[-2]
         # sanity check to see if patient
-        match = re.search(r'(0\d{3}RPI\d{10})', filename)
+        match = re.search(r'(0\d{3}RPI(\d{10}|\d{2}))', filename)
         if match:
             return match.groups()[0]
         try:
@@ -1039,20 +1039,28 @@ class SiameseNetworkDataset(ARDSRawDataset):
                  dataset_type,
                  all_sequences=[],
                  to_pickle=None,
-                 train=True):
+                 train=True,
+                 on_the_fly=False):
 
         self.total_kfolds = None
         self.all_sequences = all_sequences
         self.n_sub_batches = n_sub_batches if all_sequences == [] else all_sequences[0][1].shape[0]
-        # XXX enable ability to split to main if wanted.
         data_subdir = 'prototrain' if train else 'prototest'
         raw_dir = os.path.join(data_path, 'experiment{}'.format(experiment_num), data_subdir, 'raw')
+        self.on_the_fly_dir = Path(raw_dir).parent.joinpath('torch')
         self.dataset_type = dataset_type
+        self.on_the_fly = on_the_fly
+        if on_the_fly and not self.on_the_fly_dir.exists():
+            self.on_the_fly_dir.mkdir()
 
         if not os.path.exists(raw_dir):
             raise Exception('No directory {} exists!'.format(raw_dir))
         self.raw_files = sorted(glob(os.path.join(raw_dir, '*/*.raw.npy')))
 
+        if self.on_the_fly and dataset_type in ['padded_breath_by_breath']:
+            raise NotImplementedError('{} not implemented with on the fly'.format(dataset_type))
+
+        self.scaling_factors = {None: [0, 0]}
         if self.all_sequences == [] and dataset_type == 'padded_breath_by_breath':
             self._process_padded_breath_by_breath_sequences(self._pad_breath)
         elif self.all_sequences == [] and dataset_type == 'unpadded_sequences':
@@ -1088,8 +1096,29 @@ class SiameseNetworkDataset(ARDSRawDataset):
         if to_pickle:
             pd.to_pickle(self, to_pickle)
 
+    def _iter_all_sequences(self):
+        if self.on_the_fly:
+            for pt, filename in self.all_sequences:
+                seq = pd.read_pickle(filename)
+                yield seq
+        else:
+            for pt, seq in self.all_sequences:
+                yield seq
+
+    def derive_scaling_factors(self):
+        # just need to calc std because mu is taken care of for us already
+        std_sum = 0
+        n_obs = 0
+        mu = self.scaling_factors[None][0]
+        for seq in self._iter_all_sequences():
+            std_sum += ((seq - mu)**2).sum(axis=0).sum(axis=-1)
+            n_obs += np.prod(seq.shape)
+        self.scaling_factors[None][1] = np.sqrt(std_sum/n_obs)
+
     def _process_padded_breath_by_breath_sequences(self, process_breath_func):
         last_patient = None
+        n_obs = 0
+        obs_sum = 0
 
         for fidx, filename in enumerate(self.raw_files):
             gen = read_processed_file(filename, filename.replace('.raw.npy', '.processed.npy'))
@@ -1115,10 +1144,15 @@ class SiameseNetworkDataset(ARDSRawDataset):
                         np.array(batch_arr).reshape((self.n_sub_batches, 1, self.seq_len))
                     ])
                     batch_arr = []
+                    n_obs += np.prod(self.all_sequences[-1].shape)
+                    obs_sum += self.all_sequences.sum(axis=0).sum(axis=-1)
                 last_vent_bn = breath['vent_bn']
+        self.scaling_factors[None][0] = obs_sum/n_obs
 
     def get_unpadded_sequences_dataset(self, processing_func, target_func):
         last_patient = None
+        n_obs = 0
+        obs_sum = 0
 
         for fidx, filename in enumerate(self.raw_files):
             gen = read_processed_file(filename, filename.replace('.raw.npy', '.processed.npy'))
@@ -1127,6 +1161,7 @@ class SiameseNetworkDataset(ARDSRawDataset):
                 last_patient = patient_id
                 batch_arr = []
                 breath_arr = []
+                batch_seq_hours = []
                 last_vent_bn = None
 
             for bidx, breath in enumerate(gen):
@@ -1136,22 +1171,41 @@ class SiameseNetworkDataset(ARDSRawDataset):
                 elif breath['vent_bn'] - 50 > last_vent_bn:
                     batch_arr = []
                     breath_arr = []
+                    batch_seq_hours = []
 
-                batch_arr, breath_arr = processing_func(breath['flow'], breath_arr, batch_arr)
-
+                batch_arr, breath_arr, batch_seq_hours = processing_func(breath['flow'], breath_arr, batch_arr, batch_seq_hours, np.nan)
                 if len(batch_arr) == self.n_sub_batches:
-                    self.all_sequences.append([
-                        patient_id,
-                        np.array(batch_arr).reshape((self.n_sub_batches, 1, self.seq_len))
-                    ])
+                    data = np.array(batch_arr).reshape((self.n_sub_batches, 1, self.seq_len))
+                    if not self.on_the_fly:
+                        self.all_sequences.append([patient_id, data])
+                    else:
+                        pt_dir = self.on_the_fly_dir.joinpath(patient_id)
+                        if not pt_dir.exists():
+                            pt_dir.mkdir()
+                        # maybe you can segment by dataset type but i just
+                        # dont see the point currently
+                        filename = str(pt_dir.joinpath('{}_{}.pkl'.format(fidx, bidx)).resolve())
+                        self.all_sequences.append([patient_id, filename])
+                        pd.to_pickle(data, filename)
                     batch_arr = []
+                    breath_arr = []
+                    batch_seq_hours = []
+                    n_obs += np.prod(data.shape)
+                    obs_sum += data.sum(axis=0).sum(axis=-1)
                 last_vent_bn = breath['vent_bn']
+        self.scaling_factors[None][0] = obs_sum/n_obs
 
     def __getitem__(self, index):
         # Here the trick is to save memory so you want to sequentially go down the
         # list of reads but then dynamically generate positive/negative examples on
         # the fly.
-        patient_id, seq = self.all_sequences[index]
+
+        item = self.all_sequences[index]
+        if self.on_the_fly:
+            patient_id, filename = item
+            seq = pd.read_pickle(filename)
+        else:
+            patient_id, seq = item
         pt_avail_pos = self.patient_mapping[patient_id]
         pt_available_neg = list(set(self.available_neg_idxs).difference(set(self.patient_mapping[patient_id])))
 
@@ -1167,7 +1221,6 @@ class SiameseNetworkDataset(ARDSRawDataset):
         neg_idx = np.random.choice(pt_available_neg)
         neg_compr = self.all_sequences[neg_idx][1]
         mu, std = self.scaling_factors[None]  # this dataset is not meant to be run with kfold
-        # XXX need to accomodate unpadded dataset types
         if 'padded_breath_by_breath' in self.dataset_type:
             seq_padding_mask = self._get_padding_mask(seq, mu)
             pos_compr_padding_mask = self._get_padding_mask(pos_compr, mu)
