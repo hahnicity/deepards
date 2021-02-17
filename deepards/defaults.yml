@@ -12,7 +12,7 @@
 data_path: /fastdata/ardsdetection
 experiment_num: 1
 cohort_file: cohort-description.csv
-network: cnn_lstm
+network: cnn_linear
 epochs: 10
 batch_size: 16
 base_network: densenet18

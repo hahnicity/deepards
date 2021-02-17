@@ -1,5 +1,6 @@
 import argparse
 from glob import glob
+from io import open
 import multiprocessing
 import os
 from warnings import warn
@@ -25,16 +26,16 @@ def collect_data(patient_id, data_dir, intermediate_results_dir, warn_file, no_i
                 file_mode = 'a'
             else:
                 file_mode = 'w'
-            with open(warn_file, file_mode) as f:
-                f.write(patient_id + '\n')
             warn('Could not find any data for patient: {}'.format(patient_id))
+            with open(warn_file, file_mode) as f:
+                f.write(u'{}\n'.format(patient_id))
             return
 
         print('Analyze breaths for patient {}'.format(patient_id))
         all_meta = []
         meta_idxs = [META_HEADER.index(col) for col in desired_cols]
         for file in files:
-            meta = get_file_breath_meta(open(file, 'rU'))[1:]
+            meta = get_file_breath_meta(open(file, errors='ignore', encoding='ascii'))[1:]
             desired_meta = [[row[idx] for idx in meta_idxs] + [patient_id, file] for row in meta]
             all_meta.extend(desired_meta)
 
@@ -106,14 +107,14 @@ def collect_data(patient_id, data_dir, intermediate_results_dir, warn_file, no_i
     for filename in df.filename.unique():
         vent_bns = df[df.filename == filename].ventBN.tolist()
         output_filename = os.path.join(raw_pt_dir, os.path.splitext(os.path.basename(filename))[0])
-        process_breath_file(open(filename), False, output_filename, spec_vent_bns=vent_bns)
+        process_breath_file(open(filename, errors='ignore', encoding='ascii'), False, output_filename, spec_vent_bns=vent_bns)
 
 
 def func_star(args):
     try:
         return collect_data(*args)
-    except:
-        print('patient {} has a fatal error in their dataset processing. Probably time related'.format(args[0]))
+    except Exception as err:
+        print(err)
 
 
 def run_parallel_func(func, run_args, threads, is_debug):
@@ -147,7 +148,7 @@ def main():
 
     print('Analyze all breaths for patients')
     patient_ids = glob(os.path.join(args.data_dir, '0*RPI*'))
-    patient_ids = [os.path.basename(id) for id in patient_ids if os.path.isdir(id)]
+    patient_ids = [os.path.basename(id) for id in patient_ids if os.path.isdir(id) and len(os.path.basename(id)) == 9]
 
     try:
         os.mkdir(args.output_dir)
