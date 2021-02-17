@@ -1,0 +1,34 @@
+name: deepardsdev2
+dependencies:
+  - python=2.7
+  - cython
+  - ipython
+  - numpy
+  - pandas
+  - pytorch<1.2
+  - torchvision
+  - cudatoolkit=11.0
+  - seaborn
+  - scipy>=1.1
+  - scikit-learn
+  - opencv
+  - pathlib
+  - shap
+  - matplotlib
+  - pyqt
+  - jupyter
+  - ipython
+  - statsmodels
+  - pyyaml
+  - pip
+  - pip:
+    - pathlib
+    - lime
+    - build/static/ucdpvanalysis-1.5.tar.gz
+    - git+git://github.com/lukauskas/dtwco.git#egg=dtwco
+    - imbalanced-learn
+    - mock
+    - prettytable
+channels:
+  - pytorch
+  - conda-forge
