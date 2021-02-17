@@ -82,6 +82,12 @@ class BaseTraining(object):
     def __init__(self, args):
         self.args = args
 
+
+        if 'oversample' in self.args.__dict__:
+            self.args.oversample_minority = self.args.oversample
+        else:
+            self.args.oversample_minority = self.args.oversample_minority
+
         if self.args.cuda:
             self.cuda_wrapper = lambda x: x.cuda()
         elif self.args.cuda_no_dp:
@@ -185,10 +191,6 @@ class BaseTraining(object):
     def get_base_datasets(self):
         kfold_num = None if self.args.kfolds is None else 0
         transforms = self.get_transforms()
-        if 'oversample' in self.args.__dict__:
-            oversample_minority = self.args.oversample
-        else:
-            oversample_minority = self.args.oversample_minority
 
         if not self.args.train_from_pickle:
             # NOTE: the datasets themselves are storing way too much state and causes us to
@@ -227,7 +229,7 @@ class BaseTraining(object):
         else:
             train_dataset = ARDSRawDataset.from_pickle(
                 self.args.train_from_pickle,
-                oversample_minority,
+                self.args.oversample_minority,
                 self.args.train_pt_frac,
                 transforms,
                 self.args.undersample_factor,
@@ -1647,7 +1649,6 @@ def build_parser():
     parser.add_argument('-2dt', '--two-dim-transforms', nargs='*', choices=two_dim_transforms.keys())
     true_false_flag('--with-fft', 'add FFT transforms to a 2d dataset')
     true_false_flag('--only-fft', 'only use FFT when using a 2d dataset. if you use this with --with-fft then --with-fft will take precedence and you will have a 3 chan input')
-    true_false_flag('--fft-real-only', 'only use real valued component of the FFT')
     parser.add_argument('-bks', '--block-kernel-size', type=int, help='kernel size of the main dense block convolution')
     parser.add_argument('--multitask-epochs', type=int)
     true_false_flag('--row-mix', 'mix row segments together from patients of the same pathophysiology')

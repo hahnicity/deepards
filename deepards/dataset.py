@@ -1281,7 +1281,7 @@ class ARDSRawDataset(Dataset):
             data = (data - mu) / std
 
         if self.butter_filter is not None:
-            data = self.butter_filter(data)
+            data = self.butter_filter(data).copy()
         # this will return absolute index of data, the data, metadata, and target
         # by absolute index we mean the indexing in self.all_sequences
         return index, data, meta, target
