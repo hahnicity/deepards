@@ -595,9 +595,6 @@ class ARDSRawDataset(Dataset):
         Get mu and std for a specific set of indices
         """
         # XXX need to do is_padded.
-        # XXX need to test this
-        #
-        # XXX theres some kinda bug with this.
         chans = self.all_sequences[0][1].shape[1]
         std_sum = np.array([0] * chans, dtype=np.float)
         mean_sum = np.array([0] * chans, dtype=np.float)
@@ -605,7 +602,7 @@ class ARDSRawDataset(Dataset):
 
         for idx in indices:
             obs = self.all_sequences[idx][1]
-            obs_count += np.prod(obs.shape)
+            obs_count += np.prod(obs.shape[0]*obs.shape[-1])
             mean_sum += obs.sum(axis=-1).sum(axis=0)
         mu = mean_sum / obs_count
         mu = mu.reshape(1, chans, 1).repeat(self.seq_len, axis=-1).repeat(self.n_sub_batches, axis=0)
@@ -693,6 +690,7 @@ class ARDSRawDataset(Dataset):
             dataset.butter_filter = lambda x: filtfilt(b, a, x, axis=-1)
         else:
             dataset.butter_filter = None
+        # backwards compat for older datasets
         try:
             dataset.add_fft
         except AttributeError:
@@ -1241,8 +1239,9 @@ class ARDSRawDataset(Dataset):
             trans = np.fft.fft(seq, axis=-1)
             fft_chans = [trans.real] if self.fft_real_only else [trans.real, trans.imag]
             if self.add_fft:
+                # axis 1 is the channel axis
                 new_seq = np.concatenate([seq]+fft_chans, axis=1)
-            elif self.fft_only:
+            elif self.only_fft:
                 new_seq = np.concatenate(fft_chans, axis=1)
             self.all_sequences[idx][1] = new_seq
 
@@ -1553,7 +1552,8 @@ class ImgARDSDataset(ARDSRawDataset):
         if self.dataset_type == 'padded_breath_by_breath':
             raise NotImplementedError('padded dataset types not implemented yet!')
         self.make_dataset_from_raw()
-        self.derive_scaling_factors()
+        if self.train:
+            self.derive_scaling_factors()
         # this will work for train segments of the dataset, however if we want
         # to test on a whole img then it needs to be modified. Possible that we
         # can save items in two competing datasets. But for now lets just focus

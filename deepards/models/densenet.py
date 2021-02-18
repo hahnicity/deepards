@@ -115,7 +115,6 @@ class DenseNet(nn.Module):
             initial_chans = 1
 
         # First convolution
-        initial_chans = 1 if not with_fft else 3
         self.features = nn.Sequential(OrderedDict([
             ('conv0', nn.Conv1d(initial_chans, num_init_features, kernel_size=7, stride=2,
                                 padding=3, bias=False)),
