@@ -4,8 +4,8 @@ Deep Learning for ARDS Detection with Ventilator Waveform Data
 ## Install
 Install using anaconda. First [install anaconda](https://docs.anaconda.com/anaconda/install/) on your machine then setup a new environment
 
-    conda env create -f environment-py2.yml
-    conda activate deepardsdev2
+    conda env create -f environment-py3.yml
+    conda activate deepardsdev3
 
 Finally install the deepards package
 

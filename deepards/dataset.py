@@ -329,7 +329,6 @@ class PatchWindowWarp(torch.nn.Module):
 
 two_dim_transforms = {
     'row_shuffle': RowShuffle,
-    'rand_erase': transforms.RandomErasing,
     'row_horiz_flip': RandomRowHorizontalFlip,
     'horiz_flip': transforms.RandomHorizontalFlip,
     'vert_flip': transforms.RandomVerticalFlip,
@@ -517,7 +516,8 @@ class ARDSRawDataset(Dataset):
         self.finalize_dataset_create(to_pickle, kfold_num)
 
     def finalize_dataset_create(self, to_pickle, kfold_num):
-        self.derive_scaling_factors()
+        if self.train:
+            self.derive_scaling_factors()
         if to_pickle:
             pd.to_pickle(self, to_pickle)
 
@@ -590,6 +590,34 @@ class ARDSRawDataset(Dataset):
         else:
             raise NotImplementedError("We haven't implemented train patient fractions for holdout yet")
 
+    def _get_scaling_factors_for_indices(self, indices, is_padded):
+        """
+        Get mu and std for a specific set of indices
+        """
+        # XXX need to do is_padded.
+        # XXX need to test this
+        #
+        # XXX theres some kinda bug with this.
+        chans = self.all_sequences[0][1].shape[1]
+        std_sum = np.array([0] * chans, dtype=np.float)
+        mean_sum = np.array([0] * chans, dtype=np.float)
+        obs_count = 0
+
+        for idx in indices:
+            obs = self.all_sequences[idx][1]
+            obs_count += np.prod(obs.shape)
+            mean_sum += obs.sum(axis=-1).sum(axis=0)
+        mu = mean_sum / obs_count
+        mu = mu.reshape(1, chans, 1).repeat(self.seq_len, axis=-1).repeat(self.n_sub_batches, axis=0)
+
+        # calculate std
+        for idx in indices:
+            obs = self.all_sequences[idx][1]
+            std_sum += ((obs - mu) ** 2).sum(axis=-1).sum(axis=0)
+        std = np.sqrt(std_sum / obs_count)
+        std = std.reshape(1, chans, 1).repeat(self.seq_len, axis=-1).repeat(self.n_sub_batches, axis=0)
+        return mu, std
+
     def derive_scaling_factors(self):
         if self.total_kfolds is not None:
             indices = {
@@ -634,6 +662,8 @@ class ARDSRawDataset(Dataset):
             drop_if_under_r2=0.0,
             undersample_factor=-1,
         )
+        # XXX will this kick in properly on FFT as well??
+        test_dataset.scaling_factors = train_dataset.scaling_factors
         return test_dataset
 
     @classmethod
@@ -704,32 +734,6 @@ class ARDSRawDataset(Dataset):
                 return ground_truth[ground_truth.patient.isin(train_pts)].index
             elif split_num == kfold_num and not self.train:
                 return ground_truth[ground_truth.patient.isin(test_pts)].index
-
-    def _get_scaling_factors_for_indices(self, indices, is_padded):
-        """
-        Get mu and std for a specific set of indices
-        """
-        # XXX need to do is_padded.
-        # XXX need to test this
-        chans = self.all_sequences[0][1].shape[1]
-        std_sum = np.array([0] * chans, dtype=np.float)
-        mean_sum = np.array([0] * chans, dtype=np.float)
-        obs_count = 0
-
-        for idx in indices:
-            obs = self.all_sequences[idx][1]
-            obs_count += np.prod(obs.shape[0:2])
-            mean_sum += obs.sum(axis=-1).sum(axis=0)
-        mu = mean_sum / obs_count
-        mu = mu.reshape(1, chans, 1).repeat(self.seq_len, axis=-1).repeat(self.n_sub_batches, axis=0)
-
-        # calculate std
-        for idx in indices:
-            obs = self.all_sequences[idx][1]
-            std_sum += ((obs - mu) ** 2).sum(axis=-1).sum(axis=0)
-        std = np.sqrt(std_sum / obs_count)
-        std = std.reshape(1, chans, 1).repeat(self.seq_len, axis=-1).repeat(self.n_sub_batches, axis=0)
-        return mu, std
 
     def _get_breath_by_breath_with_flow_time_features(self, process_breath_func, bm_features):
         last_patient = None

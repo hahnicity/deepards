@@ -5,15 +5,14 @@ dependencies:
   - ipython
   - numpy
   - pandas
-  - pytorch<1.2
+  - pytorch=1.0
   - torchvision
-  - cudatoolkit=11.0
+  - cudatoolkit
   - seaborn
   - scipy>=1.1
   - scikit-learn
   - opencv
   - pathlib
-  - shap
   - matplotlib
   - pyqt
   - jupyter
@@ -23,12 +22,9 @@ dependencies:
   - pip
   - pip:
     - pathlib
-    - lime
     - build/static/ucdpvanalysis-1.5.tar.gz
     - git+git://github.com/lukauskas/dtwco.git#egg=dtwco
-    - imbalanced-learn
+    - imbalanced-learn=0.4.3
     - mock
     - prettytable
-channels:
-  - pytorch
-  - conda-forge
+    - shap

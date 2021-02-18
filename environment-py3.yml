@@ -5,15 +5,14 @@ dependencies:
   - ipython
   - numpy
   - pandas
-  - pytorch
+  - pytorch=1.0
   - torchvision
-  - cudatoolkit=11.0
+  - cudatoolkit
   - seaborn
   - scipy>=1.1
   - scikit-learn
   - opencv
   - pathlib
-  - shap
   - matplotlib
   - pyqt
   - jupyter
@@ -29,6 +28,4 @@ dependencies:
     - imbalanced-learn
     - mock
     - prettytable
-channels:
-  - pytorch
-  - conda-forge
+    - shap

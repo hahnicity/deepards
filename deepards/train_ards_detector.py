@@ -12,13 +12,12 @@ from torch.autograd import Variable
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from torchvision.ops import box_area
 from torchvision.transforms import Compose
 
 from deepards.augmentation import IEWindowWarping, IEWindowWarpingIEProgrammable,  NaiveWindowWarping
 from deepards.config import Configuration
 from deepards.dataset import ARDSRawDataset, ImgARDSDataset, SiameseNetworkDataset, two_dim_transforms
-from deepards.loss import ConfidencePenaltyLoss, FocalLoss, VacillatingLoss
+from deepards.loss import ConfidencePenaltyLoss, VacillatingLoss
 from deepards.metrics import DeepARDSResults, Reporting
 from deepards.models.autoencoder_cnn import AutoencoderCNN
 from deepards.models.autoencoder_network import AutoencoderNetwork
@@ -27,7 +26,6 @@ from deepards.models.cnn_transformer import CNNTransformerNetwork
 from deepards.models.densenet import densenet18, densenet121, densenet161, densenet169, densenet201
 from deepards.models.densenet2d import densenet18 as densenet18_2d
 from deepards.models.densenet2x1d import densenet18 as densenet18_2x1d
-from deepards.models.detection import FasterRCNNMain, RetinaNetMain
 from deepards.models.lstm_only import DoubleLSTMNetwork, LSTMOnlyNetwork, LSTMOnlyWithPacking
 from deepards.models.protopnet1d.model import construct_PPNet
 from deepards.models.protopnet1d.ppnet_push import prototype_viz, push_prototypes
@@ -70,10 +68,6 @@ base_networks = {
     'vgg13': vgg13_bn,
 }
 saved_models_default_dir = os.path.join(os.path.dirname(__file__), 'saved_models')
-
-
-def detection_collate_fn(batch):
-    return tuple(zip(*batch))
 
 
 class BaseTraining(object):
@@ -291,7 +285,6 @@ class BaseTraining(object):
 
     def get_splits(self, fold_num):
         train_dataset, test_dataset = self.get_base_datasets()
-        collate_fn = None if not self.bbox else detection_collate_fn
         self.set_kfold_indexes(train_dataset, test_dataset, fold_num)
         train_loader = DataLoader(
             train_dataset,
@@ -299,7 +292,6 @@ class BaseTraining(object):
             shuffle=True if not self.args.unshuffled else False,
             pin_memory=self.args.cuda,
             num_workers=self.args.loader_threads,
-            collate_fn=collate_fn,
         )
         test_loader = DataLoader(
             test_dataset,
@@ -307,7 +299,6 @@ class BaseTraining(object):
             shuffle=False,
             pin_memory=self.args.cuda,
             num_workers=self.args.loader_threads,
-            collate_fn=collate_fn,
         )
         return train_dataset, train_loader, test_dataset, test_loader
 
@@ -510,8 +501,6 @@ class PatientClassifierMixin(object):
             self.criterion = torch.nn.BCEWithLogitsLoss()
         elif self.args.loss_func == 'confidence':
             self.criterion = ConfidencePenaltyLoss(self.args.conf_beta)
-        elif self.args.loss_func == 'focal':
-            self.criterion = FocalLoss(gamma=self.args.fl_gamma, alpha=self.args.fl_alpha)
 
     def perform_post_modeling_actions(self):
         self.results.aggregate_classification_results()
@@ -1388,108 +1377,6 @@ class ProtoPNet2DModel(ProtoPNetModel, BaseTraining, PatientClassifierMixin):
         self.pusher.push_orig(train_loader, model, epoch_num)
 
 
-class DetectionModel(BaseTraining, PatientClassifierMixin):
-    def run_train_epoch(self, model, train_loader, optimizer, epoch_num, fold_num):
-        print('train instances: {}'.format(len(train_loader)))
-        with torch.enable_grad():
-            print("\nrun epoch {}\n".format(epoch_num))
-            model.train()
-            model.detector.training = True
-            total_batches = len(train_loader)
-            for batch_idx, (obs_idx, seq, _, bbox_target) in enumerate(train_loader):
-                model.zero_grad()
-                inputs = [self.cuda_wrapper(Variable(s.float())) for s in seq]
-                label_target = self.get_label_target(bbox_target)
-                for idx, dict in enumerate(bbox_target):
-                    for k, v in dict.items():
-                        bbox_target[idx][k] = self.cuda_wrapper(Variable(v))
-                if epoch_num > self.args.multitask_epochs:
-                    out = model.backbone_classify(inputs)
-                    bbox_loss = {
-                        'classification': torch.tensor(0, requires_grad=False),
-                        'bbox_regression': torch.tensor(0, requires_grad=False),
-                    }
-                else:
-                    bbox_loss, out = model.multitarget_classify(inputs, bbox_target)
-                loss = self.calc_loss(bbox_loss, out, label_target)
-                loss.backward()
-                optimizer.step()
-                self.results.update_meter('loss_epoch_{}'.format(epoch_num), fold_num, loss)
-                self.results.update_meter('cls_epoch_{}'.format(epoch_num), fold_num, bbox_loss['classification'].data)
-                self.results.update_meter('bbox_epoch_{}'.format(epoch_num), fold_num, bbox_loss['bbox_regression'].data)
-                if not self.args.no_print_progress or self.args.print_progress:
-                    print("batch num: {}/{}, avg loss: {}, cls_loss: {} reg_loss: {}\r".format(
-                        batch_idx,
-                        total_batches,
-                        self.results.get_meter('loss_epoch_{}'.format(epoch_num), fold_num),
-                        self.results.get_meter('cls_epoch_{}'.format(epoch_num), fold_num),
-                        self.results.get_meter('bbox_epoch_{}'.format(epoch_num), fold_num),
-                        end=""
-                    ))
-                if self.args.debug:
-                    break
-
-    def get_label_target(self, bbox_target):
-        label_target = torch.zeros(len(bbox_target), 2)
-        for idx, t in enumerate(bbox_target):
-            # this code will not work if you do >3 bboxes
-            cls = 1 if t['labels'].sum() > 1 else 0
-            label_target[idx, cls] = 1
-        return self.cuda_wrapper(label_target)
-
-    def run_test_epoch(self, epoch_num, model, test_dataset, test_loader, fold_num):
-        print('test instances: {}'.format(len(test_loader)))
-        self.pred_idx = []
-        self.preds = []
-        with torch.no_grad():
-            print("\nrun test epoch {}\n".format(epoch_num))
-            model.eval()
-            model.detector.training = False
-            total_batches = len(test_loader)
-            for batch_idx, (obs_idx, seq, _, target) in enumerate(test_loader):
-                inputs = [self.cuda_wrapper(s.float()) for s in seq]
-                outputs = model.backbone_classify(inputs)
-                batch_preds = self._process_test_batch_results(outputs, target, fold_num)
-                self.pred_idx.extend(self.transform_obs_idx(obs_idx, outputs))
-                self.preds.extend(batch_preds)
-        self.record_final_epoch_testing_results(fold_num, epoch_num, test_dataset)
-
-    def _process_test_batch_results(self, outputs, target, fold_num):
-        batch_preds = outputs.argmax(dim=-1).cpu()
-        target = np.array([t.argmax() for t in target])
-        self.record_testing_results(target, batch_preds, fold_num)
-        return batch_preds.tolist()
-
-    def _process_bbox_test_batch_results(self, outputs, target, fold_num):
-        batch_preds = []
-        for idx, item in enumerate(outputs):
-            other_pred = box_area(item['boxes'][item['labels'] == 0]).sum()
-            ards_pred = box_area(item['boxes'][item['labels'] == 1]).sum()
-            if ards_pred >= other_pred:
-                batch_preds.append(1)
-            else:
-                batch_preds.append(0)
-        target = np.array([t.argmax() for t in target])
-        batch_preds = np.array(batch_preds)
-        self.record_testing_results(target, batch_preds, fold_num)
-        return batch_preds.tolist()
-
-    def transform_obs_idx(self, obs_idx, outputs):
-        return list(obs_idx)
-
-
-class RetinaNetBBoxModel(DetectionModel):
-    def __init__(self, args):
-        super().__init__(args)
-
-    def calc_loss(self, bbox_loss, output, label_target):
-        cls_loss = F.binary_cross_entropy_with_logits(output, label_target)
-        return bbox_loss['classification'] + bbox_loss['bbox_regression'] + cls_loss
-
-    def get_network(self, base_network):
-        return RetinaNetMain(base_network)
-
-
 # Is putting a global in code like this a great idea? probably not, but saves some hassle
 # on outside scripting
 network_map = {
@@ -1518,8 +1405,6 @@ network_map = {
     'cnn_linear_to_mean': CNNLinearToMeanModel,
     'protopnet': ProtoPNet1DModel,
     'protopnet_2d': ProtoPNet2DModel,
-    'retinanet_2d': RetinaNetBBoxModel,
-    'retinanet_2x1d': RetinaNetBBoxModel,
 }
 
 
@@ -1582,7 +1467,7 @@ def build_parser():
     parser.add_argument('-exp', '--experiment-name')
     parser.add_argument('--downsample-factor', type=float)
     parser.add_argument('-wd', '--weight-decay', type=float)
-    parser.add_argument('-loss', '--loss-func', choices=['bce', 'vacillating', 'confidence', 'focal'], help='This option only works for classification. Choose the loss function you want to use for classification purposes: BCE or vacillating loss.')
+    parser.add_argument('-loss', '--loss-func', choices=['bce', 'vacillating', 'confidence'], help='This option only works for classification. Choose the loss function you want to use for classification purposes: BCE or vacillating loss.')
     parser.add_argument('--valpha', type=float, default=float('Inf'), help='alpha value to use for vacillating loss. Lower alpha values mean vacillating loss will contribute less to overall loss of the system. Default value is inf')
     parser.add_argument('--conf-beta', type=float, default=1.0, help='Modifier to the intensity of the confidence penalty')
     parser.add_argument('--time-series-hidden-units', type=int)
@@ -1665,9 +1550,6 @@ def main():
     # convenience code
     if args.load_siamese:
         args.network = 'siamese_pretrained'
-
-    if args.fl_alpha > 1 or args.fl_alpha < 0:
-        raise Exception('Focal loss alpha must be between 0 and 1')
 
     if args.save_model_per_epoch and not args.save_model:
         raise Exception('Must specify a filename to save your model using --save-model')

@@ -68,21 +68,6 @@ class _DenseLayer(nn.Module):
                 return True
         return False
 
-    @torch.jit.unused  # noqa: T484
-    def call_checkpoint_bottleneck(self, input: List[Tensor]) -> Tensor:
-        def closure(*inputs):
-            return self.bn_function(inputs)
-
-        return cp.checkpoint(closure, *input)
-
-    @torch.jit._overload_method  # noqa: F811
-    def forward(self, input: List[Tensor]) -> Tensor:
-        pass
-
-    @torch.jit._overload_method  # noqa: F811
-    def forward(self, input: Tensor) -> Tensor:
-        pass
-
     # torchscript does not yet support *args, so we overload method
     # allowing it to take either a List[Tensor] or single Tensor
     def forward(self, input: Tensor) -> Tensor:  # noqa: F811
@@ -91,13 +76,7 @@ class _DenseLayer(nn.Module):
         else:
             prev_features = input
 
-        if self.memory_efficient and self.any_requires_grad(prev_features):
-            if torch.jit.is_scripting():
-                raise Exception("Memory Efficient not supported in JIT")
-
-            bottleneck_output = self.call_checkpoint_bottleneck(prev_features)
-        else:
-            bottleneck_output = self.bn_function(prev_features)
+        bottleneck_output = self.bn_function(prev_features)
 
         new_features = self.conv2(self.relu2(self.norm2(bottleneck_output)))
         if self.drop_rate > 0:

@@ -95,7 +95,7 @@ class DenseNet(nn.Module):
 
     def __init__(self, growth_rate=32, block_config=(6, 12, 24, 16),
                  num_init_features=64, bn_size=4, drop_rate=0.2, num_classes=1000,
-                 track_running_stats=False, with_fft=False, only_fft=False, fft_real_only=False):
+                 with_fft=False, only_fft=False, fft_real_only=False):
 
         super(DenseNet, self).__init__()
         self.kernel_sizes = []
@@ -104,6 +104,7 @@ class DenseNet(nn.Module):
         self.n_layers = 0
         self.inplanes = num_init_features
         self.drop_rate = drop_rate
+        track_running_stats = False
 
         fft_real_modifier = 0 if not fft_real_only else -1
         if with_fft:
