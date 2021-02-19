@@ -10,7 +10,6 @@ cohort_file: cohort-description.csv
 data_path: /fastdata/ardsdetection
 kfolds: 5
 base_network: densenet18
-cuda: true
 cuda_no_dp: true
 oversample: true
 clip_grad: true
