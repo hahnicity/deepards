@@ -9,7 +9,8 @@ class Configuration(object):
             self.conf = yaml.load(defaults)
 
         if parser_args.config_override:
-            with open(override_config_file) as overrides:
+            with open(parser_args.config_override) as overrides:
+                overrides = yaml.load(overrides, Loader=yaml.FullLoader)
                 for k, v in overrides.items():
                     self.conf[k] = v
 

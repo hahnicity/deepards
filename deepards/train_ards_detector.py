@@ -61,7 +61,7 @@ class BaseTraining(object):
     clip_odd_batches = False
 
     def __init__(self, parser_args):
-        self.args = Configuration(parser_args)
+        self.args = parser_args
         self.cuda_wrapper = lambda x: x.cuda() if self.args.cuda else x
         if self.args.debug or self.args.cuda_no_dp:
             self.model_cuda_wrapper = lambda x: x.cuda() if self.args.cuda else x
@@ -1008,6 +1008,7 @@ def main():
 
     if args.fl_alpha > 1 or args.fl_alpha < 0:
         raise Exception('Focal loss alpha must be between 0 and 1')
+    args = Configuration(args)
     cls = network_map[args.network](args)
     cls.train_and_test()
 

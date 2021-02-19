@@ -9,7 +9,12 @@ results/
 *.pth
 *.DS_Store
 *.Rhistory
+gradcam_results/
+prototype_results/
+build/
 Data/
+static/
+deepards_build.zip
 
 # C extensions
 *.so
