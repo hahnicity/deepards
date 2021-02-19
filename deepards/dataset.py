@@ -135,7 +135,8 @@ class ARDSRawDataset(Dataset):
         self.finalize_dataset_create(to_pickle, kfold_num)
 
     def finalize_dataset_create(self, to_pickle, kfold_num):
-        self.derive_scaling_factors()
+        if self.train:
+            self.derive_scaling_factors()
         if to_pickle:
             pd.to_pickle(self, to_pickle)
 
@@ -216,6 +217,7 @@ class ARDSRawDataset(Dataset):
             total_kfolds=train_dataset.total_kfolds,
             train_patient_fraction=1.0,
         )
+        test_dataset.scaling_factors = train_dataset.scaling_factors
         return test_dataset
 
     @classmethod
