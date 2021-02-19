@@ -76,15 +76,16 @@ def do_fold_graphing(start_times):
     for df in df_patient_results_list:
         df_stats = computeMetricsFromPatientResults(df, df_stats)
 
-    if len(df_stats.fold.unique()) > 1:
-        for k, stats in df_stats.groupby('fold'):
-            sns.lineplot(x='epoch', y='AUC', data=stats, label='fold {}'.format(int(k)))
-    sns.lineplot(x='epoch', y='AUC', data=df_stats, label='aggregate_results')
-    plt.xticks(np.arange(len(df_stats.epoch.unique())), sorted((df_stats.epoch.unique()+1).astype(int)))
-    ax = plt.gca()
-    ax.yaxis.set_minor_locator(MultipleLocator(.01))
-    plt.grid(axis='both')
-    plt.show()
+    for metric in ['Accuracy', 'AUC']:
+        if len(df_stats.fold.unique()) > 1:
+            for k, stats in df_stats.groupby('fold'):
+                sns.lineplot(x='epoch', y=metric, data=stats, label='fold {}'.format(int(k)))
+        sns.lineplot(x='epoch', y=metric, data=df_stats, label='aggregate_results')
+        plt.xticks(np.arange(len(df_stats.epoch.unique())), sorted((df_stats.epoch.unique()+1).astype(int)))
+        ax = plt.gca()
+        ax.yaxis.set_minor_locator(MultipleLocator(.01))
+        plt.grid(axis='both')
+        plt.show()
 
 
 if __name__ == "__main__":
@@ -102,28 +103,6 @@ if __name__ == "__main__":
     for exp in sorted(unique_experiments):
         start_times = list(set([os.path.splitext(file_.split('_')[-1])[0] for file_ in glob(exp + '*')]))
         mean_df_stats = getMeanMetrics(start_times)
-        #do_fold_graphing(start_times)
 
-        for dt in datasets:
-            if dt in exp:
-                dataset_type = dt
-                break
-        else:
-            raise Exception('dataset not found for experiment: ' + exp)
-
-        for net in networks:
-            if net in exp:
-                network_type = net
-                break
-        else:
-            raise Exception('network not found for experiment: ' + exp)
-
-        for base in base_networks:
-            if base in exp:
-                base_net = base
-                break
-
-        exp_results.append([dt, net, base, mean_df_stats.AUC.mean()])
-    exp_results = pd.DataFrame(exp_results, columns=['dataset_type', 'network', 'base_cnn', 'auc'])
     do_fold_graphing(start_times)
     import IPython; IPython.embed()
