@@ -2,13 +2,11 @@ dataset_type: unpadded_centered_sequences
 epochs: 10
 n_sub_batches: 20
 batches: 16
-#train_from_pickle: /fastdata/deepards/unpadded_centered_sequences-nb20-kfold-py2.pkl
-train_to_pickle: /fastdata/deepards/unpadded_centered_sequences-nb20-kfold-py2.pkl
+train_from_pickle: /fastdata/deepards/unpadded_centered_sequences-nb20-kfold-py2.pkl
+#train_to_pickle: /fastdata/deepards/unpadded_centered_sequences-nb20-kfold-py2.pkl
 network: cnn_linear
 experiment_num: '1'
 cohort_file: cohort-description.csv
 data_path: /fastdata/ardsdetection
 kfolds: 5
-cuda_no_dp: true
 base_network: densenet18
-clip_grad: true
