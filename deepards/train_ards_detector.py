@@ -409,7 +409,10 @@ class BaseTraining(object):
             # in the dataset class, and again in the batch norm. This shouldn't really
             # do anything, but we're normalizing to unit std not unit var. So thats the
             # difference here.
-            model.eval()
+
+            # Looking at prior code, nothing is rly different. What would happen if
+            # I took away model.eval tho??
+            #model.eval()
             for idx, (obs_idx, seq, metadata, target) in enumerate(test_loader):
                 if not self.args.batch_size == 1 and self.clip_odd_batches:
                     obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)
