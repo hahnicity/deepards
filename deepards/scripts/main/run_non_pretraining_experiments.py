@@ -1,60 +1,50 @@
 import argparse
+from copy import copy
+import os
 import subprocess
 
-from deepards.train_ards_detector import base_networks, network_map
+from pathlib import Path
 
-bs = str(16)
-epochs = str(10)
-weight_decay = str(0.0001)
-kfolds = str(5)
-n_times_each_experiment = 10
-# found .001 and .01 to be pretty good via experimentation
-grad_clip = .01
+saved_models_dir = Path(__file__).parent.joinpath('../../saved_models')
 
 
-def run_experiment(dataset_path, network, bs, epochs, kfolds, base_network, weight_decay, dataset_type, dry_run, experiment_name_prefix, n_sub_batches, clip_val, cuda_arg):
-    experiment_name = "{}_{}_{}_{}".format(experiment_name_prefix, dataset_type, network, base_network)
-    command = [str(i) for i in [
-        'ts', 'python', 'train_ards_detector.py', '--train-from-pickle', dataset_path,
-        '-n', network, '-b', bs, '-e', epochs, '--no-print-progress',
-        '--kfolds', kfolds, '-exp', experiment_name, '--base-network', base_network,
-        '--oversample', '-wd', weight_decay, '-dt', dataset_type, '--clip-grad', '--clip-val',
-        clip_val, '-nb', n_sub_batches, cuda_arg
-    ]]
+def run_experiment(dry_run, cuda_arg, config_override, cuda_devices, n_times_each_experiment):
+    experiment_name = config_override.split('.yml')[0].replace('/', '_')
+    script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'train_ards_detector.py'))
+    dir = saved_models_dir.joinpath(experiment_name)
+    if not dir.exists():
+        dir.mkdir()
+    commands = [[str(i) for i in [
+        'ts', 'python', script_path, '-co', config_override,
+        '--no-print-progress', '-exp', experiment_name,
+        '--clip-grad', cuda_arg,
+        '--cuda-device', dev,
+    ]] for dev in cuda_devices.split('+')]
+
     if dry_run:
-        print("Running:\n\n{}".format(" ".join(command)))
-        return
+        print('\nDry Runnings:\n')
 
-    for i in range(n_times_each_experiment):
-        proc = subprocess.Popen(command) #??--reshuffle-oversample-per-epoch
-        proc.communicate()
+    i = 0
+    while i < n_times_each_experiment:
+        to_run = copy(commands[i % len(commands)])
+        to_run[-2] = to_run[-2].format(model_num=i)
+        if dry_run:
+            print("{}\n".format(" ".join(to_run)))
+        else:
+            proc = subprocess.Popen(to_run)
+            proc.communicate()
+        i += 1
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('-dt', '--dataset-type', nargs='+', choices=['unpadded_sequences', 'unpadded_centered_sequences', 'unpadded_downsampled_sequences'], required=True)
-    parser.add_argument('-n', '--networks', nargs='+', choices=network_map.keys(), required=True)
-    parser.add_argument('-b', '--base-networks', nargs='+', choices=base_networks.keys(), required=True)
     parser.add_argument('--dry-run', action='store_true')
-    parser.add_argument('-e', '--experiment-name', required=True)
-    parser.add_argument('--clip-val', type=float, default=.01)
+    parser.add_argument('--cuda-devices', help="cuda device you wish to use. Can use + to split work across different devices. E.g. 0+1", required=True)
+    parser.add_argument('-co', '--config-override', required=True, help='Path to config override file you set for the experiment')
+    parser.add_argument('--n-runs', type=int, help='Times to run each experiment', default=10)
     args = parser.parse_args()
 
-    for dataset_type, dataset_path, n_sub_batches in [
-       ('unpadded_sequences', '/fastdata/deepards/unpadded_sequences-nb150-kfold.pkl', 150),
-       ('unpadded_centered_sequences', '/fastdata/deepards/unpadded_centered_sequences-nb20-kfold.pkl', 20),
-       ('unpadded_downsampled_sequences', '/fastdata/deepards/unpadded_downsampled_sequences-nbXXX-kfold.pkl', 'XXX')
-    ]:
-        if dataset_type not in args.dataset_type:
-            continue
-
-        for network in args.networks:
-            if network == 'lstm_only':
-                # the base network input doesnt matter here
-                run_experiment(dataset_path, network, bs, epochs, kfolds, 'resnet18', weight_decay, dataset_type, args.dry_run, args.experiment_name, n_sub_batches, args.clip_val, '--cuda-no-dp')
-            else:
-                for base_network in args.base_networks:
-                    run_experiment(dataset_path, network, bs, epochs, kfolds, base_network, weight_decay, dataset_type, args.dry_run, args.experiment_name, n_sub_batches, args.clip_val, '--cuda')
+    run_experiment(args.dry_run, '--cuda-no-dp', args.config_override, args.cuda_devices, args.n_runs)
 
 
 if __name__ == "__main__":
