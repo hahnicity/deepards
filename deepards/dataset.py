@@ -7,7 +7,7 @@ import re
 from imblearn.over_sampling import RandomOverSampler
 import numpy as np
 import pandas as pd
-from scipy.signal import resample
+from scipy.signal import butter, filtfilt, resample
 from sklearn.model_selection import StratifiedKFold
 from torch.utils.data import Dataset, DataLoader
 from ventmap.raw_utils import extract_raw, read_processed_file
@@ -37,7 +37,11 @@ class ARDSRawDataset(Dataset):
                  drop_frame_if_frac_missing=True,
                  whole_patient_super_batch=False,
                  holdout_set_type='main',
-                 train_patient_fraction=1.0):
+                 train_patient_fraction=1.0,
+                 butter_filter=None,
+                 add_fft=False,
+                 only_fft=False,
+                 fft_real_only=False,):
         """
         Dataset to generate sequences of data for ARDS Detection
         """
@@ -57,6 +61,15 @@ class ARDSRawDataset(Dataset):
         self.oversample = oversample_minority
         self.whole_patient_super_batch = whole_patient_super_batch
         self.train_patient_fraction = train_patient_fraction
+
+        self.only_fft = only_fft
+        self.add_fft = add_fft
+        self.fft_real_only = fft_real_only
+        if butter_filter is not None:
+            b, a = butter(1, butter_filter)
+            self.butter_filter = lambda x: filtfilt(b, a, x, axis=-1)
+        else:
+            self.butter_filter = None
 
         if self.oversample and self.whole_patient_super_batch:
             raise Exception('currently oversampling with whole patient super batch is not supported')
@@ -132,6 +145,7 @@ class ARDSRawDataset(Dataset):
             self._get_breath_by_breath_with_breath_meta_target(self._pad_breath, ['iTime', 'eTime', 'inst_RR', 'mean_flow_from_pef', 'I:E ratio', 'tve:tvi ratio', 'dyn_compliance'])
         else:
             raise Exception('Unknown dataset type: {}'.format(dataset_type))
+        self._perform_fft()
         self.finalize_dataset_create(to_pickle, kfold_num)
 
     def finalize_dataset_create(self, to_pickle, kfold_num):
@@ -184,12 +198,40 @@ class ARDSRawDataset(Dataset):
         else:
             raise NotImplementedError("We haven't implemented train patient fractions for holdout yet")
 
+    def _get_scaling_factors_for_indices(self, indices, is_padded):
+        """
+        Get mu and std for a specific set of indices
+        """
+        if is_padded:
+            raise NotImplementedError('havent implemented padding yet for multi-channel scaling factors')
+        chans = self.all_sequences[0][1].shape[1]
+        std_sum = np.array([0] * chans, dtype=np.float)
+        mean_sum = np.array([0] * chans, dtype=np.float)
+        obs_count = 0
+
+        for idx in indices:
+            obs = self.all_sequences[idx][1]
+            obs_count += np.prod(obs.shape[0]*obs.shape[-1])
+            mean_sum += obs.sum(axis=-1).sum(axis=0)
+        mu = mean_sum / obs_count
+        mu = mu.reshape(1, chans, 1).repeat(self.seq_len, axis=-1).repeat(self.n_sub_batches, axis=0)
+
+        # calculate std
+        for idx in indices:
+            obs = self.all_sequences[idx][1]
+            std_sum += ((obs - mu) ** 2).sum(axis=-1).sum(axis=0)
+        std = np.sqrt(std_sum / obs_count)
+        std = std.reshape(1, chans, 1).repeat(self.seq_len, axis=-1).repeat(self.n_sub_batches, axis=0)
+        return mu, std
+
     def derive_scaling_factors(self):
-        is_kfolds = self.total_kfolds is not None
-        if is_kfolds:
-            indices = [self.get_kfold_indexes_for_fold(kfold_num) for kfold_num in range(self.total_kfolds)]
+        if self.total_kfolds is not None:
+            indices = {
+                kfold_num: self.get_kfold_indexes_for_fold(kfold_num)
+                for kfold_num in range(self.total_kfolds)
+            }
         else:
-            indices = [range(len(self.all_sequences))]
+            indices = {None: range(len(self.all_sequences))}
 
         if 'padded_breath_by_breath' in self.dataset_type:
             is_padded = True
@@ -199,8 +241,8 @@ class ARDSRawDataset(Dataset):
             raise Exception('unsupported dataset type {} for scaling'.format(self.dataset_type))
 
         self.scaling_factors = {
-            kfold_num if is_kfolds else None: self._get_scaling_factors_for_indices(idxs, is_padded)
-            for kfold_num, idxs in enumerate(indices)
+            kfold_num: self._get_scaling_factors_for_indices(idxs, is_padded)
+            for kfold_num, idxs in indices.items()
         }
 
     @classmethod
@@ -216,21 +258,50 @@ class ARDSRawDataset(Dataset):
             kfold_num=train_dataset.kfold_num,
             total_kfolds=train_dataset.total_kfolds,
             train_patient_fraction=1.0,
+            oversample_minority=False,
+            butter_filter=train_dataset.butter_filter,
+            add_fft=train_dataset.add_fft,
+            only_fft=train_dataset.only_fft,
+            fft_real_only=train_dataset.fft_real_only,
         )
         test_dataset.scaling_factors = train_dataset.scaling_factors
         return test_dataset
 
     @classmethod
-    def from_pickle(cls, data_path, oversample_minority, train_patient_fraction):
+    def from_pickle(cls,
+                    data_path,
+                    oversample_minority,
+                    train_patient_fraction,
+                    butter_filter,
+                    add_fft,
+                    only_fft,
+                    fft_real_only,):
         dataset = pd.read_pickle(data_path)
         if not isinstance(dataset, ARDSRawDataset):
             raise ValueError('The pickle file you have specified is out-of-date. Please re-process your dataset and save the new pickled dataset.')
         dataset.oversample = oversample_minority
         dataset.train_patient_fraction = train_patient_fraction
-        # paranoia
+        if butter_filter is not None:
+            b, a = butter(1, butter_filter)
+            dataset.butter_filter = lambda x: filtfilt(b, a, x, axis=-1)
+        else:
+            dataset.butter_filter = None
+        # backwards compat for older datasets
         try:
-            dataset.scaling_factors
+            dataset.add_fft
         except AttributeError:
+            dataset.add_fft = False
+            dataset.only_fft = False
+        # xor
+        if (add_fft or only_fft) and not (dataset.add_fft or dataset.only_fft):
+            run_new_fft = True
+        else:
+            run_new_fft = False
+        dataset.add_fft = add_fft
+        dataset.only_fft = only_fft
+        dataset.fft_real_only = fft_real_only
+        if run_new_fft:
+            dataset._perform_fft()
             dataset.derive_scaling_factors()
         return dataset
 
@@ -255,35 +326,6 @@ class ARDSRawDataset(Dataset):
                 return ground_truth[ground_truth.patient.isin(train_pts)].index
             elif split_num == kfold_num and not self.train:
                 return ground_truth[ground_truth.patient.isin(test_pts)].index
-
-    def _get_scaling_factors_for_indices(self, indices, is_padded):
-        """
-        Get mu and std for a specific set of indices
-        """
-        std_sum = 0
-        mean_sum = 0
-        obs_count = 0
-
-        for idx in indices:
-            obs = self.all_sequences[idx][1]
-            if is_padded:  # clear off 0's used for padding
-                obs = obs.ravel()
-                obs = obs[obs != 0]
-                obs_count += len(obs)
-            else:
-                obs_count += np.prod(obs.shape)
-            mean_sum += obs.sum()
-        mu = mean_sum / obs_count
-
-        # calculate std
-        for idx in indices:
-            obs = self.all_sequences[idx][1]
-            if is_padded:  # clear off 0's used for padding
-                obs = obs.ravel()
-                obs = obs[obs != 0]
-            std_sum += ((obs - mu) ** 2).sum()
-        std = np.sqrt(std_sum / obs_count)
-        return mu, std
 
     def _get_breath_by_breath_with_flow_time_features(self, process_breath_func, bm_features):
         last_patient = None
@@ -663,6 +705,19 @@ class ARDSRawDataset(Dataset):
                 return True
         return False
 
+    def _perform_fft(self):
+        if not self.add_fft and not self.only_fft:
+            return
+        for idx, (pt, seq, _, __) in enumerate(self.all_sequences):
+            trans = np.fft.fft(seq, axis=-1)
+            fft_chans = [trans.real] if self.fft_real_only else [trans.real, trans.imag]
+            if self.add_fft:
+                # axis 1 is the channel axis
+                new_seq = np.concatenate([seq]+fft_chans, axis=1)
+            elif self.only_fft:
+                new_seq = np.concatenate(fft_chans, axis=1)
+            self.all_sequences[idx][1] = new_seq
+
     def __getitem__(self, index):
         # This is a bit tricky because pytorch will just assume that indexing
         # goes from 0 ... __len__ - 1. But this is not the case for kfold. So you
@@ -688,6 +743,8 @@ class ARDSRawDataset(Dataset):
         else:
             data = (data - mu) / std
 
+        if self.butter_filter is not None:
+            data = self.butter_filter(data).copy()
         return index, data, meta, target
 
     def _get_padding_mask(self, data, mu):

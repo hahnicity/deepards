@@ -71,14 +71,22 @@ class DenseNet(nn.Module):
     """
 
     def __init__(self, growth_rate=32, block_config=(6, 12, 24, 16),
-                 num_init_features=64, bn_size=4, drop_rate=0.2, num_classes=1000):
+                 num_init_features=64, bn_size=4, drop_rate=0.2, num_classes=1000,
+                 with_fft=False, only_fft=False, fft_real_only=False):
 
         super(DenseNet, self).__init__()
         self.inplanes = num_init_features
 
+        if with_fft:
+            init_chans = 3 - (1 if fft_real_only else 0)
+        elif only_fft:
+            init_chans = 2 - (1 if fft_real_only else 0)
+        else:
+            init_chans = 1
+
         # First convolution
         self.features = nn.Sequential(OrderedDict([
-            ('conv0', nn.Conv1d(1, num_init_features, kernel_size=7, stride=2,
+            ('conv0', nn.Conv1d(init_chans, num_init_features, kernel_size=7, stride=2,
                                 padding=3, bias=False)),
             ('norm0', nn.BatchNorm1d(num_init_features)),
             ('relu0', nn.ReLU(inplace=True)),

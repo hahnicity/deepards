@@ -168,15 +168,37 @@ class BaseTraining(object):
                 drop_frame_if_frac_missing=self.args.no_drop_frames,
                 oversample_minority=self.args.oversample,
                 train_patient_fraction=self.args.train_pt_frac,
+                butter_filter=self.args.butter_freq,
+                add_fft=self.args.with_fft,
+                only_fft=self.args.only_fft,
+                fft_real_only=self.args.fft_real_only,
             )
         else:
-            train_dataset = ARDSRawDataset.from_pickle(self.args.train_from_pickle, self.args.oversample, self.args.train_pt_frac)
+            train_dataset = ARDSRawDataset.from_pickle(
+                self.args.train_from_pickle,
+                self.args.oversample,
+                self.args.train_pt_frac,
+                self.args.butter_freq,
+                self.args.with_fft,
+                self.args.only_fft,
+                self.args.fft_real_only,
+            )
 
         self.n_sub_batches = train_dataset.n_sub_batches
         if not self.args.test_from_pickle and (self.args.kfolds is not None):
             test_dataset = ARDSRawDataset.make_test_dataset_if_kfold(train_dataset)
         elif self.args.test_from_pickle:
-            test_dataset = ARDSRawDataset.from_pickle(self.args.test_from_pickle, False, 1.0)
+            if self.args.with_fft or self.args.only_fft:
+                raise NotImplementedError('havent implemented test set only and FFT. would need to redo scaling factor derivation')
+            test_dataset = ARDSRawDataset.from_pickle(
+                self.args.test_from_pickle,
+                False,
+                1.0,
+                self.args.butter_freq,
+                self.args.with_fft,
+                self.args.only_fft,
+                self.args.fft_real_only,
+            )
         else:  # holdout, no pickle, no kfold
             # there is a really bizarre bug where my default arg is being overwritten by
             # the state of the train_dataset obj. I checked pointer references and there was
@@ -195,6 +217,10 @@ class BaseTraining(object):
                 drop_frame_if_frac_missing=self.args.no_drop_frames,
                 holdout_set_type=self.args.holdout_set_type,
                 train_patient_fraction=1.0,
+                butter_filter=self.args.butter_freq,
+                add_fft=self.args.with_fft,
+                only_fft=self.args.only_fft,
+                fft_real_only=self.args.fft_real_only,
             )
 
         return train_dataset, test_dataset
@@ -262,7 +288,11 @@ class BaseTraining(object):
         elif 'unet' in self.args.base_network:
             base_network = base_network(1)
         else:
-            base_network = base_network()
+            base_network = base_network(
+                with_fft=self.args.with_fft,
+                only_fft=self.args.only_fft,
+                fft_real_only=self.args.fft_real_only,
+            )
 
         if self.args.freeze_base_network:
             for param in base_network.parameters():
@@ -1010,6 +1040,10 @@ def main():
     parser.add_argument('--perform-dtw-preprocessing', action='store_true', default=None, help='perform DTW preprocessing actions even if we dont want to visualize DTW')
     parser.add_argument('--train-pt-frac', type=float, help='Fraction of random training patients to use')
     parser.add_argument('--cuda-device', type=int, help='number of cuda device you want to use')
+    parser.add_argument('--butter-freq', type=float)
+    parser.add_argument('--with-fft', action='store_true', default=None)
+    parser.add_argument('--only-fft', action='store_true', default=None)
+    parser.add_argument('--fft-real-only', action='store_true', default=None)
     args = parser.parse_args()
 
     # convenience code
