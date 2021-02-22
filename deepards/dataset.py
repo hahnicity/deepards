@@ -1594,7 +1594,7 @@ class ImgARDSDataset(ARDSRawDataset):
         img = np.expand_dims(np.concatenate(img), axis=-1)
         if self.add_fft or self.fft_only:
             trans = np.fft.fftshift(np.fft.fft(img, axis=1))
-            fft_chans = [np.abs(trans.real), np.abs(trans.imag)] if not self.fft_real_only else [np.abs(trans.real)]
+            fft_chans = [trans.real, trans.imag] if not self.fft_real_only else [trans.real]
         if self.add_fft:
             img = np.concatenate([img]+fft_chans, axis=-1)
         elif self.fft_only:
@@ -1726,7 +1726,8 @@ class ImgARDSDataset(ARDSRawDataset):
                 sh = sh if len(sh) > 0 else [last_hour_obs]
                 self._finish_mat(last_pt, mat, last_target, sh)
                 mat, sh = [], []
-
+            # make sure we're only using the VWD channel
+            data = data[:, 0:1, :]
             last_hour_obs = seq_hours[-1]
             mat, remainder, remainder_sh = self._append_to_mat(mat, data, sh, seq_hours)
             if len(remainder) > 0:
