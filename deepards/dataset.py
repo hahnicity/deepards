@@ -10,7 +10,7 @@ from imblearn.over_sampling import RandomOverSampler
 import numpy as np
 import pandas as pd
 from scipy.interpolate import CubicSpline
-from scipy.signal import butter, filtfilt, resample
+from scipy.signal import butter, resample, sosfilt
 from sklearn.model_selection import StratifiedKFold
 import torch
 from torch.nn.utils.rnn import pack_padded_sequence
@@ -400,8 +400,8 @@ class ARDSRawDataset(Dataset):
         self.add_fft = add_fft
         self.fft_real_only = fft_real_only
         if butter_filter is not None:
-            b, a = butter(1, butter_filter)
-            self.butter_filter = lambda x: filtfilt(b, a, x, axis=-1)
+            sos = butter(10, butter_filter, fs=50, output='sos')
+            self.butter_filter = lambda x: sosfilt(sos, x, axis=-1)
         else:
             self.butter_filter = None
 
@@ -686,8 +686,8 @@ class ARDSRawDataset(Dataset):
         dataset.undersample_std_factor = undersample_std_factor
         dataset.oversample_all_factor = oversample_all_factor
         if butter_filter is not None:
-            b, a = butter(1, butter_filter)
-            dataset.butter_filter = lambda x: filtfilt(b, a, x, axis=-1)
+            sos = butter(10, butter_filter, fs=50, output='sos')
+            dataset.butter_filter = lambda x: sosfilt(sos, x, axis=-1)
         else:
             dataset.butter_filter = None
         # backwards compat for older datasets
@@ -1529,8 +1529,8 @@ class ImgARDSDataset(ARDSRawDataset):
         self.total_kfolds = self.raw.total_kfolds
         self.fft_real_only = fft_real_only
         if butter_filter is not None:
-            b, a = butter(1, butter_filter)
-            self.butter_filter = lambda x: filtfilt(b, a, x, axis=1)
+            sos = butter(10, butter_filter, fs=50, output='sos')
+            self.butter_filter = lambda x: sosfilt(sos, x, axis=1)
         else:
             self.butter_filter = None
         try:
