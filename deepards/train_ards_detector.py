@@ -185,6 +185,10 @@ class BaseTraining(object):
     def get_base_datasets(self):
         kfold_num = None if self.args.kfolds is None else 0
         transforms = self.get_transforms()
+        if 'oversample' in self.args.__dict__:
+            oversample_minority = self.args.oversample
+        else:
+            oversample_minority = self.args.oversample_minority
 
         if not self.args.train_from_pickle:
             # NOTE: the datasets themselves are storing way too much state and causes us to
