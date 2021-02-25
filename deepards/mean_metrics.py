@@ -3,6 +3,7 @@ from glob import glob
 import os
 import re
 from warnings import warn
+import zipfile
 
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MultipleLocator
@@ -111,7 +112,15 @@ def do_fold_graphing(start_times, only_aggregate):
 def get_hyperparams(start_time):
     # search for legacy format
     hyperparam_file = glob('results/*{}*.pth'.format(start_time))
-    hyperparams = torch.load(hyperparam_file[0])
+    try:
+        hyperparams = torch.load(hyperparam_file[0])
+    except RuntimeError:
+        print('torch saved hyperparams as zip!')
+        import IPython; IPython.embed()
+        # noticed a problem that
+        with zipfile.ZipFile(hyperparam_file[0], 'r') as zip_ref:
+            zip_ref.extractall('archive/')
+            hyperparams = pd.read_pickle('archive/data.pkl')
     if 'dataset_type' in hyperparams:
         tmp = hyperparams
     else:
@@ -184,6 +193,67 @@ def analyze_similar_dissimilar_experiments(sim_dissim_file, expr_ids):
         plt.show()
 
 
+def one_to_many_shot_analysis(experiment_name, start_times):
+    model_list = []
+    # this will have format:
+    #
+    # patient,model idx,n,patho,pred_frac,pred
+    one_to_many_results = []
+    max_n = 20
+
+    for time in start_times:
+        try:
+            # apparently I can't recover py2 results from py3. So I'd need to run
+            # this script in py2 if my results were done in py2
+            df = pd.read_pickle("results/{}_results_{}.pkl".format(experiment_name, time))
+        except FileNotFoundError:
+            raise FileNotFoundError('Unable to find all results record for experiment: {}, id: {}. Is this an old experiment?'.format(experiment_name, time))
+
+        model_list.append(df)
+    # need to average together last epoch across all foldsand then
+
+    # what should my primary metric be?? AUC/Accuracy? why not both? probably should
+    # average the results over multiple folds.
+
+    for model_idx, results in enumerate(model_list):
+        final_epoch = results.all_pred_to_hour.epoch.max()
+        last_epoch_preds = results.all_pred_to_hour[results.all_pred_to_hour.epoch == final_epoch]
+        for n in range(1, max_n+1):
+            for pt_id, pt_df in last_epoch_preds.groupby('patient').head(n).groupby('patient'):
+                one_to_many_results.append([
+                    pt_id,
+                    model_idx,
+                    n,
+                    pt_df.iloc[0].y,
+                    pt_df.pred.sum() / float(n),
+                    int((pt_df.pred.sum() / float(n)) >= .5),
+                ])
+    one_to_many_results = pd.DataFrame(one_to_many_results, columns=['patient', 'model', 'n', 'patho', 'pred_frac', 'pred'])
+
+    # this will be formatted like
+    #
+    # n,sen,spec,auc
+    pred_stats = []
+    for n in range(1, max_n+1):
+        # just do stats for ARDS right now
+        n_df = one_to_many_results[one_to_many_results.n==n]
+        tps = len(n_df[(n_df.patho == 1) & (n_df.pred == 1)])
+        tns = len(n_df[(n_df.patho != 1) & (n_df.pred != 1)])
+        fps = len(n_df[(n_df.patho != 1) & (n_df.pred == 1)])
+        fns = len(n_df[(n_df.patho == 1) & (n_df.pred != 1)])
+        sen = tps / float(tps+fns)
+        spec = tns / float(tns+fps)
+        auc = roc_auc_score(n_df.patho, n_df.pred_frac)
+        pred_stats.append([n, sen, spec, auc])
+    pred_stats = pd.DataFrame(pred_stats, columns=['n', 'sen', 'spec', 'auc'])
+
+    plt.plot(range(1, max_n+1), pred_stats.sen, label='sensitivity')
+    plt.plot(range(1, max_n+1), pred_stats.spec, label='specificity')
+    plt.plot(range(1, max_n+1), pred_stats.auc, label='auc')
+    plt.legend()
+    plt.show()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('-e', '--experiment-name', default='main_experiment')
@@ -208,4 +278,4 @@ if __name__ == "__main__":
         analyze_similar_dissimilar_experiments(args.sim_dissim_file, unique_experiments)
     else:
         do_fold_graphing(unique_experiments, args.only_aggregate)
-    # XXX analytics needed
+    one_to_many_shot_analysis(args.experiment_name, unique_experiments)
