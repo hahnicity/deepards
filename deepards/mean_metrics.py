@@ -159,6 +159,7 @@ def find_matching_experiments(experiment_name):
 
 
 def analyze_similar_dissimilar_experiments(sim_dissim_file, expr_ids):
+
     with open(os.path.join(os.path.dirname(__file__), sim_dissim_file)) as sds:
         conf = yaml.load(sds, Loader=yaml.FullLoader)
 
@@ -194,11 +195,14 @@ def analyze_similar_dissimilar_experiments(sim_dissim_file, expr_ids):
 
 
 def one_to_many_shot_analysis(experiment_name, start_times):
+    cmap = sns.color_palette('deep', as_cmap=True)
+
     model_list = []
     # this will have format:
     #
     # patient,model idx,n,patho,pred_frac,pred
     one_to_many_results = []
+    one_to_many_by_thresh = []
     max_n = 20
 
     for time in start_times:
@@ -228,7 +232,19 @@ def one_to_many_shot_analysis(experiment_name, start_times):
                     pt_df.pred.sum() / float(n),
                     int((pt_df.pred.sum() / float(n)) >= .5),
                 ])
+                one_to_many_by_thresh.append([
+                    pt_id,
+                    model_idx,
+                    n,
+                    pt_df.iloc[0].y,
+                    pt_df.pred.sum() / float(n),
+                    int((pt_df.pred.sum() / float(n)) >= .2),
+                    int((pt_df.pred.sum() / float(n)) >= .4),
+                    int((pt_df.pred.sum() / float(n)) >= .6),
+                    int((pt_df.pred.sum() / float(n)) >= .8),
+                ])
     one_to_many_results = pd.DataFrame(one_to_many_results, columns=['patient', 'model', 'n', 'patho', 'pred_frac', 'pred'])
+    one_to_many_by_thresh = pd.DataFrame(one_to_many_by_thresh, columns=['patient', 'model', 'n', 'patho', 'pred_frac'] + ['pred{}'.format(i) for i in range(2, 10, 2)])
 
     # this will be formatted like
     #
@@ -247,10 +263,43 @@ def one_to_many_shot_analysis(experiment_name, start_times):
         pred_stats.append([n, sen, spec, auc])
     pred_stats = pd.DataFrame(pred_stats, columns=['n', 'sen', 'spec', 'auc'])
 
-    plt.plot(range(1, max_n+1), pred_stats.sen, label='sensitivity')
-    plt.plot(range(1, max_n+1), pred_stats.spec, label='specificity')
-    plt.plot(range(1, max_n+1), pred_stats.auc, label='auc')
-    plt.legend()
+    plt.plot(range(1, max_n+1), pred_stats.sen, label='Sensitivity', color=cmap[0])
+    plt.plot(range(1, max_n+1), pred_stats.spec, label='Specificity', color=cmap[1])
+    plt.plot(range(1, max_n+1), pred_stats.auc, label='AUC', color=cmap[2])
+    plt.xticks([1, 5, 10, 15, 20])
+    plt.xlim([.8, 20.2])
+    plt.grid(axis='y', alpha=.7)
+    plt.ylabel('Score')
+    plt.xlabel('N observations')
+    plt.legend(loc='lower right')
+    plt.show()
+
+    thresh_stats = []
+
+    for n in range(1, max_n+1):
+        # just do accuracy for now
+        n_df = one_to_many_by_thresh[one_to_many_by_thresh.n==n]
+        for thresh in range(2, 10, 2):
+            col = 'pred{}'.format(thresh)
+            tps = len(n_df[(n_df.patho == 1) & (n_df[col] == 1)])
+            tns = len(n_df[(n_df.patho != 1) & (n_df[col] != 1)])
+            fps = len(n_df[(n_df.patho != 1) & (n_df[col] == 1)])
+            fns = len(n_df[(n_df.patho == 1) & (n_df[col] != 1)])
+            sen = tps / float(tps+fns)
+            spec = tns / float(tns+fps)
+            auc = roc_auc_score(n_df.patho, n_df.pred_frac)
+            acc = (tps+tns) / float(tps+tns+fps+fns)
+            thresh_stats.append([thresh, n, sen, spec, auc, acc])
+    thresh_stats = pd.DataFrame(thresh_stats, columns=['thresh', 'n', 'sen', 'spec', 'auc', 'acc'])
+
+    for thresh, thresh_df in thresh_stats.groupby('thresh'):
+        plt.plot(range(1, max_n+1), thresh_df.acc, label='{}%'.format(thresh*10), color=cmap[thresh-1], alpha=.8)
+    plt.xticks([1, 5, 10, 15, 20])
+    plt.xlim([.8, 20.2])
+    plt.grid(axis='y', alpha=.7)
+    plt.ylabel('Accuracy')
+    plt.xlabel('N observations')
+    plt.legend(loc='lower right')
     plt.show()
 
 
