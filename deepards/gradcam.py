@@ -77,7 +77,10 @@ class GradCam():
         output = model_out_func(model_output, target)
         self.model.zero_grad()
         # Backward pass wrt output
-        output.backward(retain_graph=True)
+        # retention of the graph is not necessary if we are only running a single
+        # backward op. However if we ran cuda on multiple different layers in the
+        # same network after the same pass then graph retention would be necessary.
+        output.backward(retain_graph=False)
         # Get hooked gradients
         guided_gradients = self.extractor.gradients.cpu().data.numpy()
         # Get convolution outputs
@@ -221,35 +224,34 @@ if __name__ == "__main__":
     filename = 'saved_models/2d_only_fft/2d_only_fft-epoch1-fold0.pth'
     pkl_dataset = pd.read_pickle('/fastdata/deepards/unpadded_centered_sequences-nb20-kfold.pkl')
     dev = torch.device('cuda:0')
-    model = torch.load(filename).to(dev).double()
-    g = MaxMinNormCam(model)
     dat = dataset.ImgARDSDataset(pkl_dataset, [], False, True, False, False, False)
     dat.train = False
     dat.set_kfold_indexes_for_fold(0)
     target_map = {0: 'non-ards', 1: 'ards'}
+    model = torch.load(filename).to(dev).double()
+    # the model is holding onto some kinda state between samples. Its being
+    # caused by graph retention. Not retaining the graph seems to cause things
+    # to work just fine.
+    g = MaxMinNormCam(model)
 
     ards_freq_avgs = np.zeros(224)
     other_freq_avgs = np.zeros(224)
     ards_freq_rows = 0
     other_freq_rows = 0
-    n_samps = 100
     freqs = np.fft.fftshift(np.fft.fftfreq(224, d=0.02))
+    n_samps = len(dat)
+    ards_all_img = None
+    other_all_img = None
+    print('Gathering all {} samples'.format(n_samps))
 
     for i in range(n_samps):
-        output_dir = Path('gradcam_results/tmp_storage/')
-        idx = np.random.randint(0, len(dat))
-        idx, seq, _, target = dat[idx]
+        #idx = np.random.randint(0, len(dat))
+        idx, seq, _, target = dat[i]
         target_name = target_map[int(target.argmax())]
-        with open(output_dir.joinpath('gradcam2d-seq-{}-{}.csv'.format(target_name, i)), 'w') as f:
-            writer = csv.writer(f)
-            writer.writerows(seq.squeeze().cpu().numpy().tolist())
-
         input = seq.unsqueeze(dim=0).to(dev)
+        seq_size = input.shape[2]
         # focus on ground truth
         cam, out = g.generate_cam(input, target=int(target.argmax()))
-        seq_size = input.shape[2]
-        img = img_process(input)
-
         cam = cam_process(cam, seq_size)
         # you can do average/median value by frequency. thats a fairly ez thing.
         for row in cam:
@@ -259,8 +261,26 @@ if __name__ == "__main__":
             else:
                 other_freq_avgs += row
                 other_freq_rows += 1
+
+        if ards_all_img is None and target.argmax() == 1:
+            ards_all_img = input
+        elif other_all_img is None and target.argmax() == 0:
+            other_all_img = input
+        elif target.argmax() == 1:
+            ards_all_img = torch.cat([ards_all_img, input], dim=0)
+        else:
+            other_all_img = torch.cat([other_all_img, input], dim=0)
+
         # XXX do this for now b/c testing my averaging theory
         continue
+
+        output_dir = Path('gradcam_results/tmp_storage/')
+        img = img_process(input)
+
+        with open(output_dir.joinpath('gradcam2d-seq-{}-{}.csv'.format(target_name, i)), 'w') as f:
+            writer = csv.writer(f)
+            writer.writerows(seq.squeeze().cpu().numpy().tolist())
+
         fig, axes = plt.subplots(nrows=1, ncols=5)
         fig.set_figheight(10)
         fig.set_figwidth(16)
@@ -331,6 +351,39 @@ if __name__ == "__main__":
         ards_mask = ards_freq_avgs
         other_mask = other_freq_avgs
         fourth_plot_title = 'avg cam value mask'
+
+    # plot box plots for frequencies.
+    #
+    # can do plots for frequencies 14 idxs long, so we'll have 16 plots
+    # cols should have names like so:
+    # val, start freq idx, ards/other
+    #
+    # Well 14 plots is too squished. maybe 28 will be better
+    rows = []
+    idx_jump = 14
+    for start in range(0, 224, idx_jump):
+        end = start + idx_jump
+        vals = ards_all_img[:, 0, :, start:end].cpu().numpy().ravel()
+        start_freq = [start] * len(vals)
+        y = [1] * len(vals)
+        rows.append(np.vstack([vals, start_freq, y]).T)
+        vals = other_all_img[:, 0, :, start:end].cpu().numpy().ravel()
+        start_freq = [start] * len(vals)
+        y = [0] * len(vals)
+        rows.append(np.vstack([vals, start_freq, y]).T)
+
+    import seaborn as sns
+    rows = np.concatenate(rows, axis=0)
+    rows = pd.DataFrame(rows, columns=['val', 'freq', 'patho'])
+    ax = sns.boxplot(x='freq', y='val', hue='patho', data=rows, palette='Set3', showfliers=False)
+    handles, labels = ax.get_legend_handles_labels()
+    ax.legend(handles, ['Non-ARDS', 'ARDS'])
+    plt.ylabel('')
+    plt.xlabel('Frequency Start')
+    plt.xticks(range(0, int(224/idx_jump)), [
+        '{}'.format(round(freqs[start],1)) for start in range(0, 224, idx_jump)
+    ])
+    plt.show()
 
     # so we need an input sequence to visualize. I mean the q is where to get one. I
     # guess we could just select randomly from the ground truth based on patho
