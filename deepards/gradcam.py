@@ -321,17 +321,24 @@ if __name__ == "__main__":
         rows.append(np.vstack([vals, start_freq, y]).T)
 
     import seaborn as sns
+    sns.set_style('white')
+    sns.despine()
     rows = np.concatenate(rows, axis=0)
     rows = pd.DataFrame(rows, columns=['val', 'freq', 'patho'])
-    ax = sns.boxplot(x='freq', y='val', hue='patho', data=rows, palette='Set3', showfliers=False)
+    fig, ax = plt.subplots(nrows=1, ncols=1)
+    fig.set_figheight(10)
+    fig.set_figwidth(16)
+    sns.boxplot(x='freq', y='val', hue='patho', data=rows, palette='Set2', showfliers=False, ax=ax)
     handles, labels = ax.get_legend_handles_labels()
-    ax.legend(handles, ['Non-ARDS', 'ARDS'])
+    ax.legend(handles, ['Non-ARDS', 'ARDS'], fontsize=16)
     plt.ylabel('')
-    plt.xlabel('Frequency Start')
+    plt.xlabel('Frequency Start', fontsize=16)
     plt.xticks(range(0, int(224/idx_jump)), [
         '{}'.format(round(freqs[start],1)) for start in range(0, 224, idx_jump)
-    ])
-    plt.show()
+    ], fontsize=14)
+    plt.yticks(np.arange(-4, 5), fontsize=14)
+    ax.grid(axis='y')
+    plt.savefig('fft_freq_box_ards_non_ards.png', dpi=200)
     plt.close()
 
     # gotta modify this so that frequency is a value and the columns are <frequency, intensity>
@@ -348,13 +355,17 @@ if __name__ == "__main__":
     handles, labels = ax.get_legend_handles_labels()
     #axes[0].set_title('Non-ARDS')
     #axes[1].set_title('ARDS')
-    ax.set_xticks(np.arange(-25, 26, 5))
+    plt.xticks(np.arange(-25, 26, 5), fontsize=14)
     #axes[1].set_xticks(np.arange(-25, 26, 5))
-    ax.set_yticks(np.arange(0, 0.81, 0.1))
+    plt.yticks(np.arange(0, 0.81, 0.1), fontsize=14)
+    plt.ylabel('Cam Intensity', fontsize=16)
+    plt.xlabel('Frequency', fontsize=16)
     #axes[1].set_yticks(np.arange(0, 0.81, 0.1))
-    ax.legend(handles, ['Non-ARDS', 'ARDS'])
+    ax.legend(handles, ['Non-ARDS', 'ARDS'], fontsize=16)
+    ax.grid(axis='y')
+    plt.xlim((-25.2, 25.2))
     plt.savefig('cam_intensities_ards_non_ards.png', dpi=200)
-    fig.show()
+    plt.close()
     # so we need an input sequence to visualize. I mean the q is where to get one. I
     # guess we could just select randomly from the ground truth based on patho
     # downside of all this is that it kinda ignores whether the classifier would be
@@ -396,7 +407,7 @@ if __name__ == "__main__":
     ax.set_title(fourth_plot_title)
 
     plt.suptitle('ARDS masking')
-    plt.show()
+    #plt.show()
     #plt.close()
 
     fig, axes = plt.subplots(nrows=1, ncols=4)
@@ -429,4 +440,4 @@ if __name__ == "__main__":
     ax.set_title(fourth_plot_title)
 
     plt.suptitle('OTHER masking')
-    plt.show()
+    #plt.show()
