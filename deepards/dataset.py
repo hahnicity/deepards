@@ -1236,7 +1236,7 @@ class ARDSRawDataset(Dataset):
         if not self.add_fft and not self.only_fft:
             return
         for idx, (pt, seq, _, __) in enumerate(self.all_sequences):
-            trans = np.fft.fft(seq, axis=-1)
+            trans = np.fft.fftshift(np.fft.fft(seq, axis=-1))
             fft_chans = [trans.real] if self.fft_real_only else [trans.real, trans.imag]
             if self.add_fft:
                 # axis 1 is the channel axis

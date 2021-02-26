@@ -144,6 +144,7 @@ class MaxMinNormCam(GradCam):
         return self.normalize(cam), mo
 
     def normalize(self, cam):
+        # perform relu
         cam = np.maximum(cam, 0)
         cam = (cam - np.min(cam)) / (np.max(cam) - np.min(cam))  # Normalize between 0-1
         cam = np.uint8(cam * 255)  # Scale between 0-255 to visualize
@@ -209,7 +210,7 @@ def img_process(model_in):
 
 
 def cam_process(cam, seq_size):
-    cam = cv2.resize(cam, (seq_size, seq_size))
+    cam = cv2.resize(cam, (1, seq_size)).ravel()
     # process cam to 0-1
     cam -= cam.min()
     cam = cam / cam.max()
@@ -217,14 +218,19 @@ def cam_process(cam, seq_size):
 
 
 if __name__ == "__main__":
+    """
+    This runs the frequency exploration experiment
+    """
     import matplotlib.pyplot as plt
     import pandas as pd
 
     from deepards import dataset
-    filename = 'saved_models/2d_only_fft/2d_only_fft-epoch1-fold0.pth'
-    pkl_dataset = pd.read_pickle('/fastdata/deepards/unpadded_centered_sequences-nb20-kfold.pkl')
+    filename = 'saved_models/1d_only_fft/1d_only_fft-epoch1-fold4.pth'
+    dat = dataset.ARDSRawDataset.from_pickle('/fastdata/deepards/unpadded_centered_sequences-nb20-kfold.pkl', False, 1.0, None, -1, 0.2, 1.0, None, False, True, False)
+
+    dat.butter_filter = None
     dev = torch.device('cuda:0')
-    dat = dataset.ImgARDSDataset(pkl_dataset, [], False, True, False, False, False)
+    #dat = dataset.ImgARDSDataset(pkl_dataset, [], False, True, False, False, False)
     dat.train = False
     dat.set_kfold_indexes_for_fold(0)
     target_map = {0: 'non-ards', 1: 'ards'}
@@ -239,28 +245,27 @@ if __name__ == "__main__":
     ards_freq_rows = 0
     other_freq_rows = 0
     freqs = np.fft.fftshift(np.fft.fftfreq(224, d=0.02))
-    n_samps = len(dat)
+    n_samps = 50  #len(dat)
     ards_all_img = None
     other_all_img = None
     print('Gathering all {} samples'.format(n_samps))
 
     for i in range(n_samps):
-        #idx = np.random.randint(0, len(dat))
-        idx, seq, _, target = dat[i]
+        idx = np.random.randint(0, len(dat))
+        idx, seq, _, target = dat[idx]
         target_name = target_map[int(target.argmax())]
-        input = seq.unsqueeze(dim=0).to(dev)
+        input = torch.tensor(seq).to(dev)
         seq_size = input.shape[2]
         # focus on ground truth
         cam, out = g.generate_cam(input, target=int(target.argmax()))
         cam = cam_process(cam, seq_size)
         # you can do average/median value by frequency. thats a fairly ez thing.
-        for row in cam:
-            if target_name == 'ards':
-                ards_freq_avgs += row
-                ards_freq_rows += 1
-            else:
-                other_freq_avgs += row
-                other_freq_rows += 1
+        if target_name == 'ards':
+            ards_freq_avgs += cam
+            ards_freq_rows += 1
+        else:
+            other_freq_avgs += cam
+            other_freq_rows += 1
 
         if ards_all_img is None and target.argmax() == 1:
             ards_all_img = input
@@ -270,7 +275,6 @@ if __name__ == "__main__":
             ards_all_img = torch.cat([ards_all_img, input], dim=0)
         else:
             other_all_img = torch.cat([other_all_img, input], dim=0)
-
         # XXX do this for now b/c testing my averaging theory
         continue
 
@@ -363,11 +367,11 @@ if __name__ == "__main__":
     idx_jump = 14
     for start in range(0, 224, idx_jump):
         end = start + idx_jump
-        vals = ards_all_img[:, 0, :, start:end].cpu().numpy().ravel()
+        vals = ards_all_img[:, 0, start:end].cpu().numpy().ravel()
         start_freq = [start] * len(vals)
         y = [1] * len(vals)
         rows.append(np.vstack([vals, start_freq, y]).T)
-        vals = other_all_img[:, 0, :, start:end].cpu().numpy().ravel()
+        vals = other_all_img[:, 0, start:end].cpu().numpy().ravel()
         start_freq = [start] * len(vals)
         y = [0] * len(vals)
         rows.append(np.vstack([vals, start_freq, y]).T)
@@ -403,8 +407,8 @@ if __name__ == "__main__":
     ards_seq_idx = np.random.choice(gt[gt.y == 1].index)
     ards_seq = dat.all_sequences[ards_seq_idx][1][rand_idx]
 
-    real = ards_seq[:, 0]
-    imag = ards_seq[:, 1]
+    real = ards_seq[0, :]
+    imag = ards_seq[1, :]
     fft_with_shift = real + (1j*imag)
     fft_noshift = np.fft.ifftshift(fft_with_shift*ards_mask)
     signal = np.fft.ifft(fft_noshift)
@@ -418,7 +422,7 @@ if __name__ == "__main__":
     ax.set_title('orig VWD')
 
     ax = plt.subplot(1, 4, 3)
-    ax.plot(freqs, ards_seq[:, 0].ravel())
+    ax.plot(freqs, ards_seq[0].ravel())
     ax.set_title('FFT sequence')
 
     ax = plt.subplot(1, 4, 4)
@@ -436,8 +440,8 @@ if __name__ == "__main__":
     other_seq_idx = np.random.choice(gt[gt.y == 0].index)
     other_seq = dat.all_sequences[other_seq_idx][1][rand_idx]
 
-    real = other_seq[:, 0]
-    imag = other_seq[:, 1]
+    real = other_seq[0, :]
+    imag = other_seq[1, :]
     fft_with_shift = real + (1j*imag)
     fft_noshift = np.fft.ifftshift(fft_with_shift*other_mask)
     signal = np.fft.ifft(fft_noshift)
@@ -451,7 +455,7 @@ if __name__ == "__main__":
     ax.set_title('orig VWD')
 
     ax = plt.subplot(1, 4, 3)
-    ax.plot(freqs, other_seq[:, 0].ravel())
+    ax.plot(freqs, other_seq[0].ravel())
     ax.set_title('FFT sequence')
 
     ax = plt.subplot(1, 4, 4)
