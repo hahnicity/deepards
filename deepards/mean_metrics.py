@@ -116,11 +116,9 @@ def get_hyperparams(start_time):
         hyperparams = torch.load(hyperparam_file[0])
     except RuntimeError:
         print('torch saved hyperparams as zip!')
-        import IPython; IPython.embed()
-        # noticed a problem that
         with zipfile.ZipFile(hyperparam_file[0], 'r') as zip_ref:
-            zip_ref.extractall('archive/')
-            hyperparams = pd.read_pickle('archive/data.pkl')
+            zip_ref.extractall('tmp_zip/')
+            hyperparams = pd.read_pickle('tmp_zip/archive/data.pkl')
     if 'dataset_type' in hyperparams:
         tmp = hyperparams
     else:
