@@ -16,6 +16,7 @@ Data/
 gradcam_results/
 prototype_results/
 static/
+tmp_zip/
 
 # C extensions
 *.so

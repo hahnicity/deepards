@@ -77,7 +77,10 @@ class GradCam():
         output = model_out_func(model_output, target)
         self.model.zero_grad()
         # Backward pass wrt output
-        output.backward(retain_graph=True)
+        # retention of the graph is not necessary if we are only running a single
+        # backward op. However if we ran cuda on multiple different layers in the
+        # same network after the same pass then graph retention would be necessary.
+        output.backward(retain_graph=False)
         # Get hooked gradients
         guided_gradients = self.extractor.gradients.cpu().data.numpy()
         # Get convolution outputs
@@ -141,6 +144,7 @@ class MaxMinNormCam(GradCam):
         return self.normalize(cam), mo
 
     def normalize(self, cam):
+        # perform relu
         cam = np.maximum(cam, 0)
         cam = (cam - np.min(cam)) / (np.max(cam) - np.min(cam))  # Normalize between 0-1
         cam = np.uint8(cam * 255)  # Scale between 0-255 to visualize
@@ -206,7 +210,7 @@ def img_process(model_in):
 
 
 def cam_process(cam, seq_size):
-    cam = cv2.resize(cam, (seq_size, seq_size))
+    cam = cv2.resize(cam, (1, seq_size)).ravel()
     # process cam to 0-1
     cam -= cam.min()
     cam = cam / cam.max()
@@ -214,113 +218,77 @@ def cam_process(cam, seq_size):
 
 
 if __name__ == "__main__":
+    """
+    This runs the frequency exploration experiment
+    """
     import matplotlib.pyplot as plt
     import pandas as pd
 
     from deepards import dataset
-    filename = 'saved_models/2d_only_fft/2d_only_fft-epoch1-fold0.pth'
-    pkl_dataset = pd.read_pickle('/fastdata/deepards/unpadded_centered_sequences-nb20-kfold.pkl')
-    dev = torch.device('cuda:0')
-    model = torch.load(filename).to(dev).double()
-    g = MaxMinNormCam(model)
-    dat = dataset.ImgARDSDataset(pkl_dataset, [], False, True, False, False, False)
-    dat.train = False
-    dat.set_kfold_indexes_for_fold(0)
-    target_map = {0: 'non-ards', 1: 'ards'}
-
     ards_freq_avgs = np.zeros(224)
     other_freq_avgs = np.zeros(224)
     ards_freq_rows = 0
     other_freq_rows = 0
-    n_samps = 100
+    ards_cam_data = []
+    other_cam_data = []
+    dat = dataset.ARDSRawDataset.from_pickle('/fastdata/deepards/unpadded_centered_sequences-nb20-kfold.pkl', False, 1.0, None, -1, 0.2, 1.0, None, False, True, False)
+    dat.butter_filter = None
+    dat.train = False
     freqs = np.fft.fftshift(np.fft.fftfreq(224, d=0.02))
+    ards_all_img = None
+    other_all_img = None
+    dev = torch.device('cuda:0')
+    target_map = {0: 'non-ards', 1: 'ards'}
 
-    for i in range(n_samps):
-        output_dir = Path('gradcam_results/tmp_storage/')
-        idx = np.random.randint(0, len(dat))
-        idx, seq, _, target = dat[idx]
-        target_name = target_map[int(target.argmax())]
-        with open(output_dir.joinpath('gradcam2d-seq-{}-{}.csv'.format(target_name, i)), 'w') as f:
-            writer = csv.writer(f)
-            writer.writerows(seq.squeeze().cpu().numpy().tolist())
+    file_map = {
+        0: 'saved_models/1d_only_fft/1d_only_fft-epoch2-fold0.pth',
+        1: 'saved_models/1d_only_fft/1d_only_fft-epoch2-fold1.pth',
+        2: 'saved_models/1d_only_fft/1d_only_fft-epoch2-fold2.pth',
+        3: 'saved_models/1d_only_fft/1d_only_fft-epoch2-fold3.pth',
+        4: 'saved_models/1d_only_fft/1d_only_fft-epoch2-fold4.pth',
+    }
 
-        input = seq.unsqueeze(dim=0).to(dev)
-        # focus on ground truth
-        cam, out = g.generate_cam(input, target=int(target.argmax()))
-        seq_size = input.shape[2]
-        img = img_process(input)
+    for fold in range(5):
+        #dat = dataset.ImgARDSDataset(pkl_dataset, [], False, True, False, False, False)
+        dat.set_kfold_indexes_for_fold(fold)
+        model = torch.load(file_map[fold]).to(dev).double()
+        # the model is holding onto some kinda state between samples. Its being
+        # caused by graph retention. Not retaining the graph seems to cause things
+        # to work just fine.
+        g = MaxMinNormCam(model)
+        n_samps = 4000
 
-        cam = cam_process(cam, seq_size)
-        # you can do average/median value by frequency. thats a fairly ez thing.
-        for row in cam:
+        for i in range(n_samps):
+            idx = i if n_samps == len(dat) else np.random.randint(0, len(dat))
+            idx, seq, _, target = dat[idx]
+            target_name = target_map[int(target.argmax())]
+            input = torch.tensor(seq).to(dev)
+            seq_size = input.shape[2]
+            # focus on ground truth
+            cam, out = g.generate_cam(input, target=int(target.argmax()))
+            cam = cam_process(cam, seq_size)
+            # you can do average/median value by frequency. thats a fairly ez thing.
             if target_name == 'ards':
-                ards_freq_avgs += row
+                ards_freq_avgs += cam
                 ards_freq_rows += 1
+                ards_cam_data.append(cam)
             else:
-                other_freq_avgs += row
+                other_freq_avgs += cam
                 other_freq_rows += 1
-        # XXX do this for now b/c testing my averaging theory
-        continue
-        fig, axes = plt.subplots(nrows=1, ncols=5)
-        fig.set_figheight(10)
-        fig.set_figwidth(16)
+                other_cam_data.append(cam)
 
-        ax = plt.subplot(1, 5, 1)
-        ax.imshow(np.rollaxis(img, 0, 3), aspect='auto')
-        ax.set_title('orig')
-
-        ax = plt.subplot(1, 5, 2)
-        ax.imshow(cam, cmap='inferno', aspect='auto')
-        ax.set_title('cam')
-
-        ax = plt.subplot(1, 5, 3)
-        ax.imshow(np.rollaxis(img, 0, 3), aspect='auto')
-        ax.imshow(cam, cmap='inferno', alpha=0.6, aspect='auto')
-        ax.set_title('cam overlay')
-
-        ax = plt.subplot(1, 5, 4)
-        ax.plot(freqs, freq_avgs)
-        ax.set_title('average frequency')
-
-        plt.suptitle('patient: {}, target: {}, pred: {}'.format(dat.all_sequences[idx][0], target.argmax(), F.softmax(out).argmax()))
-
-        # i want to use this as a compression/visualization algo.
-        # I guess that i can probably use a threshold on the cam. and then 0 out the
-        # coefficients below a certain value. kinda similar to how jpeg compression
-        # works. Anyways, this will probably enable us to clarify what exactly is
-        # being focused on.
-
-        # I mean whats the deal here? what do we do to go backwards? So I do this and
-        #
-        # Yeah so this doesnt actually do anything. It just calculates an avg cam val
-        # and has nothing to actually do with the fft vals.
-        #
-        # So you can do a few things still. you can just use the thresholding or you
-        # can use the avg cam vals as a mask. You could even apply some kind of
-        # non-linearity to it if you wanted. well either way you create a mask. one
-        # is a binary thresh mask the other is a fractional averaging/median mask
-        #
-        # apparently masks cannot have absolute value or you are screwed.
-        #
-        # Hmm... I think one thing i notice here is that the ARDS recon signals are
-        # much cleaner compared to the OTHER recon signals. I think this is because ARDS
-        # tends to focus more on the center of the picture where a lot of the important
-        # frequency information is. OTHER tends to focus on the left hand side of the img.
-        # there's a lot of fast oscillation component here. Its quite possible that
-        # the fast oscillation component is just capturing a greater degree of
-        # spontaneous breath. Or it could also be capturing elements of the COPD type
-        # as well
-
-        # well i think the way this is showing is pretty marginal. It might have
-        # some more use if we can average the cam contributions across many images
-        # and then showcase overall what the cam is looking at.
-
-        #plt.savefig(output_dir.joinpath('gradcam2d-{}-{}.png'.format(target_name, i)), dpi=200)
-        #plt.show()
+            if ards_all_img is None and target.argmax() == 1:
+                ards_all_img = input
+            elif other_all_img is None and target.argmax() == 0:
+                other_all_img = input
+            elif target.argmax() == 1:
+                ards_all_img = torch.cat([ards_all_img, input], dim=0)
+            else:
+                other_all_img = torch.cat([other_all_img, input], dim=0)
 
     ards_freq_avgs /= ards_freq_rows
     other_freq_avgs /= other_freq_rows
-    thresh, seq_idx = .4, 0
+    thresh, seq_idx = .5, 0
 
     binary_thresh = True
     if binary_thresh:
@@ -332,6 +300,61 @@ if __name__ == "__main__":
         other_mask = other_freq_avgs
         fourth_plot_title = 'avg cam value mask'
 
+    # plot box plots for frequencies.
+    #
+    # can do plots for frequencies 14 idxs long, so we'll have 16 plots
+    # cols should have names like so:
+    # val, start freq idx, ards/other
+    #
+    # Well 14 plots is too squished. maybe 28 will be better
+    rows = []
+    idx_jump = 14
+    for start in range(0, 224, idx_jump):
+        end = start + idx_jump
+        vals = ards_all_img[:, 0, start:end].cpu().numpy().ravel()
+        start_freq = [start] * len(vals)
+        y = [1] * len(vals)
+        rows.append(np.vstack([vals, start_freq, y]).T)
+        vals = other_all_img[:, 0, start:end].cpu().numpy().ravel()
+        start_freq = [start] * len(vals)
+        y = [0] * len(vals)
+        rows.append(np.vstack([vals, start_freq, y]).T)
+
+    import seaborn as sns
+    rows = np.concatenate(rows, axis=0)
+    rows = pd.DataFrame(rows, columns=['val', 'freq', 'patho'])
+    ax = sns.boxplot(x='freq', y='val', hue='patho', data=rows, palette='Set3', showfliers=False)
+    handles, labels = ax.get_legend_handles_labels()
+    ax.legend(handles, ['Non-ARDS', 'ARDS'])
+    plt.ylabel('')
+    plt.xlabel('Frequency Start')
+    plt.xticks(range(0, int(224/idx_jump)), [
+        '{}'.format(round(freqs[start],1)) for start in range(0, 224, idx_jump)
+    ])
+    plt.show()
+    plt.close()
+
+    # gotta modify this so that frequency is a value and the columns are <frequency, intensity>
+    sns.set_style('white')
+    sns.despine()
+    cam_intensities = np.hstack(ards_cam_data+other_cam_data)
+    freq_col = np.hstack([freqs]*(len(ards_cam_data)+len(other_cam_data)))
+    patho_col = ([1] * len(ards_cam_data) * 224) + ([0] * len(other_cam_data) * 224)
+    cam_data = pd.DataFrame(np.vstack([cam_intensities, freq_col, patho_col]).T, columns=['Cam Intensity', 'Frequency', 'Patho'])
+    fig, ax = plt.subplots(nrows=1, ncols=1)
+    fig.set_figheight(10)
+    fig.set_figwidth(16)
+    sns.lineplot(data=cam_data, x='Frequency', y='Cam Intensity', hue='Patho', ax=ax)
+    handles, labels = ax.get_legend_handles_labels()
+    #axes[0].set_title('Non-ARDS')
+    #axes[1].set_title('ARDS')
+    ax.set_xticks(np.arange(-25, 26, 5))
+    #axes[1].set_xticks(np.arange(-25, 26, 5))
+    ax.set_yticks(np.arange(0, 0.81, 0.1))
+    #axes[1].set_yticks(np.arange(0, 0.81, 0.1))
+    ax.legend(handles, ['Non-ARDS', 'ARDS'])
+    plt.savefig('cam_intensities_ards_non_ards.png', dpi=200)
+    fig.show()
     # so we need an input sequence to visualize. I mean the q is where to get one. I
     # guess we could just select randomly from the ground truth based on patho
     # downside of all this is that it kinda ignores whether the classifier would be
@@ -350,8 +373,8 @@ if __name__ == "__main__":
     ards_seq_idx = np.random.choice(gt[gt.y == 1].index)
     ards_seq = dat.all_sequences[ards_seq_idx][1][rand_idx]
 
-    real = ards_seq[:, 0]
-    imag = ards_seq[:, 1]
+    real = ards_seq[0, :]
+    imag = ards_seq[1, :]
     fft_with_shift = real + (1j*imag)
     fft_noshift = np.fft.ifftshift(fft_with_shift*ards_mask)
     signal = np.fft.ifft(fft_noshift)
@@ -365,7 +388,7 @@ if __name__ == "__main__":
     ax.set_title('orig VWD')
 
     ax = plt.subplot(1, 4, 3)
-    ax.plot(freqs, ards_seq[:, 0].ravel())
+    ax.plot(freqs, ards_seq[0].ravel())
     ax.set_title('FFT sequence')
 
     ax = plt.subplot(1, 4, 4)
@@ -383,8 +406,8 @@ if __name__ == "__main__":
     other_seq_idx = np.random.choice(gt[gt.y == 0].index)
     other_seq = dat.all_sequences[other_seq_idx][1][rand_idx]
 
-    real = other_seq[:, 0]
-    imag = other_seq[:, 1]
+    real = other_seq[0, :]
+    imag = other_seq[1, :]
     fft_with_shift = real + (1j*imag)
     fft_noshift = np.fft.ifftshift(fft_with_shift*other_mask)
     signal = np.fft.ifft(fft_noshift)
@@ -398,7 +421,7 @@ if __name__ == "__main__":
     ax.set_title('orig VWD')
 
     ax = plt.subplot(1, 4, 3)
-    ax.plot(freqs, other_seq[:, 0].ravel())
+    ax.plot(freqs, other_seq[0].ravel())
     ax.set_title('FFT sequence')
 
     ax = plt.subplot(1, 4, 4)
