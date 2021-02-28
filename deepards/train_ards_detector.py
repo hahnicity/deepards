@@ -831,7 +831,6 @@ class CNNLSTMModel(PerBreathClassifierMixin, BaseTraining, PatientClassifierMixi
         with torch.no_grad():
             model.eval()
             for idx, (obs_idx, seq, metadata, target) in enumerate(test_loader):
-                obs_idx, seq, metadata, target = self.clip_odd_batch_sizes(obs_idx, seq, metadata, target)
                 if seq.shape[0] == 0:
                     continue
                 inputs = self.cuda_wrapper(Variable(seq.float()))

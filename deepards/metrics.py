@@ -580,12 +580,15 @@ class DeepARDSResults(object):
         :param epoch_num: Which epoch number are we in
         """
         for pt in y_test.patient.unique():
+            # get all rows for patient from y_test
             pt_rows = y_test[y_test.patient == pt]
             pt_idx = pt_rows.index
             patho_n = pt_rows.y.unique()[0]
 
             pt_actual = pt_rows.y
+            # what was actually predicted for the patient?
             pt_pred = predictions.loc[pt_rows.index]
+
             pt_results = [pt, patho_n]
 
             for n, patho in self.pathos.items():

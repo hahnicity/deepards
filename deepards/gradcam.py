@@ -10,6 +10,9 @@ import torch
 import argparse
 import pickle
 import cv2
+from scipy.spatial.distance import cdist
+from sklearn import metrics
+from sklearn.cluster import KMeans
 import torch.nn.functional as F
 
 
@@ -217,6 +220,93 @@ def cam_process(cam, seq_size):
     return cam
 
 
+def get_fft(seq):
+    real = seq[:, 0, :]
+    imag = seq[:, 1, :]
+    fft_with_shift = real + (1j*imag)
+    return fft_with_shift
+
+
+def fft_to_ts(seq):
+    fft = get_fft(seq)
+    fft_noshift = np.fft.ifftshift(fft)
+    signal = np.fft.ifft(fft_noshift)
+    return signal
+
+
+def fft_to_ts_with_mask(seq, mask):
+    fft = get_fft(seq)
+    fft_noshift = np.fft.ifftshift(fft*mask)
+    signal = np.fft.ifft(fft_noshift)
+    return signal
+
+
+def kmean_clust_search(X):
+
+    # show mean prototypes
+    distortions = []
+    inertias = []
+    sil = []
+    mapping1 = {}
+    mapping2 = {}
+    max_clusts = 50
+    K = range(2, max_clusts)
+
+    for k in K:
+        # Building and fitting the model
+        kmeanModel = KMeans(n_clusters=k).fit(X)
+        kmeanModel.fit(X)
+        labels = kmeanModel.labels_
+
+        distortions.append(sum(np.min(cdist(X, kmeanModel.cluster_centers_,
+                                            'euclidean'), axis=1)) / X.shape[0])
+        inertias.append(kmeanModel.inertia_)
+
+        sil.append(metrics.silhouette_score(X, labels, metric='euclidean'))
+        mapping1[k] = sum(np.min(cdist(X, kmeanModel.cluster_centers_,
+                                       'euclidean'), axis=1)) / X.shape[0]
+        mapping2[k] = kmeanModel.inertia_
+
+    # code from https://anaconda.org/milesgranger/gap-statistic/notebook
+    gaps = np.zeros((len(range(2, max_clusts)),))
+    resultsdf = pd.DataFrame({'clusterCount':[], 'gap':[]})
+    nrefs = 3
+    for gap_index, k in enumerate(range(2, max_clusts)):
+
+        # Holder for reference dispersion results
+        refDisps = np.zeros(nrefs)
+
+        # For n references, generate random sample and perform kmeans getting resulting dispersion of each loop
+        for i in range(nrefs):
+
+            # Create new random reference set
+            randomReference = np.random.random_sample(size=X.shape)
+
+            # Fit to it
+            km = KMeans(k)
+            km.fit(randomReference)
+
+            refDisp = km.inertia_
+            refDisps[i] = refDisp
+
+        # Fit cluster to original data and create dispersion
+        km = KMeans(k)
+        km.fit(X)
+
+        origDisp = km.inertia_
+
+        # Calculate gap statistic
+        gap = np.log(np.mean(refDisps)) - np.log(origDisp)
+
+        # Assign this loop's gap statistic to gaps
+        gaps[gap_index] = gap
+
+        resultsdf = resultsdf.append({'clusterCount':k, 'gap':gap}, ignore_index=True)
+
+    # Plus 2 because index of 0 means 2 cluster is optimal
+    return distortions, inertias, sil, gaps.argmax()+2, resultsdf
+
+
 if __name__ == "__main__":
     """
     This runs the frequency exploration experiment
@@ -239,6 +329,8 @@ if __name__ == "__main__":
     other_all_img = None
     dev = torch.device('cuda:0')
     target_map = {0: 'non-ards', 1: 'ards'}
+    ards_seq_idxs = []
+    other_seq_idxs = []
 
     file_map = {
         0: 'saved_models/1d_only_fft/1d_only_fft-epoch2-fold0.pth',
@@ -256,7 +348,7 @@ if __name__ == "__main__":
         # caused by graph retention. Not retaining the graph seems to cause things
         # to work just fine.
         g = MaxMinNormCam(model)
-        n_samps = 4000
+        n_samps = 1000
 
         for i in range(n_samps):
             idx = i if n_samps == len(dat) else np.random.randint(0, len(dat))
@@ -269,13 +361,11 @@ if __name__ == "__main__":
             cam = cam_process(cam, seq_size)
             # you can do average/median value by frequency. thats a fairly ez thing.
             if target_name == 'ards':
-                ards_freq_avgs += cam
-                ards_freq_rows += 1
                 ards_cam_data.append(cam)
+                ards_seq_idxs.append(idx)
             else:
-                other_freq_avgs += cam
-                other_freq_rows += 1
                 other_cam_data.append(cam)
+                other_seq_idxs.append(idx)
 
             if ards_all_img is None and target.argmax() == 1:
                 ards_all_img = input
@@ -286,9 +376,45 @@ if __name__ == "__main__":
             else:
                 other_all_img = torch.cat([other_all_img, input], dim=0)
 
-    ards_freq_avgs /= ards_freq_rows
-    other_freq_avgs /= other_freq_rows
+    # show mean prototypes
+    ards_freq_avgs = np.nanmean(np.array(ards_cam_data), axis=0).ravel()
+    other_freq_avgs = np.nanmean(np.array(other_cam_data), axis=0).ravel()
+    ards_min_seq = ards_seq_idxs[np.sum((np.array(ards_cam_data) - ards_freq_avgs) ** 2, axis=0).argmin()]
+    other_min_seq = other_seq_idxs[np.sum((np.array(other_cam_data) - other_freq_avgs) ** 2, axis=0).argmin()]
+    ards_seq = fft_to_ts(dat.all_sequences[ards_min_seq][1])
+    other_seq = fft_to_ts(dat.all_sequences[other_min_seq][1])
     thresh, seq_idx = .5, 0
+    rand_idx = np.random.randint(0, 20)
+
+    fig, axes = plt.subplots(nrows=1, ncols=2)
+    fig.set_figheight(10)
+    fig.set_figwidth(16)
+    axes[0].plot(ards_seq[rand_idx].ravel())
+    axes[0].set_title('ARDS mean prototype')
+    axes[1].plot(other_seq[rand_idx].ravel())
+    axes[1].set_title('Non-ARDS mean prototype')
+    plt.show()
+
+    # perform kmeans on the prototype
+    #
+    # Elbow model is inconclusive, silhouette method tells us 2 clusters is best,
+    # and gap stat says that infinitely more clusters is better.
+    X = np.array(ards_cam_data)
+    ards_dist, ards_inertias, ards_sil, ards_gap_optim, ards_gapdf = kmean_clust_search(X)
+    X = np.array(other_cam_data)
+    other_dist, other_inertias, other_sil, other_gap_optim, other_gapdf = kmean_clust_search(X)
+    fig, axes = plt.subplots(nrows=1, ncols=6)
+    fig.set_figheight(10)
+    fig.set_figwidth(16)
+    axes[0].plot(ards_dist)
+    axes[1].plot(ards_sil)
+    axes[2].plot(ards_gapdf.gap)
+    axes[2].set_title('ARDS Gap Stat')
+    axes[3].plot(other_dist)
+    axes[4].plot(other_sil)
+    axes[5].plot(other_gapdf.gap)
+    axes[5].set_title('Other Gap Stat')
+    plt.show()
 
     binary_thresh = True
     if binary_thresh:
@@ -382,62 +508,6 @@ if __name__ == "__main__":
     gt = dat._get_all_sequence_ground_truth()
     rand_idx = np.random.choice(range(0, 20))
     ards_seq_idx = np.random.choice(gt[gt.y == 1].index)
-    ards_seq = dat.all_sequences[ards_seq_idx][1][rand_idx]
-
-    real = ards_seq[0, :]
-    imag = ards_seq[1, :]
-    fft_with_shift = real + (1j*imag)
-    fft_noshift = np.fft.ifftshift(fft_with_shift*ards_mask)
-    signal = np.fft.ifft(fft_noshift)
-
-    ax = plt.subplot(1, 4, 1)
-    ax.plot(freqs, ards_freq_avgs)
-    ax.set_title('avg freq')
-
-    ax = plt.subplot(1, 4, 2)
-    ax.plot(np.fft.ifft(np.fft.ifftshift(fft_with_shift)).real)
-    ax.set_title('orig VWD')
-
-    ax = plt.subplot(1, 4, 3)
-    ax.plot(freqs, ards_seq[0].ravel())
-    ax.set_title('FFT sequence')
-
-    ax = plt.subplot(1, 4, 4)
-    ax.plot(signal)
-    ax.set_title(fourth_plot_title)
-
-    plt.suptitle('ARDS masking')
-    #plt.show()
-    #plt.close()
-
-    fig, axes = plt.subplots(nrows=1, ncols=4)
-    fig.set_figheight(10)
-    fig.set_figwidth(16)
-
-    other_seq_idx = np.random.choice(gt[gt.y == 0].index)
-    other_seq = dat.all_sequences[other_seq_idx][1][rand_idx]
-
-    real = other_seq[0, :]
-    imag = other_seq[1, :]
-    fft_with_shift = real + (1j*imag)
-    fft_noshift = np.fft.ifftshift(fft_with_shift*other_mask)
-    signal = np.fft.ifft(fft_noshift)
-
-    ax = plt.subplot(1, 4, 1)
-    ax.plot(freqs, other_freq_avgs)
-    ax.set_title('avg freq')
-
-    ax = plt.subplot(1, 4, 2)
-    ax.plot(np.fft.ifft(np.fft.ifftshift(fft_with_shift)).real)
-    ax.set_title('orig VWD')
-
-    ax = plt.subplot(1, 4, 3)
-    ax.plot(freqs, other_seq[0].ravel())
-    ax.set_title('FFT sequence')
-
-    ax = plt.subplot(1, 4, 4)
-    ax.plot(signal)
-    ax.set_title(fourth_plot_title)
-
-    plt.suptitle('OTHER masking')
-    #plt.show()
+    ards_seq = dat.all_sequences[ards_seq_idx][1]
+    fft = get_fft(ards_seq)
+    masked_signal = fft_to_ts_with_mask(ards_seq, ards_mask)[rand_idx]
