@@ -4,16 +4,22 @@ Created on Thu Oct 26 11:06:51 2017
 """
 import csv
 from pathlib import Path
+import random
 
 import numpy as np
 import torch
 import argparse
 import pickle
 import cv2
+import matplotlib.pyplot as plt
+import pandas as pd
 from scipy.spatial.distance import cdist
 from sklearn import metrics
 from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
 import torch.nn.functional as F
+
+from deepards import dataset
 
 
 class CamExtractor():
@@ -307,14 +313,49 @@ def kmean_clust_search(X):
     return distortions, inertias, sil, gaps.argmax()+2, resultsdf
 
 
-if __name__ == "__main__":
-    """
-    This runs the frequency exploration experiment
-    """
-    import matplotlib.pyplot as plt
-    import pandas as pd
+def viz_pca_clustering(X):
+    transformed = PCA(2).fit_transform(X)
+    for k in range(2, 10):
+        km = KMeans(k)
+        km.fit(X)
+        labels = km.labels_
+        for i in range(k):
+            mask = labels == i
+            plt.scatter(transformed[mask, 0], transformed[mask, 1])
+        plt.show()
 
-    from deepards import dataset
+
+def viz_prototype_by_clust(n_clust, X, dataset, sequence_map):
+    km = KMeans(n_clust)
+    km.fit(X)
+    labels = km.labels_
+    centroids = km.cluster_centers_
+    out = np.zeros((X.shape[0], len(centroids), X.shape[1]))
+    for i, cam in enumerate(X):
+        out[i] = X[i] - centroids
+    # so lemme think this out... you're taking the distance between the
+    # sequence and the centroid. so then taking the euclidean dist gives
+    # you the distance for each row between each centroid. So then you
+    # would take an argmin across the final
+    row_dist_to_centroid = np.sqrt(np.sum(out ** 2, axis=-1))
+    closest_row_to_centroid = np.argmin(row_dist_to_centroid, axis=0)
+
+    fig, axes = plt.subplots(nrows=1, ncols=n_clust)
+    fig.set_figheight(10)
+    fig.set_figwidth(16)
+    for i in range(n_clust):
+        mask = labels == i
+        # want to find distance each row has to each centroid because you want
+        # to find the closest row by centroid
+        row_proto_idx = closest_row_to_centroid[i]
+        true_idx = sequence_map[row_proto_idx]
+        seq = dataset.all_sequences[true_idx][1]
+        axes[i].plot(fft_to_ts(seq)[0].ravel())
+        axes[i].set_title('cluster {} proto'.format(i))
+    plt.show()
+
+
+def one_d_analytics():
     ards_freq_avgs = np.zeros(224)
     other_freq_avgs = np.zeros(224)
     ards_freq_rows = 0
@@ -331,6 +372,10 @@ if __name__ == "__main__":
     target_map = {0: 'non-ards', 1: 'ards'}
     ards_seq_idxs = []
     other_seq_idxs = []
+    ards_model_out = []
+    other_model_out = []
+    ards_kfold_idxs = []
+    other_kfold_idxs = []
 
     file_map = {
         0: 'saved_models/1d_only_fft/1d_only_fft-epoch2-fold0.pth',
@@ -348,24 +393,29 @@ if __name__ == "__main__":
         # caused by graph retention. Not retaining the graph seems to cause things
         # to work just fine.
         g = MaxMinNormCam(model)
-        n_samps = 1000
+        n_samps = 50
 
         for i in range(n_samps):
-            idx = i if n_samps == len(dat) else np.random.randint(0, len(dat))
-            idx, seq, _, target = dat[idx]
+            kfold_idx = i if n_samps == len(dat) else np.random.randint(0, len(dat))
+            idx, seq, _, target = dat[kfold_idx]
             target_name = target_map[int(target.argmax())]
             input = torch.tensor(seq).to(dev)
             seq_size = input.shape[2]
             # focus on ground truth
             cam, out = g.generate_cam(input, target=int(target.argmax()))
             cam = cam_process(cam, seq_size)
+            out_pred = out.argmax()
             # you can do average/median value by frequency. thats a fairly ez thing.
-            if target_name == 'ards':
+            if out_pred == 1:
                 ards_cam_data.append(cam)
                 ards_seq_idxs.append(idx)
+                ards_model_out.append(out)
+                ards_kfold_idxs.append([fold, kfold_idx])
             else:
                 other_cam_data.append(cam)
                 other_seq_idxs.append(idx)
+                other_model_out.append(out)
+                other_kfold_idxs.append([fold, kfold_idx])
 
             if ards_all_img is None and target.argmax() == 1:
                 ards_all_img = input
@@ -386,35 +436,88 @@ if __name__ == "__main__":
     thresh, seq_idx = .5, 0
     rand_idx = np.random.randint(0, 20)
 
-    fig, axes = plt.subplots(nrows=1, ncols=2)
+    fig, axes = plt.subplots(nrows=2, ncols=2)
     fig.set_figheight(10)
     fig.set_figwidth(16)
-    axes[0].plot(ards_seq[rand_idx].ravel())
-    axes[0].set_title('ARDS mean prototype')
-    axes[1].plot(other_seq[rand_idx].ravel())
-    axes[1].set_title('Non-ARDS mean prototype')
+    axes[0][0].plot(ards_freq_avgs)
+    axes[0][0].set_title('ARDS mean cam')
+    axes[0][1].plot(other_freq_avgs)
+    axes[0][1].set_title('Non-ARDS mean cam')
+    axes[1][0].plot(ards_seq[rand_idx].ravel())
+    axes[1][0].set_title('ARDS mean prototype')
+    axes[1][1].plot(other_seq[rand_idx].ravel())
+    axes[1][1].set_title('Non-ARDS mean prototype')
     plt.show()
 
     # perform kmeans on the prototype
     #
     # Elbow model is inconclusive, silhouette method tells us 2 clusters is best,
     # and gap stat says that infinitely more clusters is better.
+#    X = np.array(ards_cam_data)
+#    ards_dist, ards_inertias, ards_sil, ards_gap_optim, ards_gapdf = kmean_clust_search(X)
+#    X = np.array(other_cam_data)
+#    other_dist, other_inertias, other_sil, other_gap_optim, other_gapdf = kmean_clust_search(X)
+#    fig, axes = plt.subplots(nrows=1, ncols=6)
+#    fig.set_figheight(10)
+#    fig.set_figwidth(16)
+#    axes[0].plot(ards_dist)
+#    axes[1].plot(ards_sil)
+#    axes[2].plot(ards_gapdf.gap)
+#    axes[2].set_title('ARDS Gap Stat')
+#    axes[3].plot(other_dist)
+#    axes[4].plot(other_sil)
+#    axes[5].plot(other_gapdf.gap)
+#    axes[5].set_title('Other Gap Stat')
+#    plt.show()
+
+    # lets just try 5 protos
     X = np.array(ards_cam_data)
-    ards_dist, ards_inertias, ards_sil, ards_gap_optim, ards_gapdf = kmean_clust_search(X)
+    viz_prototype_by_clust(5, X, dat, ards_seq_idxs)
     X = np.array(other_cam_data)
-    other_dist, other_inertias, other_sil, other_gap_optim, other_gapdf = kmean_clust_search(X)
-    fig, axes = plt.subplots(nrows=1, ncols=6)
-    fig.set_figheight(10)
-    fig.set_figwidth(16)
-    axes[0].plot(ards_dist)
-    axes[1].plot(ards_sil)
-    axes[2].plot(ards_gapdf.gap)
-    axes[2].set_title('ARDS Gap Stat')
-    axes[3].plot(other_dist)
-    axes[4].plot(other_sil)
-    axes[5].plot(other_gapdf.gap)
-    axes[5].set_title('Other Gap Stat')
-    plt.show()
+    viz_prototype_by_clust(5, X, dat, other_seq_idxs)
+
+    # I want to try splicing frequencies from one sequence to another. So
+    # basically I would take one item that does very well in one area. ARDS
+    # for example, and then try to nudge another item into ARDS by splicing the ARDS
+    # frequency into the other item. If it works then I guess I look to see
+    # what changed in the waveform that made it look special
+    #
+    # lets try getting all freqs after 15Hz
+    #
+    # Hmm... so initial results werent that promising. it doesnt work that
+    # frequently. But I wonder if we chose frequencies that were more in
+    # line with the ARDS average frequencies rather than just any item that
+    # was confidently predicted as ARDS if things would be different
+    #
+    # This is actually interesting. because splicing doesnt seem to work with the
+    # 15Hz frequency bands that I tried. That is supposedly where ARDS gradcam is looking
+    # tho. Oh... i think I kno why. Its because ARDS is probably looking negatively
+    # at the lower frequencies. Whereas for other its looking positively. the neg.
+    # association is being filtered by relu tho. The high frequencies are a nice
+    # fine tuning point for the network so that they can slightly improve AUC/accuracy
+    # but the main thing is that the lower frequencies will never be out-dominated
+    # by the higher frequencies.
+    freq_mask = np.abs(freqs) >= 15
+    num_mask = np.argwhere(freq_mask).ravel()
+    for i, item in enumerate(ards_model_out):
+        if F.softmax(item)[0, 1] > .95:
+            fold_n, idx = ards_kfold_idxs[i]
+            dat.set_kfold_indexes_for_fold(fold_n)
+            _, seq, __, ___ = dat[idx]
+            ards_cam, ards_out = g.generate_cam(torch.tensor(seq).to(dev), target=1)
+            # select random other item
+            other_fold_n, other_idx = random.choice(other_kfold_idxs)
+            dat.set_kfold_indexes_for_fold(other_fold_n)
+            _, other_seq, __, ___ = dat[other_idx]
+
+            cam_before, out_before = g.generate_cam(torch.tensor(other_seq).to(dev), target=0)
+            other_before = other_seq.copy()
+            other_seq[:, :, num_mask] = seq[:, :, num_mask]
+            other_seq = torch.tensor(other_seq).to(dev)
+
+            cam_after, out_after = g.generate_cam(other_seq, target=0)
+
+            import IPython; IPython.embed()
 
     binary_thresh = True
     if binary_thresh:
@@ -511,3 +614,10 @@ if __name__ == "__main__":
     ards_seq = dat.all_sequences[ards_seq_idx][1]
     fft = get_fft(ards_seq)
     masked_signal = fft_to_ts_with_mask(ards_seq, ards_mask)[rand_idx]
+
+
+if __name__ == "__main__":
+    """
+    This runs the frequency exploration experiment
+    """
+    one_d_analytics()
