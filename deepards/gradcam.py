@@ -518,6 +518,11 @@ def one_d_analytics():
             cam_after, out_after = g.generate_cam(other_seq, target=0)
 
             import IPython; IPython.embed()
+            # I mean how would I show the high frequency part. One idea is splicing
+            # between ARDS and OTHER / OTHER and ARDS. Then visual comparison on
+            # how things change for each breath. Another option is talking to Jason
+            # about what it possibly means, and what the small fluctuations could be
+            # doing.
 
     binary_thresh = True
     if binary_thresh:

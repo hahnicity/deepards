@@ -102,6 +102,7 @@ def do_fold_graphing(start_times, only_aggregate):
         df_stats = computeMetricsFromPatientResults(df, df_stats)
 
     for metric in ['Accuracy', 'f1', 'sensitivity', 'specificity', 'AUC']:
+
         if not only_aggregate:
             _do_fold_graphing(df_stats, metric)
         else:
@@ -200,8 +201,8 @@ def one_to_many_shot_analysis(experiment_name, start_times):
     #
     # patient,model idx,n,patho,pred_frac,pred
     one_to_many_results = []
-    one_to_many_by_thresh = []
-    max_n = 20
+    # so 40 frames is approx \eq to 1hr of vent data so 960 frames if eq to 1 day
+    #max_n = 960
 
     for time in start_times:
         try:
@@ -212,91 +213,76 @@ def one_to_many_shot_analysis(experiment_name, start_times):
             raise FileNotFoundError('Unable to find all results record for experiment: {}, id: {}. Is this an old experiment?'.format(experiment_name, time))
 
         model_list.append(df)
+    gb = model_list[0].all_pred_to_hour.groupby(['patient', 'epoch'])
+    max_n = gb.agg('count').y.max()
     # need to average together last epoch across all foldsand then
 
     # what should my primary metric be?? AUC/Accuracy? why not both? probably should
     # average the results over multiple folds.
+    interval = 5
+    xrange = list(range(1, interval)) + list(range(interval, max_n+1, interval)) + [max_n]
+    xticks_x = np.arange(0, 964.3, 40.17)
+    xticks_labels = [i for i in range(25)]
+    x_ticks = np.arange(0, max_n+interval, interval)
 
     for model_idx, results in enumerate(model_list):
         final_epoch = results.all_pred_to_hour.epoch.max()
         last_epoch_preds = results.all_pred_to_hour[results.all_pred_to_hour.epoch == final_epoch]
-        for n in range(1, max_n+1):
+        if 'hour_x' not in last_epoch_preds.columns:
+            hour_col = 'hour'
+        else:
+            hour_col = 'hour_x'
+        last_epoch_preds = last_epoch_preds.sort_values(by=['patient', hour_col])
+        for n in xrange:
             for pt_id, pt_df in last_epoch_preds.groupby('patient').head(n).groupby('patient'):
                 one_to_many_results.append([
                     pt_id,
                     model_idx,
+                    pt_df.fold.iloc[0],
                     n,
                     pt_df.iloc[0].y,
-                    pt_df.pred.sum() / float(n),
-                    int((pt_df.pred.sum() / float(n)) >= .5),
+                    pt_df.pred.sum() / len(pt_df),
+                    int((pt_df.pred.sum() / len(pt_df)) >= .5),
                 ])
-                one_to_many_by_thresh.append([
-                    pt_id,
-                    model_idx,
-                    n,
-                    pt_df.iloc[0].y,
-                    pt_df.pred.sum() / float(n),
-                    int((pt_df.pred.sum() / float(n)) >= .2),
-                    int((pt_df.pred.sum() / float(n)) >= .4),
-                    int((pt_df.pred.sum() / float(n)) >= .6),
-                    int((pt_df.pred.sum() / float(n)) >= .8),
-                ])
-    one_to_many_results = pd.DataFrame(one_to_many_results, columns=['patient', 'model', 'n', 'patho', 'pred_frac', 'pred'])
-    one_to_many_by_thresh = pd.DataFrame(one_to_many_by_thresh, columns=['patient', 'model', 'n', 'patho', 'pred_frac'] + ['pred{}'.format(i) for i in range(2, 10, 2)])
+    one_to_many_results = pd.DataFrame(one_to_many_results, columns=['patient', 'model', 'fold', 'n', 'patho', 'pred_frac', 'pred'])
 
     # this will be formatted like
     #
-    # n,sen,spec,auc
+    # model_n,n,sen,spec,auc
     pred_stats = []
-    for n in range(1, max_n+1):
-        # just do stats for ARDS right now
-        n_df = one_to_many_results[one_to_many_results.n==n]
-        tps = len(n_df[(n_df.patho == 1) & (n_df.pred == 1)])
-        tns = len(n_df[(n_df.patho != 1) & (n_df.pred != 1)])
-        fps = len(n_df[(n_df.patho != 1) & (n_df.pred == 1)])
-        fns = len(n_df[(n_df.patho == 1) & (n_df.pred != 1)])
-        sen = tps / float(tps+fns)
-        spec = tns / float(tns+fps)
-        auc = roc_auc_score(n_df.patho, n_df.pred_frac)
-        pred_stats.append([n, sen, spec, auc])
-    pred_stats = pd.DataFrame(pred_stats, columns=['n', 'sen', 'spec', 'auc'])
-
-    plt.plot(range(1, max_n+1), pred_stats.sen, label='Sensitivity', color=cmap[0])
-    plt.plot(range(1, max_n+1), pred_stats.spec, label='Specificity', color=cmap[1])
-    plt.plot(range(1, max_n+1), pred_stats.auc, label='AUC', color=cmap[2])
-    plt.xticks([1, 5, 10, 15, 20])
-    plt.xlim([.8, 20.2])
-    plt.grid(axis='y', alpha=.7)
-    plt.ylabel('Score')
-    plt.xlabel('N observations')
-    plt.legend(loc='lower right')
-    plt.show()
-
-    thresh_stats = []
-
-    for n in range(1, max_n+1):
-        # just do accuracy for now
-        n_df = one_to_many_by_thresh[one_to_many_by_thresh.n==n]
-        for thresh in range(2, 10, 2):
-            col = 'pred{}'.format(thresh)
-            tps = len(n_df[(n_df.patho == 1) & (n_df[col] == 1)])
-            tns = len(n_df[(n_df.patho != 1) & (n_df[col] != 1)])
-            fps = len(n_df[(n_df.patho != 1) & (n_df[col] == 1)])
-            fns = len(n_df[(n_df.patho == 1) & (n_df[col] != 1)])
+    for model_n, model_df in one_to_many_results.groupby(['model', 'fold']):
+        for n, n_df in model_df.groupby('n'):
+            # just do stats for ARDS right now
+            tps = len(n_df[(n_df.patho == 1) & (n_df.pred == 1)])
+            tns = len(n_df[(n_df.patho != 1) & (n_df.pred != 1)])
+            fps = len(n_df[(n_df.patho != 1) & (n_df.pred == 1)])
+            fns = len(n_df[(n_df.patho == 1) & (n_df.pred != 1)])
             sen = tps / float(tps+fns)
             spec = tns / float(tns+fps)
             auc = roc_auc_score(n_df.patho, n_df.pred_frac)
-            acc = (tps+tns) / float(tps+tns+fps+fns)
-            thresh_stats.append([thresh, n, sen, spec, auc, acc])
-    thresh_stats = pd.DataFrame(thresh_stats, columns=['thresh', 'n', 'sen', 'spec', 'auc', 'acc'])
+            pred_stats.append([n_df.model.iloc[0], n_df.fold.iloc[0], n, sen, spec, auc])
 
-    for thresh, thresh_df in thresh_stats.groupby('thresh'):
-        plt.plot(range(1, max_n+1), thresh_df.acc, label='{}%'.format(thresh*10), color=cmap[thresh-1], alpha=.8)
-    plt.xticks([1, 5, 10, 15, 20])
-    plt.xlim([.8, 20.2])
+    # XXX alright this code isnt matching my experimental results whatsoever. Which
+    # doesnt make sense because it just doesnt. theres no way that these results
+    # should be off the main experimental results as our number of obs approaches
+    # the max number of obs for each patient.
+
+    pred_stats = pd.DataFrame(pred_stats, columns=['model_n', 'fold', 'n', 'sen', 'spec', 'auc'])
+
+    templ = pred_stats[['n', 'model_n', 'sen', 'spec', 'auc', 'fold']].groupby(['n', 'fold'])
+    # first mean is mean by model, next mean is mean by fold
+    mean_sen = templ.sen.mean().groupby('n').mean()
+    mean_spec = templ.spec.mean().groupby('n').mean()
+    mean_auc = templ.auc.mean().groupby('n').mean()
+
+    plt.plot(xrange, mean_sen, label='Sensitivity', color=cmap[0])
+    plt.plot(xrange, mean_spec, label='Specificity', color=cmap[1])
+    plt.plot(xrange, mean_auc, label='AUC', color=cmap[2])
+    plt.xticks(xticks_x, xticks_labels)
+    plt.xlim([.8, x_ticks[-1]+0.2])
     plt.grid(axis='y', alpha=.7)
-    plt.ylabel('Accuracy')
-    plt.xlabel('N observations')
+    plt.ylabel('Score')
+    plt.xlabel('Hour')
     plt.legend(loc='lower right')
     plt.show()
 
@@ -324,5 +310,6 @@ if __name__ == "__main__":
     if args.sim_dissim_file:
         analyze_similar_dissimilar_experiments(args.sim_dissim_file, unique_experiments)
     else:
-        do_fold_graphing(unique_experiments, args.only_aggregate)
-    #one_to_many_shot_analysis(args.experiment_name, unique_experiments)
+        #do_fold_graphing(unique_experiments, args.only_aggregate)
+        pass
+    one_to_many_shot_analysis(args.experiment_name, unique_experiments)
