@@ -221,6 +221,7 @@ def one_to_many_shot_analysis(experiment_name, start_times):
     # average the results over multiple folds.
     interval = 5
     xrange = list(range(1, interval)) + list(range(interval, max_n+1, interval)) + [max_n]
+    # there are 40.17 breath windows per hour. so the 964.3 = 40.17*24
     xticks_x = np.arange(0, 964.3, 40.17)
     xticks_labels = [i for i in range(25)]
     x_ticks = np.arange(0, max_n+interval, interval)
@@ -259,32 +260,34 @@ def one_to_many_shot_analysis(experiment_name, start_times):
             fns = len(n_df[(n_df.patho == 1) & (n_df.pred != 1)])
             sen = tps / float(tps+fns)
             spec = tns / float(tns+fps)
+            acc = (tps + tns) / (tps+tns+fps+fns)
             auc = roc_auc_score(n_df.patho, n_df.pred_frac)
-            pred_stats.append([n_df.model.iloc[0], n_df.fold.iloc[0], n, sen, spec, auc])
+            pred_stats.append([n_df.model.iloc[0], n_df.fold.iloc[0], n, sen, spec, acc, auc])
 
     # XXX alright this code isnt matching my experimental results whatsoever. Which
     # doesnt make sense because it just doesnt. theres no way that these results
     # should be off the main experimental results as our number of obs approaches
     # the max number of obs for each patient.
 
-    pred_stats = pd.DataFrame(pred_stats, columns=['model_n', 'fold', 'n', 'sen', 'spec', 'auc'])
+    pred_stats = pd.DataFrame(pred_stats, columns=['model_n', 'fold', 'n', 'sen', 'spec', 'acc', 'auc'])
 
-    templ = pred_stats[['n', 'model_n', 'sen', 'spec', 'auc', 'fold']].groupby(['n', 'fold'])
+    templ = pred_stats[['n', 'model_n', 'sen', 'spec', 'auc', 'acc', 'fold']].groupby(['n', 'fold'])
     # first mean is mean by model, next mean is mean by fold
     mean_sen = templ.sen.mean().groupby('n').mean()
     mean_spec = templ.spec.mean().groupby('n').mean()
     mean_auc = templ.auc.mean().groupby('n').mean()
+    mean_acc = templ.acc.mean().groupby('n').mean()
 
+    plt.plot(xrange, mean_auc, label='AUC', color=cmap[2])
+    plt.plot(xrange, mean_acc, label='Accuracy', color=cmap[3])
     plt.plot(xrange, mean_sen, label='Sensitivity', color=cmap[0])
     plt.plot(xrange, mean_spec, label='Specificity', color=cmap[1])
-    plt.plot(xrange, mean_auc, label='AUC', color=cmap[2])
     plt.xticks(xticks_x, xticks_labels)
     plt.xlim([.8, x_ticks[-1]+0.2])
     plt.grid(axis='y', alpha=.7)
-    plt.ylabel('Score')
-    plt.xlabel('Hour')
-    plt.legend(loc='lower right')
-    plt.show()
+    plt.xlabel('Hour', fontsize=16)
+    plt.legend(loc='lower right', fontsize=16)
+    plt.savefig('../img/one_to_many_plotting.png', dpi=200)
 
 
 if __name__ == "__main__":
