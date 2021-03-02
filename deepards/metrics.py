@@ -649,7 +649,6 @@ class DeepARDSResults(object):
                 self.pred_to_hour_frame.loc[idx, 'hour'] = hrs
 
         self.pred_to_hour_frame = self.pred_to_hour_frame.merge(y_test, left_index=True, right_index=True)
-        import IPython; IPython.embed()
         tmp = self.pred_to_hour_frame.copy()
         tmp['epoch'] = epoch_num
         tmp['fold'] = fold_num
