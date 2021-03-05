@@ -313,6 +313,6 @@ if __name__ == "__main__":
     if args.sim_dissim_file:
         analyze_similar_dissimilar_experiments(args.sim_dissim_file, unique_experiments)
     else:
-        #do_fold_graphing(unique_experiments, args.only_aggregate)
+        do_fold_graphing(unique_experiments, args.only_aggregate)
         pass
-    one_to_many_shot_analysis(args.experiment_name, unique_experiments)
+    #one_to_many_shot_analysis(args.experiment_name, unique_experiments)

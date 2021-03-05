@@ -49,7 +49,6 @@ class CamExtractor():
         """
         Does a full forward pass on the model
         """
-        #print(x.shape)
         # Forward pass on the convolutions
         conv_output, x = self.forward_pass_on_convolutions(x)
         # they forgot relu when they were doing this initially. damn
@@ -57,7 +56,7 @@ class CamExtractor():
         # pool and flatten
         try:
             x = self.model.breath_block.avgpool(x).view(-1)
-        except:
+        except AttributeError:
             x = F.avg_pool2d(x, 7).view(-1)
         x = self.model.linear_final(x).unsqueeze(0)
         return conv_output, x
@@ -190,6 +189,19 @@ class FracTotalNormCam(GradCam):
         return cam
 
 
+class UnNormalizedCam(GradCam):
+    def generate_cam(self, input, target=None):
+        conv_output, grad, mo = self.generate_one_hot_grad_and_output(input, target)
+        weights = np.mean(grad, axis=(0, 2))
+        conv_output = np.mean(conv_output, axis=0)
+        cam = np.zeros(conv_output.shape[1:], dtype=np.float32)
+        for i, w in enumerate(weights):
+            cam += w * conv_output[i, :]
+
+        # just apply ReLU and be done
+        return np.maximum(0, cam), mo
+
+
 def get_sequence(filename, ards, c, fold):
     data = pickle.load(open(filename, "rb"))
     data.set_kfold_indexes_for_fold(fold)
@@ -218,11 +230,14 @@ def img_process(model_in):
     return img.numpy()
 
 
-def cam_process(cam, seq_size):
-    cam = cv2.resize(cam, (1, seq_size)).ravel()
+def cam_process(cam, seq_shape, normalize):
+    cam = cv2.resize(cam, seq_shape)
+    if cam.shape[0] == 1:
+        cam = cam.ravel()
     # process cam to 0-1
-    cam -= cam.min()
-    cam = cam / cam.max()
+    if normalize:
+        cam -= cam.min()
+        cam = cam / cam.max()
     return cam
 
 
@@ -355,6 +370,104 @@ def viz_prototype_by_clust(n_clust, X, dataset, sequence_map):
     plt.show()
 
 
+def two_d_analytics():
+    ards_cam_data = []
+    other_cam_data = []
+    oned_dat = dataset.ARDSRawDataset.from_pickle('/fastdata/deepards/unpadded_centered_sequences-nb20-kfold.pkl', False, 1.0, None, -1, 0.2, 1.0, None, False, False, False)
+    oned_dat.butter_filter = None
+    dat = dataset.ImgARDSDataset(oned_dat, [], False, True, False, False, False)
+    oned_dat.train = False
+    dat.train = False
+    freqs = np.fft.fftshift(np.fft.fftfreq(224, d=0.02))
+    ards_all_img = None
+    other_all_img = None
+    dev = torch.device('cuda:0')
+    target_map = {0: 'non-ards', 1: 'ards'}
+    ards_seq_idxs = []
+    other_seq_idxs = []
+    ards_model_out = []
+    other_model_out = []
+    ards_kfold_idxs = []
+    other_kfold_idxs = []
+
+    file_map = {
+        0: 'saved_models/experiment_files_unpadded_centered_nb20_cnn_linear_2d_bs2_only_fft_baseline/model-run-0-epoch2-fold0.pth',
+        1: 'saved_models/experiment_files_unpadded_centered_nb20_cnn_linear_2d_bs2_only_fft_baseline/model-run-0-epoch2-fold1.pth',
+        2: 'saved_models/experiment_files_unpadded_centered_nb20_cnn_linear_2d_bs2_only_fft_baseline/model-run-0-epoch2-fold2.pth',
+        3: 'saved_models/experiment_files_unpadded_centered_nb20_cnn_linear_2d_bs2_only_fft_baseline/model-run-0-epoch2-fold3.pth',
+        4: 'saved_models/experiment_files_unpadded_centered_nb20_cnn_linear_2d_bs2_only_fft_baseline/model-run-0-epoch2-fold4.pth',
+    }
+
+    for fold in range(5):
+        dat.set_kfold_indexes_for_fold(fold)
+        model = torch.load(file_map[fold]).to(dev).double()
+        # the model is holding onto some kinda state between samples. Its being
+        # caused by graph retention. Not retaining the graph seems to cause things
+        # to work just fine.
+        g = UnNormalizedCam(model)
+        #n_samps = len(dat)
+        n_samps = len(dat)-500
+
+        for i in range(n_samps):
+            kfold_idx = i if n_samps == len(dat) else np.random.randint(0, len(dat))
+            idx, seq, _, target = dat[kfold_idx]
+            input = torch.tensor(seq).to(dev).unsqueeze(dim=0)
+            seq_size = input.shape[2]
+            # focus on ground truth
+            cam, out = g.generate_cam(input, target=int(target.argmax()))
+            cam = cam_process(cam, (seq_size, seq_size), False)
+            out_pred = out.argmax()
+            # you can do average/median value by frequency. thats a fairly ez thing.
+            if out_pred == 1:
+                ards_cam_data.append(cam)
+                ards_seq_idxs.append(idx)
+                ards_model_out.append(out)
+                ards_kfold_idxs.append([fold, kfold_idx])
+            else:
+                other_cam_data.append(cam)
+                other_seq_idxs.append(idx)
+                other_model_out.append(out)
+                other_kfold_idxs.append([fold, kfold_idx])
+
+            if ards_all_img is None and target.argmax() == 1:
+                ards_all_img = input
+            elif other_all_img is None and target.argmax() == 0:
+                other_all_img = input
+            elif target.argmax() == 1:
+                ards_all_img = torch.cat([ards_all_img, input], dim=0)
+            else:
+                other_all_img = torch.cat([other_all_img, input], dim=0)
+
+    import seaborn as sns
+    sns.set_style('white')
+    sns.despine()
+    ards_cam_data = np.array(ards_cam_data)
+    other_cam_data = np.array(other_cam_data)
+    cam_intensities = np.hstack((ards_cam_data.ravel(), other_cam_data.ravel()))
+    freq_col = np.hstack([freqs]*(len(ards_cam_data)+len(other_cam_data))*224)
+    patho_col = ([1] * (len(ards_cam_data) * 224**2)) + ([0] * (len(other_cam_data) * 224**2))
+    cam_data = pd.DataFrame(np.vstack([cam_intensities, freq_col, patho_col]).T, columns=['Cam Intensity', 'Frequency', 'Patho'])
+    fig, ax = plt.subplots(nrows=1, ncols=1)
+    fig.set_figheight(10)
+    fig.set_figwidth(16)
+    sns.lineplot(data=cam_data, x='Frequency', y='Cam Intensity', hue='Patho', ax=ax)
+    handles, labels = ax.get_legend_handles_labels()
+    #axes[0].set_title('Non-ARDS')
+    #axes[1].set_title('ARDS')
+    plt.xticks(np.arange(-25, 26, 5), fontsize=14)
+    #axes[1].set_xticks(np.arange(-25, 26, 5))
+    #plt.yticks(np.arange(0, 0.81, 0.1), fontsize=14)
+    plt.ylabel('Cam Intensity', fontsize=16)
+    plt.xlabel('Frequency', fontsize=16)
+    #axes[1].set_yticks(np.arange(0, 0.81, 0.1))
+    ax.legend(handles, ['Non-ARDS', 'ARDS'], fontsize=16)
+    ax.grid(axis='y')
+    plt.xlim((-25.2, 25.2))
+
+    plt.savefig('2d_cam_unnormalized_intensities_ards_non_ards.png', dpi=200)
+    plt.close()
+
+
 def one_d_analytics():
     ards_freq_avgs = np.zeros(224)
     other_freq_avgs = np.zeros(224)
@@ -392,18 +505,17 @@ def one_d_analytics():
         # the model is holding onto some kinda state between samples. Its being
         # caused by graph retention. Not retaining the graph seems to cause things
         # to work just fine.
-        g = MaxMinNormCam(model)
+        g = UnNormalizedCam(model)
         n_samps = 50
 
         for i in range(n_samps):
             kfold_idx = i if n_samps == len(dat) else np.random.randint(0, len(dat))
             idx, seq, _, target = dat[kfold_idx]
-            target_name = target_map[int(target.argmax())]
             input = torch.tensor(seq).to(dev)
             seq_size = input.shape[2]
             # focus on ground truth
             cam, out = g.generate_cam(input, target=int(target.argmax()))
-            cam = cam_process(cam, seq_size)
+            cam = cam_process(cam, (1, seq_size), True)
             out_pred = out.argmax()
             # you can do average/median value by frequency. thats a fairly ez thing.
             if out_pred == 1:
@@ -426,6 +538,71 @@ def one_d_analytics():
             else:
                 other_all_img = torch.cat([other_all_img, input], dim=0)
 
+    # plot box plots for frequencies.
+    #
+    # can do plots for frequencies 14 idxs long, so we'll have 16 plots
+    # cols should have names like so:
+    # val, start freq idx, ards/other
+    #
+    # Well 14 plots is too squished. maybe 28 will be better
+    rows = []
+    idx_jump = 14
+    for start in range(0, 224, idx_jump):
+        end = start + idx_jump
+        vals = ards_all_img[:, 0, start:end].cpu().numpy().ravel()
+        start_freq = [start] * len(vals)
+        y = [1] * len(vals)
+        rows.append(np.vstack([vals, start_freq, y]).T)
+        vals = other_all_img[:, 0, start:end].cpu().numpy().ravel()
+        start_freq = [start] * len(vals)
+        y = [0] * len(vals)
+        rows.append(np.vstack([vals, start_freq, y]).T)
+
+    import seaborn as sns
+    sns.set_style('white')
+    sns.despine()
+    rows = np.concatenate(rows, axis=0)
+    rows = pd.DataFrame(rows, columns=['val', 'freq', 'patho'])
+    fig, ax = plt.subplots(nrows=1, ncols=1)
+    fig.set_figheight(10)
+    fig.set_figwidth(16)
+    sns.boxplot(x='freq', y='val', hue='patho', data=rows, palette='Set2', showfliers=False, ax=ax)
+    handles, labels = ax.get_legend_handles_labels()
+    ax.legend(handles, ['Non-ARDS', 'ARDS'], fontsize=16)
+    plt.ylabel('')
+    plt.xlabel('Frequency Start', fontsize=16)
+    plt.xticks(range(0, int(224/idx_jump)), [
+        '{}'.format(round(freqs[start],1)) for start in range(0, 224, idx_jump)
+    ], fontsize=14)
+    plt.yticks(np.arange(-4, 5), fontsize=14)
+    ax.grid(axis='y')
+    plt.savefig('fft_freq_box_ards_non_ards.png', dpi=200)
+    plt.close()
+
+    sns.set_style('white')
+    sns.despine()
+    cam_intensities = np.hstack(ards_cam_data+other_cam_data).ravel()
+    freq_col = np.hstack([freqs]*(len(ards_cam_data)+len(other_cam_data)))
+    patho_col = ([1] * len(ards_cam_data) * 224) + ([0] * len(other_cam_data) * 224)
+    cam_data = pd.DataFrame(np.vstack([cam_intensities, freq_col, patho_col]).T, columns=['Cam Intensity', 'Frequency', 'Patho'])
+    fig, ax = plt.subplots(nrows=1, ncols=1)
+    fig.set_figheight(10)
+    fig.set_figwidth(16)
+    sns.lineplot(data=cam_data, x='Frequency', y='Cam Intensity', hue='Patho', ax=ax)
+    handles, labels = ax.get_legend_handles_labels()
+    #axes[0].set_title('Non-ARDS')
+    #axes[1].set_title('ARDS')
+    plt.xticks(np.arange(-25, 26, 5), fontsize=14)
+    #axes[1].set_xticks(np.arange(-25, 26, 5))
+    plt.yticks(np.arange(0, 0.81, 0.1), fontsize=14)
+    plt.ylabel('Cam Intensity', fontsize=16)
+    plt.xlabel('Frequency', fontsize=16)
+    #axes[1].set_yticks(np.arange(0, 0.81, 0.1))
+    ax.legend(handles, ['Non-ARDS', 'ARDS'], fontsize=16)
+    ax.grid(axis='y')
+    plt.xlim((-25.2, 25.2))
+    plt.savefig('1d_cam_intensities_ards_non_ards.png', dpi=200)
+    plt.close()
     # show mean prototypes
     ards_freq_avgs = np.nanmean(np.array(ards_cam_data), axis=0).ravel()
     other_freq_avgs = np.nanmean(np.array(other_cam_data), axis=0).ravel()
@@ -500,6 +677,9 @@ def one_d_analytics():
     freq_mask = np.abs(freqs) >= 15
     num_mask = np.argwhere(freq_mask).ravel()
     for i, item in enumerate(ards_model_out):
+        # XXX DEBUG for now
+        continue
+
         if F.softmax(item)[0, 1] > .95:
             fold_n, idx = ards_kfold_idxs[i]
             dat.set_kfold_indexes_for_fold(fold_n)
@@ -534,72 +714,7 @@ def one_d_analytics():
         other_mask = other_freq_avgs
         fourth_plot_title = 'avg cam value mask'
 
-    # plot box plots for frequencies.
-    #
-    # can do plots for frequencies 14 idxs long, so we'll have 16 plots
-    # cols should have names like so:
-    # val, start freq idx, ards/other
-    #
-    # Well 14 plots is too squished. maybe 28 will be better
-    rows = []
-    idx_jump = 14
-    for start in range(0, 224, idx_jump):
-        end = start + idx_jump
-        vals = ards_all_img[:, 0, start:end].cpu().numpy().ravel()
-        start_freq = [start] * len(vals)
-        y = [1] * len(vals)
-        rows.append(np.vstack([vals, start_freq, y]).T)
-        vals = other_all_img[:, 0, start:end].cpu().numpy().ravel()
-        start_freq = [start] * len(vals)
-        y = [0] * len(vals)
-        rows.append(np.vstack([vals, start_freq, y]).T)
-
-    import seaborn as sns
-    sns.set_style('white')
-    sns.despine()
-    rows = np.concatenate(rows, axis=0)
-    rows = pd.DataFrame(rows, columns=['val', 'freq', 'patho'])
-    fig, ax = plt.subplots(nrows=1, ncols=1)
-    fig.set_figheight(10)
-    fig.set_figwidth(16)
-    sns.boxplot(x='freq', y='val', hue='patho', data=rows, palette='Set2', showfliers=False, ax=ax)
-    handles, labels = ax.get_legend_handles_labels()
-    ax.legend(handles, ['Non-ARDS', 'ARDS'], fontsize=16)
-    plt.ylabel('')
-    plt.xlabel('Frequency Start', fontsize=16)
-    plt.xticks(range(0, int(224/idx_jump)), [
-        '{}'.format(round(freqs[start],1)) for start in range(0, 224, idx_jump)
-    ], fontsize=14)
-    plt.yticks(np.arange(-4, 5), fontsize=14)
-    ax.grid(axis='y')
-    plt.savefig('fft_freq_box_ards_non_ards.png', dpi=200)
-    plt.close()
-
     # gotta modify this so that frequency is a value and the columns are <frequency, intensity>
-    sns.set_style('white')
-    sns.despine()
-    cam_intensities = np.hstack(ards_cam_data+other_cam_data)
-    freq_col = np.hstack([freqs]*(len(ards_cam_data)+len(other_cam_data)))
-    patho_col = ([1] * len(ards_cam_data) * 224) + ([0] * len(other_cam_data) * 224)
-    cam_data = pd.DataFrame(np.vstack([cam_intensities, freq_col, patho_col]).T, columns=['Cam Intensity', 'Frequency', 'Patho'])
-    fig, ax = plt.subplots(nrows=1, ncols=1)
-    fig.set_figheight(10)
-    fig.set_figwidth(16)
-    sns.lineplot(data=cam_data, x='Frequency', y='Cam Intensity', hue='Patho', ax=ax)
-    handles, labels = ax.get_legend_handles_labels()
-    #axes[0].set_title('Non-ARDS')
-    #axes[1].set_title('ARDS')
-    plt.xticks(np.arange(-25, 26, 5), fontsize=14)
-    #axes[1].set_xticks(np.arange(-25, 26, 5))
-    plt.yticks(np.arange(0, 0.81, 0.1), fontsize=14)
-    plt.ylabel('Cam Intensity', fontsize=16)
-    plt.xlabel('Frequency', fontsize=16)
-    #axes[1].set_yticks(np.arange(0, 0.81, 0.1))
-    ax.legend(handles, ['Non-ARDS', 'ARDS'], fontsize=16)
-    ax.grid(axis='y')
-    plt.xlim((-25.2, 25.2))
-    plt.savefig('cam_intensities_ards_non_ards.png', dpi=200)
-    plt.close()
     # so we need an input sequence to visualize. I mean the q is where to get one. I
     # guess we could just select randomly from the ground truth based on patho
     # downside of all this is that it kinda ignores whether the classifier would be
@@ -621,8 +736,139 @@ def one_d_analytics():
     masked_signal = fft_to_ts_with_mask(ards_seq, ards_mask)[rand_idx]
 
 
+def one_two_d_comparison():
+    oned_freq_rows = 0
+    twod_freq_rows = 0
+    oned_cam_data = []
+    twod_cam_data = []
+    oned_dat = dataset.ARDSRawDataset.from_pickle('/fastdata/deepards/unpadded_centered_sequences-nb20-kfold.pkl', False, 1.0, None, -1, 0.2, 1.0, None, False, False, False)
+    twod_dat = dataset.ImgARDSDataset(oned_dat, [], False, False, False, False, False)
+    oned_dat.butter_filter = None
+    oned_dat.train = False
+    twod_dat.train = False
+    oned_all_img = []
+    twod_all_img = []
+    dev = torch.device('cuda:0')
+    target_map = {0: 'non-ards', 1: 'ards'}
+    # part of the problem here will be how to match 1d data to 2d data because of how they handle things differently. It will
+    # likely come down to finding a way to match relative patient sequences to each twod.
+    oned_seq_idxs = []
+    twod_seq_idxs = []
+    oned_kfold_idxs = []
+    twod_kfold_idxs = []
+
+    oned_file_map = {
+        0: 'saved_models/experiment_files_unpadded_centered_nb20_cnn_linear/model-run-1-fold0.pth',
+        1: 'saved_models/experiment_files_unpadded_centered_nb20_cnn_linear/model-run-1-fold1.pth',
+        2: 'saved_models/experiment_files_unpadded_centered_nb20_cnn_linear/model-run-1-fold2.pth',
+        3: 'saved_models/experiment_files_unpadded_centered_nb20_cnn_linear/model-run-1-fold3.pth',
+        4: 'saved_models/experiment_files_unpadded_centered_nb20_cnn_linear/model-run-1-fold4.pth',
+    }
+    twod_file_map = {
+        0:'saved_models/experiment_files_unpadded_centered_nb20_cnn_linear_2d_bs2/model-run-1-fold0.pth',
+        1:'saved_models/experiment_files_unpadded_centered_nb20_cnn_linear_2d_bs2/model-run-1-fold1.pth',
+        2:'saved_models/experiment_files_unpadded_centered_nb20_cnn_linear_2d_bs2/model-run-1-fold2.pth',
+        3:'saved_models/experiment_files_unpadded_centered_nb20_cnn_linear_2d_bs2/model-run-1-fold3.pth',
+        4:'saved_models/experiment_files_unpadded_centered_nb20_cnn_linear_2d_bs2/model-run-1-fold4.pth',
+    }
+
+    for dim in range(1, 3):
+        if dim == 1:
+            file_map = oned_file_map
+            #n_samps_per_pt = 11
+            n_samps_per_pt = 1
+            dat = oned_dat
+        else:
+            file_map = twod_file_map
+            n_samps_per_pt = 1
+            dat = twod_dat
+
+        for fold in range(5):
+            dat.set_kfold_indexes_for_fold(fold)
+            gt = dat.get_ground_truth_df()
+            avail_idxs = gt.groupby('patient').head(n_samps_per_pt)
+            model = torch.load(file_map[fold]).to(dev).double()
+            # the model is holding onto some kinda state between samples. Its being
+            # caused by graph retention. Not retaining the graph seems to cause things
+            # to work just fine.
+            g = MaxMinNormCam(model)
+
+            # avail_idxs.index should be the kfold_index, but its dying.
+            for kfold_idx in avail_idxs.index:
+                # the problem with random indices is that you will not be guaranteed
+                # a comparison sequences from 1d -> 2d. So maybe picking first n
+                # sequences per patient is better
+                idx = np.where(dat.kfold_indexes == kfold_idx)[0][0]
+                idx, seq, _, target = dat[idx]
+                t_int = int(target.argmax())
+                seq = torch.tensor(seq).to(dev)
+                seq_size = seq.shape[2]
+                n_iters = 20 if dim == 1 else 1
+                # focus on ground truth
+                for breath_n in range(n_iters):
+                    if dim == 1:
+                        input = seq[breath_n:breath_n+1]
+                        input = input.repeat((20, 1, 1))
+                    elif dim == 2:
+                        input = seq.unsqueeze(dim=0)
+                    cam, out = g.generate_cam(input, target=t_int)
+                    if dim == 1:
+                        cam = cam_process(cam, (1, seq_size), True)
+                        oned_cam_data.append(cam)
+                        oned_seq_idxs.append((idx, breath_n))
+                        oned_kfold_idxs.append([fold, kfold_idx, breath_n])
+                        oned_all_img.append(input[0:1])
+                    elif dim == 2:
+                        cam = cam_process(cam, (seq_size, seq_size), True)
+                        twod_cam_data.append(cam)
+                        twod_seq_idxs.append(idx)
+                        twod_kfold_idxs.append([fold, kfold_idx, breath_n])
+                        twod_all_img.append(input)
+
+    oned_all_img = torch.cat(oned_all_img, dim=0)
+    twod_all_img = torch.cat(twod_all_img, dim=0)
+
+    # need to compare 1d to 2d seqs now
+
+    # for now this works because its just 1-1 in 1d/2d seqs. but not always the case
+    for i, (idx, breath_n) in enumerate(oned_seq_idxs):
+
+        # XXX twod_seq_match, twod_idx_match
+
+        # ok so i have the oned idx and i need to find a way of matching that to
+        # the 2d idx
+        fold, kfold_idx, _ = oned_kfold_idxs[i]
+        oned_dat.set_kfold_indexes_for_fold(fold)
+        twod_dat.set_kfold_indexes_for_fold(fold)
+        pt, _, target, __ = oned_dat.all_sequences[idx]
+        target_name = {0: 'non-ards', 1: 'ards'}[np.argmax(target,axis=0)]
+        # ok so now i have my abs idx, kfold idx, pt, and fold. So what else does it
+        # take to get from here.
+        #
+        # I mean one way would be to actually create a memory construct in
+        # ImgARDSDataset so you can find it easily. But then creating the memory
+        # construct requires more complexity than I want to put into ImgARDSDataset
+        twod_seq_match = twod_seq_idxs[i // 20]
+        twod_idx_match = i // 20
+
+        oned_seq = oned_dat[idx][1][breath_n].ravel()
+        twod_seq = twod_dat[twod_seq_match][1][:, breath_n].cpu().numpy().ravel()
+        oned_cam = oned_cam_data[i]
+        twod_cam = twod_cam_data[twod_idx_match][breath_n]
+
+        fig, axes = plt.subplots(nrows=1, ncols=2)
+        axes[0].plot(oned_seq)
+        axes[1].plot(twod_seq)
+        axes[0].scatter(np.arange(224), oned_seq, c=oned_cam, vmin=0, vmax=1)
+        axes[1].scatter(np.arange(224), twod_seq, c=twod_cam, vmin=0, vmax=1)
+        axes[0].set_title('1d')
+        axes[1].set_title('2d')
+        plt.suptitle('{} sequence i-{} breath_n-{}'.format(target_name, idx, breath_n))
+        plt.savefig('img1d2d/i{}-b{}.png'.format(idx, breath_n), dpi=200)
+
+
 if __name__ == "__main__":
     """
     This runs the frequency exploration experiment
     """
-    one_d_analytics()
+    two_d_analytics()
