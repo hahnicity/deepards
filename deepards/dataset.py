@@ -372,12 +372,14 @@ class ARDSRawDataset(Dataset):
                  butter_filter=None,
                  add_fft=False,
                  only_fft=False,
-                 fft_real_only=False,):
+                 fft_real_only=False,
+                 random_kfold=False,):
         """
         Dataset to generate sequences of data for ARDS Detection
         """
         self.train = train
         self.kfold_num = kfold_num
+        self.kfold_patient_splits = dict()
         self.all_sequences = all_sequences
         self.experiment_num = experiment_num
         self.seq_hours = dict()
@@ -399,6 +401,7 @@ class ARDSRawDataset(Dataset):
         self.only_fft = only_fft
         self.add_fft = add_fft
         self.fft_real_only = fft_real_only
+        self.random_kfold = random_kfold
         if butter_filter is not None:
             sos = butter(10, butter_filter, fs=50, output='sos')
             self.butter_filter = lambda x: sosfilt(sos, x, axis=-1)
@@ -658,8 +661,9 @@ class ARDSRawDataset(Dataset):
             oversample_minority=False,
             drop_if_under_r2=0.0,
             undersample_factor=-1,
+            random_kfold=train_dataset.random_kfold,
         )
-        # XXX will this kick in properly on FFT as well??
+        test_dataset.kfold_patient_splits = train_dataset.kfold_patient_splits
         test_dataset.scaling_factors = train_dataset.scaling_factors
         return test_dataset
 
@@ -675,7 +679,8 @@ class ARDSRawDataset(Dataset):
                     butter_filter,
                     add_fft,
                     only_fft,
-                    fft_real_only,):
+                    fft_real_only,
+                    random_kfold,):
         dataset = pd.read_pickle(data_path)
         if not isinstance(dataset, ARDSRawDataset) and not isinstance(dataset, deepards.dataset.ARDSRawDataset):
             raise ValueError('The pickle file you have specified is out-of-date. Please re-process your dataset and save the new pickled dataset.')
@@ -685,6 +690,9 @@ class ARDSRawDataset(Dataset):
         dataset.undersample_factor = undersample_factor
         dataset.undersample_std_factor = undersample_std_factor
         dataset.oversample_all_factor = oversample_all_factor
+        dataset.random_kfold = random_kfold
+        if dataset.total_kfolds is not None:
+            dataset.set_kfold_patient_splits()
         if butter_filter is not None:
             sos = butter(10, butter_filter, fs=50, output='sos')
             dataset.butter_filter = lambda x: sosfilt(sos, x, axis=-1)
@@ -718,20 +726,35 @@ class ARDSRawDataset(Dataset):
         self.set_undersampling_indices()
         self.set_oversampling_indices()
 
+    def set_kfold_patient_splits(self):
+        # for backwards compat
+        try:
+            self.kfold_patient_splits
+        except AttributeError:
+            self.kfold_patient_splits = dict()
+
+        if not self.kfold_patient_splits:
+            ground_truth = self._get_all_sequence_ground_truth()
+            other_patients = ground_truth[ground_truth.y == 0].patient.unique()
+            ards_patients = ground_truth[ground_truth.y == 1].patient.unique()
+            all_patients = np.append(other_patients, ards_patients)
+            patho = [0] * len(other_patients) + [1] * len(ards_patients)
+            kfolds = StratifiedKFold(n_splits=self.total_kfolds, shuffle=self.random_kfold)
+            for split_num, (train_pt_idx, test_pt_idx) in enumerate(kfolds.split(all_patients, patho)):
+                train_pts = all_patients[train_pt_idx]
+                test_pts = all_patients[test_pt_idx]
+                self.kfold_patient_splits[split_num] = {'train': train_pts, 'test': test_pts}
+        return self.kfold_patient_splits
+
     def get_kfold_indexes_for_fold(self, kfold_num):
+        self.set_kfold_patient_splits()
         ground_truth = self._get_all_sequence_ground_truth()
-        other_patients = ground_truth[ground_truth.y == 0].patient.unique()
-        ards_patients = ground_truth[ground_truth.y == 1].patient.unique()
-        all_patients = np.append(other_patients, ards_patients)
-        patho = [0] * len(other_patients) + [1] * len(ards_patients)
-        kfolds = StratifiedKFold(n_splits=self.total_kfolds)
-        for split_num, (train_pt_idx, test_pt_idx) in enumerate(kfolds.split(all_patients, patho)):
-            train_pts = all_patients[train_pt_idx]
-            test_pts = all_patients[test_pt_idx]
-            if split_num == kfold_num and self.train:
-                return ground_truth[ground_truth.patient.isin(train_pts)].index
-            elif split_num == kfold_num and not self.train:
-                return ground_truth[ground_truth.patient.isin(test_pts)].index
+        if self.train:
+            train_pts = self.kfold_patient_splits[kfold_num]['train']
+            return ground_truth[ground_truth.patient.isin(train_pts)].index
+        else:
+            test_pts = self.kfold_patient_splits[kfold_num]['test']
+            return ground_truth[ground_truth.patient.isin(test_pts)].index
 
     def _get_breath_by_breath_with_flow_time_features(self, process_breath_func, bm_features):
         last_patient = None

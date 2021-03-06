@@ -223,6 +223,7 @@ class BaseTraining(object):
                 add_fft=self.args.with_fft,
                 only_fft=self.args.only_fft,
                 fft_real_only=self.args.fft_real_only,
+                random_kfold=self.args.random_kfold,
             )
         else:
             train_dataset = ARDSRawDataset.from_pickle(
@@ -237,6 +238,7 @@ class BaseTraining(object):
                 add_fft=self.args.with_fft,
                 only_fft=self.args.only_fft,
                 fft_real_only=self.args.fft_real_only,
+                random_kfold=self.args.random_kfold,
             )
 
         self.n_sub_batches = train_dataset.n_sub_batches
@@ -1540,6 +1542,7 @@ def build_parser():
     true_false_flag('--row-mix', 'mix row segments together from patients of the same pathophysiology')
     true_false_flag('--fft-real-only', 'Only incorporate the real component of FFT')
     parser.add_argument('--butter-freq', type=float)
+    true_false_flag('--random-kfold', 'perform a random kfold splitting.')
     return parser
 
 
