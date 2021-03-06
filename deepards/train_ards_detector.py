@@ -248,6 +248,7 @@ class BaseTraining(object):
             if self.args.with_fft or self.args.only_fft:
                 raise NotImplementedError('havent implemented test set only and FFT. would need to redo scaling factor derivation')
             test_dataset = ARDSRawDataset.from_pickle(self.args.test_from_pickle, False, 1.0, None, -1, None, 1.0, butter_filter=self.args.butter_freq, add_fft=False, only_fft=False, fft_real_only=False)
+            test_dataset.scaling_factors = train_dataset.scaling_factors
         else:  # holdout, no pickle, no kfold
             # there is a really bizarre bug where my default arg is being overwritten by
             # the state of the train_dataset obj. I checked pointer references and there was
@@ -277,6 +278,7 @@ class BaseTraining(object):
                 only_fft=self.args.only_fft,
                 fft_real_only=self.args.fft_real_only,
             )
+            test_dataset.scaling_factors = train_dataset.scaling_factors
 
         if self.is_2d_dataset or self.is_2x1d_dataset:
             train_dataset = ImgARDSDataset(train_dataset, self.args.two_dim_transforms, self.args.with_fft, self.args.only_fft, self.args.fft_real_only, self.bbox, self.args.row_mix, butter_filter=self.args.butter_freq)
