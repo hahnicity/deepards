@@ -201,6 +201,7 @@ def one_to_many_shot_analysis(experiment_name, start_times):
     #
     # patient,model idx,n,patho,pred_frac,pred
     one_to_many_results = []
+    hour_range_results = []
     # so 40 frames is approx \eq to 1hr of vent data so 960 frames if eq to 1 day
     #max_n = 960
 
@@ -219,12 +220,14 @@ def one_to_many_shot_analysis(experiment_name, start_times):
 
     # what should my primary metric be?? AUC/Accuracy? why not both? probably should
     # average the results over multiple folds.
-    interval = 5
-    xrange = list(range(1, interval)) + list(range(interval, max_n+1, interval)) + [max_n]
+    minute_interval = 60
+    xrange = list(range(0, 60*24, minute_interval))
     # there are 40.17 breath windows per hour. so the 964.3 = 40.17*24
-    xticks_x = np.arange(0, 964.3, 40.17)
-    xticks_labels = [i for i in range(25)]
-    x_ticks = np.arange(0, max_n+interval, interval)
+    xticks_labels = [i for i in range(1, 25)]
+    xticks_x = list(range(1, 60*24, 60))
+    #x_ticks = np.arange(0, max_n+interval, interval)
+    hour_interval = 20
+    hour_interval_range = list(range(hour_interval, 25))
 
     for model_idx, results in enumerate(model_list):
         final_epoch = results.all_pred_to_hour.epoch.max()
@@ -234,25 +237,75 @@ def one_to_many_shot_analysis(experiment_name, start_times):
         else:
             hour_col = 'hour_x'
         last_epoch_preds = last_epoch_preds.sort_values(by=['patient', hour_col])
-        for n in xrange:
-            for pt_id, pt_df in last_epoch_preds.groupby('patient').head(n).groupby('patient'):
+        for patient, pt_df in last_epoch_preds.groupby('patient'):
+            last_epoch_preds.loc[pt_df.index, 'rel_hour'] = last_epoch_preds.loc[pt_df.index, hour_col] - last_epoch_preds.loc[pt_df.index, hour_col].iloc[0]
+
+        for start in xrange:
+            range_preds = last_epoch_preds[
+                (last_epoch_preds['rel_hour'] <= (start+minute_interval)/60)
+            ]
+            for pt_id, pt_df in range_preds.groupby('patient'):
                 one_to_many_results.append([
                     pt_id,
                     model_idx,
                     pt_df.fold.iloc[0],
-                    n,
+                    (start+minute_interval)/60,
                     pt_df.iloc[0].y,
                     pt_df.pred.sum() / len(pt_df),
                     int((pt_df.pred.sum() / len(pt_df)) >= .5),
                 ])
+
+        for start in range(0, 24-hour_interval+1):
+            range_preds = last_epoch_preds[
+                (last_epoch_preds['rel_hour'] >= start) &
+                (last_epoch_preds['rel_hour'] <= start+hour_interval)
+            ]
+            for pt_id, pt_df in range_preds.groupby('patient'):
+                hour_range_results.append([
+                    pt_id,
+                    model_idx,
+                    pt_df.fold.iloc[0],
+                    start+hour_interval,
+                    pt_df.iloc[0].y,
+                    pt_df.pred.sum() / len(pt_df),
+                    int((pt_df.pred.sum() / len(pt_df)) >= .5),
+                ])
+
     one_to_many_results = pd.DataFrame(one_to_many_results, columns=['patient', 'model', 'fold', 'n', 'patho', 'pred_frac', 'pred'])
+    hour_range_results = pd.DataFrame(hour_range_results, columns=['patient', 'model', 'fold', 'end_hour', 'patho', 'pred_frac', 'pred'])
 
     # this will be formatted like
     #
     # model_n,n,sen,spec,auc
     pred_stats = []
+    hour_range_pred_stats = []
+    #XXX ok slight problem with the hour method because looking at the model
+    # from time of first prediction is not the same as looking at model from
+    # the hour of the prediction.
+    #
+    # I think what chao is looking for is relative hour, not absolute hour
+    # whereas I'm using absolute hour. I think absolute hour is useful in
+    # medical context, but not so much from computational.
+
     for model_n, model_df in one_to_many_results.groupby(['model', 'fold']):
         for n, n_df in model_df.groupby('n'):
+            # just do stats for ARDS right now
+            tps = len(n_df[(n_df.patho == 1) & (n_df.pred == 1)])
+            tns = len(n_df[(n_df.patho != 1) & (n_df.pred != 1)])
+            fps = len(n_df[(n_df.patho != 1) & (n_df.pred == 1)])
+            fns = len(n_df[(n_df.patho == 1) & (n_df.pred != 1)])
+
+            if tns == 0 or tps == 0:
+                import IPython; IPython.embed()
+                continue
+            sen = tps / float(tps+fns)
+            spec = tns / float(tns+fps)
+            acc = (tps + tns) / (tps+tns+fps+fns)
+            auc = roc_auc_score(n_df.patho, n_df.pred_frac)
+            pred_stats.append([n_df.model.iloc[0], n_df.fold.iloc[0], n, sen, spec, acc, auc])
+
+    for model_n, model_df in hour_range_results.groupby(['model', 'fold']):
+        for n, n_df in model_df.groupby('end_hour'):
             # just do stats for ARDS right now
             tps = len(n_df[(n_df.patho == 1) & (n_df.pred == 1)])
             tns = len(n_df[(n_df.patho != 1) & (n_df.pred != 1)])
@@ -262,7 +315,7 @@ def one_to_many_shot_analysis(experiment_name, start_times):
             spec = tns / float(tns+fps)
             acc = (tps + tns) / (tps+tns+fps+fns)
             auc = roc_auc_score(n_df.patho, n_df.pred_frac)
-            pred_stats.append([n_df.model.iloc[0], n_df.fold.iloc[0], n, sen, spec, acc, auc])
+            hour_range_pred_stats.append([n_df.model.iloc[0], n_df.fold.iloc[0], n, sen, spec, acc, auc])
 
     # XXX alright this code isnt matching my experimental results whatsoever. Which
     # doesnt make sense because it just doesnt. theres no way that these results
@@ -270,6 +323,7 @@ def one_to_many_shot_analysis(experiment_name, start_times):
     # the max number of obs for each patient.
 
     pred_stats = pd.DataFrame(pred_stats, columns=['model_n', 'fold', 'n', 'sen', 'spec', 'acc', 'auc'])
+    hour_range_pred_stats = pd.DataFrame(hour_range_pred_stats, columns=['model_n', 'fold', 'end_hour', 'sen', 'spec', 'acc', 'auc'])
 
     templ = pred_stats[['n', 'model_n', 'sen', 'spec', 'auc', 'acc', 'fold']].groupby(['n', 'fold'])
     # first mean is mean by model, next mean is mean by fold
@@ -278,16 +332,40 @@ def one_to_many_shot_analysis(experiment_name, start_times):
     mean_auc = templ.auc.mean().groupby('n').mean()
     mean_acc = templ.acc.mean().groupby('n').mean()
 
-    plt.plot(xrange, mean_auc, label='AUC', color=cmap[2])
-    plt.plot(xrange, mean_acc, label='Accuracy', color=cmap[3])
-    plt.plot(xrange, mean_sen, label='Sensitivity', color=cmap[0])
-    plt.plot(xrange, mean_spec, label='Specificity', color=cmap[1])
+    plt.plot(xrange, mean_auc, label='AUC', color=cmap[2], marker='o', linestyle='dotted')
+    plt.plot(xrange, mean_sen, label='Sensitivity', color=cmap[0], marker='^', linestyle='dashed')
+    plt.plot(xrange, mean_acc, label='Accuracy', color=cmap[3], marker='s', linestyle='dotted')
+    plt.plot(xrange, mean_spec, label='Specificity', color=cmap[1], marker='D', linestyle='dashed')
     plt.xticks(xticks_x, xticks_labels)
-    plt.xlim([.8, x_ticks[-1]+0.2])
+    plt.xlim([-10, xticks_x[-1]+10])
+    yticks = np.arange(.5, 1.01, .05)
+    plt.ylim((yticks[0]-0.05, yticks[-1]+.025))
+    plt.yticks(yticks)
     plt.grid(axis='y', alpha=.7)
-    plt.xlabel('Hour', fontsize=16)
-    plt.legend(loc='lower right', fontsize=16)
+    plt.xlabel('Hour', fontsize=12)
+    plt.ylabel('Score', fontsize=12)
+    plt.legend(loc='lower right', fontsize=12)
+    #plt.show()
     plt.savefig('../img/one_to_many_plotting.png', dpi=200)
+
+    templ = hour_range_pred_stats[['end_hour', 'model_n', 'sen', 'spec', 'auc', 'acc', 'fold']].groupby(['end_hour', 'fold'])
+    # first mean is mean by model, next mean is mean by fold
+    mean_sen = templ.sen.mean().groupby('end_hour').mean()
+    mean_spec = templ.spec.mean().groupby('end_hour').mean()
+    mean_auc = templ.auc.mean().groupby('end_hour').mean()
+    mean_acc = templ.acc.mean().groupby('end_hour').mean()
+
+    plt.plot(hour_interval_range, mean_auc, label='AUC', color=cmap[2])
+    plt.plot(hour_interval_range, mean_sen, label='Sensitivity', color=cmap[0])
+    plt.plot(hour_interval_range, mean_acc, label='Accuracy', color=cmap[3])
+    plt.plot(hour_interval_range, mean_spec, label='Specificity', color=cmap[1])
+    #plt.xticks(xticks_x, xticks_labels)
+    plt.xlim([hour_interval_range[0]-0.2, hour_interval_range[-1]+0.2])
+    plt.grid(axis='y', alpha=.7)
+    plt.xlabel('Hour', fontsize=12)
+    plt.legend(fontsize=12)
+    plt.show()
+    #plt.savefig('../img/one_to_many_plotting.png', dpi=200)
 
 
 if __name__ == "__main__":
@@ -313,6 +391,6 @@ if __name__ == "__main__":
     if args.sim_dissim_file:
         analyze_similar_dissimilar_experiments(args.sim_dissim_file, unique_experiments)
     else:
-        do_fold_graphing(unique_experiments, args.only_aggregate)
+        #do_fold_graphing(unique_experiments, args.only_aggregate)
         pass
-    #one_to_many_shot_analysis(args.experiment_name, unique_experiments)
+    one_to_many_shot_analysis(args.experiment_name, unique_experiments)

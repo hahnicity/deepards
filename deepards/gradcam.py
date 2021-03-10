@@ -475,7 +475,7 @@ def one_d_analytics():
     other_freq_rows = 0
     ards_cam_data = []
     other_cam_data = []
-    dat = dataset.ARDSRawDataset.from_pickle('/fastdata/deepards/unpadded_centered_sequences-nb20-kfold.pkl', False, 1.0, None, -1, 0.2, 1.0, None, False, True, False)
+    dat = dataset.ARDSRawDataset.from_pickle('/fastdata/deepards/unpadded_centered_sequences-nb20-kfold.pkl', False, 1.0, None, -1, 0.2, 1.0, None, False, True, False, False)
     dat.butter_filter = None
     dat.train = False
     freqs = np.fft.fftshift(np.fft.fftfreq(224, d=0.02))
@@ -604,27 +604,27 @@ def one_d_analytics():
     plt.savefig('1d_cam_intensities_ards_non_ards.png', dpi=200)
     plt.close()
     # show mean prototypes
-    ards_freq_avgs = np.nanmean(np.array(ards_cam_data), axis=0).ravel()
-    other_freq_avgs = np.nanmean(np.array(other_cam_data), axis=0).ravel()
-    ards_min_seq = ards_seq_idxs[np.sum((np.array(ards_cam_data) - ards_freq_avgs) ** 2, axis=0).argmin()]
-    other_min_seq = other_seq_idxs[np.sum((np.array(other_cam_data) - other_freq_avgs) ** 2, axis=0).argmin()]
-    ards_seq = fft_to_ts(dat.all_sequences[ards_min_seq][1])
-    other_seq = fft_to_ts(dat.all_sequences[other_min_seq][1])
-    thresh, seq_idx = .5, 0
-    rand_idx = np.random.randint(0, 20)
-
-    fig, axes = plt.subplots(nrows=2, ncols=2)
-    fig.set_figheight(10)
-    fig.set_figwidth(16)
-    axes[0][0].plot(ards_freq_avgs)
-    axes[0][0].set_title('ARDS mean cam')
-    axes[0][1].plot(other_freq_avgs)
-    axes[0][1].set_title('Non-ARDS mean cam')
-    axes[1][0].plot(ards_seq[rand_idx].ravel())
-    axes[1][0].set_title('ARDS mean prototype')
-    axes[1][1].plot(other_seq[rand_idx].ravel())
-    axes[1][1].set_title('Non-ARDS mean prototype')
-    plt.show()
+#    ards_freq_avgs = np.nanmean(np.array(ards_cam_data), axis=0).ravel()
+#    other_freq_avgs = np.nanmean(np.array(other_cam_data), axis=0).ravel()
+#    ards_min_seq = ards_seq_idxs[np.sum((np.array(ards_cam_data) - ards_freq_avgs) ** 2, axis=0).argmin()]
+#    other_min_seq = other_seq_idxs[np.sum((np.array(other_cam_data) - other_freq_avgs) ** 2, axis=0).argmin()]
+#    ards_seq = fft_to_ts(dat.all_sequences[ards_min_seq][1])
+#    other_seq = fft_to_ts(dat.all_sequences[other_min_seq][1])
+#    thresh, seq_idx = .5, 0
+#    rand_idx = np.random.randint(0, 20)
+#
+#    fig, axes = plt.subplots(nrows=2, ncols=2)
+#    fig.set_figheight(10)
+#    fig.set_figwidth(16)
+#    axes[0][0].plot(ards_freq_avgs)
+#    axes[0][0].set_title('ARDS mean cam')
+#    axes[0][1].plot(other_freq_avgs)
+#    axes[0][1].set_title('Non-ARDS mean cam')
+#    axes[1][0].plot(ards_seq[rand_idx].ravel())
+#    axes[1][0].set_title('ARDS mean prototype')
+#    axes[1][1].plot(other_seq[rand_idx].ravel())
+#    axes[1][1].set_title('Non-ARDS mean prototype')
+#    plt.show()
 
     # perform kmeans on the prototype
     #
@@ -648,10 +648,10 @@ def one_d_analytics():
 #    plt.show()
 
     # lets just try 5 protos
-    X = np.array(ards_cam_data)
-    viz_prototype_by_clust(5, X, dat, ards_seq_idxs)
-    X = np.array(other_cam_data)
-    viz_prototype_by_clust(5, X, dat, other_seq_idxs)
+    #X = np.array(ards_cam_data)
+    #viz_prototype_by_clust(5, X, dat, ards_seq_idxs)
+    #X = np.array(other_cam_data)
+    #viz_prototype_by_clust(5, X, dat, other_seq_idxs)
 
     # I want to try splicing frequencies from one sequence to another. So
     # basically I would take one item that does very well in one area. ARDS
@@ -674,11 +674,16 @@ def one_d_analytics():
     # fine tuning point for the network so that they can slightly improve AUC/accuracy
     # but the main thing is that the lower frequencies will never be out-dominated
     # by the higher frequencies.
+    #
+    #
+    # what about a sanity check where you set ARDS pred target  high frequencies
+    # to 0 and then see what the cam mask looks like.
+    # OK, so setting frequencies to 0 does very little. So just more confirmation for
+    # the theory that it is a mix of high+low frequency data, and that the high freq
+    # data can serve as a tipping point.
     freq_mask = np.abs(freqs) >= 15
     num_mask = np.argwhere(freq_mask).ravel()
     for i, item in enumerate(ards_model_out):
-        # XXX DEBUG for now
-        continue
 
         if F.softmax(item)[0, 1] > .95:
             fold_n, idx = ards_kfold_idxs[i]
@@ -871,4 +876,4 @@ if __name__ == "__main__":
     """
     This runs the frequency exploration experiment
     """
-    two_d_analytics()
+    one_d_analytics()
