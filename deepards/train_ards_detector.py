@@ -123,10 +123,14 @@ class BaseTraining(object):
         if self.args.unshuffled and self.args.batch_size > 1:
             raise Exception('Currently we can only run unshuffled runs with a batch size of 1!')
 
-        self.n_kfolds = self.args.kfolds if self.args.kfolds is not None else 1
-        # Train and test both load from the same dataset in the case of kfold
-        if self.n_kfolds > 1:
+        if self.args.bootstrap:
+            self.n_kfolds = 1
             self.args.test_to_pickle = None
+        elif self.args.kfolds:
+            self.n_kfolds = self.args.kfolds
+            self.args.test_to_pickle = None
+        else:
+            self.n_kfolds = 1
 
         self.start_time = datetime.now().strftime('%s')
         self.results = DeepARDSResults(self.start_time, self.args.experiment_name, **self.args.__dict__)
@@ -224,6 +228,7 @@ class BaseTraining(object):
                 only_fft=self.args.only_fft,
                 fft_real_only=self.args.fft_real_only,
                 random_kfold=self.args.random_kfold,
+                bootstrap=self.args.bootstrap,
             )
         else:
             train_dataset = ARDSRawDataset.from_pickle(
@@ -239,6 +244,7 @@ class BaseTraining(object):
                 only_fft=self.args.only_fft,
                 fft_real_only=self.args.fft_real_only,
                 random_kfold=self.args.random_kfold,
+                bootstrap=self.args.bootstrap,
             )
 
         self.n_sub_batches = train_dataset.n_sub_batches
@@ -292,7 +298,7 @@ class BaseTraining(object):
     def get_splits(self):
         train_dataset, test_dataset = self.get_base_datasets()
         for i in range(self.n_kfolds):
-            if self.args.kfolds is not None:
+            if self.args.kfolds is not None or self.args.bootstrap:
                 print('--- Run Fold {} ---'.format(i+1))
                 train_dataset.set_kfold_indexes_for_fold(i)
                 test_dataset.set_kfold_indexes_for_fold(i)
@@ -1543,6 +1549,7 @@ def build_parser():
     true_false_flag('--fft-real-only', 'Only incorporate the real component of FFT')
     parser.add_argument('--butter-freq', type=float)
     true_false_flag('--random-kfold', 'perform a random kfold splitting.')
+    true_false_flag('--bootstrap', 'perform a single trial of an 80-20 bootstrap with replacement')
     return parser
 
 

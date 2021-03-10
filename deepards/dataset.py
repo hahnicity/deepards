@@ -373,7 +373,8 @@ class ARDSRawDataset(Dataset):
                  add_fft=False,
                  only_fft=False,
                  fft_real_only=False,
-                 random_kfold=False,):
+                 random_kfold=False,
+                 bootstrap=False,):
         """
         Dataset to generate sequences of data for ARDS Detection
         """
@@ -402,6 +403,16 @@ class ARDSRawDataset(Dataset):
         self.add_fft = add_fft
         self.fft_real_only = fft_real_only
         self.random_kfold = random_kfold
+        self.bootstrap = bootstrap
+        # this is kinda a hacky thing that I'm doing because we're at the end of this
+        # project. But the deal is that I'm fashioning bootstrap as kfold so we can
+        # sample from every patient that we have with replacement. Otherwise we'd have
+        # to direct things to a director split. I guess in future it might be better
+        # to have a file specified split of train/test instead of a directory struct
+        if bootstrap:
+            self.kfold_num = 0
+            self.total_kfolds = 1
+
         if butter_filter is not None:
             sos = butter(10, butter_filter, fs=50, output='sos')
             self.butter_filter = lambda x: sosfilt(sos, x, axis=-1)
@@ -597,7 +608,6 @@ class ARDSRawDataset(Dataset):
         """
         Get mu and std for a specific set of indices
         """
-        # XXX need to do is_padded.
         chans = self.all_sequences[0][1].shape[1]
         std_sum = np.array([0] * chans, dtype=np.float)
         mean_sum = np.array([0] * chans, dtype=np.float)
@@ -662,6 +672,7 @@ class ARDSRawDataset(Dataset):
             drop_if_under_r2=0.0,
             undersample_factor=-1,
             random_kfold=train_dataset.random_kfold,
+            bootstrap=train_dataset.bootstrap,
         )
         test_dataset.kfold_patient_splits = train_dataset.kfold_patient_splits
         test_dataset.scaling_factors = train_dataset.scaling_factors
@@ -680,7 +691,8 @@ class ARDSRawDataset(Dataset):
                     add_fft,
                     only_fft,
                     fft_real_only,
-                    random_kfold,):
+                    random_kfold,
+                    bootstrap,):
         dataset = pd.read_pickle(data_path)
         if not isinstance(dataset, ARDSRawDataset) and not isinstance(dataset, deepards.dataset.ARDSRawDataset):
             raise ValueError('The pickle file you have specified is out-of-date. Please re-process your dataset and save the new pickled dataset.')
@@ -691,7 +703,8 @@ class ARDSRawDataset(Dataset):
         dataset.undersample_std_factor = undersample_std_factor
         dataset.oversample_all_factor = oversample_all_factor
         dataset.random_kfold = random_kfold
-        if dataset.total_kfolds is not None:
+        dataset.bootstrap = bootstrap
+        if dataset.total_kfolds is not None or dataset.bootstrap:
             dataset.set_kfold_patient_splits()
         if butter_filter is not None:
             sos = butter(10, butter_filter, fs=50, output='sos')
@@ -733,7 +746,7 @@ class ARDSRawDataset(Dataset):
         except AttributeError:
             self.kfold_patient_splits = dict()
 
-        if not self.kfold_patient_splits:
+        if not self.kfold_patient_splits and not self.bootstrap:
             ground_truth = self._get_all_sequence_ground_truth()
             other_patients = ground_truth[ground_truth.y == 0].patient.unique()
             ards_patients = ground_truth[ground_truth.y == 1].patient.unique()
@@ -744,17 +757,45 @@ class ARDSRawDataset(Dataset):
                 train_pts = all_patients[train_pt_idx]
                 test_pts = all_patients[test_pt_idx]
                 self.kfold_patient_splits[split_num] = {'train': train_pts, 'test': test_pts}
+        elif not self.kfold_patient_splits and self.bootstrap:
+            ground_truth = self._get_all_sequence_ground_truth()
+            other_patients = ground_truth[ground_truth.y == 0].patient.unique()
+            ards_patients = ground_truth[ground_truth.y == 1].patient.unique()
+
+            other_train = np.random.choice(other_patients, size=int(len(other_patients)*.8), replace=True)
+            ards_train = np.random.choice(ards_patients, size=int(len(ards_patients)*.8), replace=True)
+
+            other_test_potentials = set(other_patients).difference(other_train)
+            ards_test_potentials = set(ards_patients).difference(ards_train)
+            other_test = np.random.choice(list(other_test_potentials), size=int(len(ards_patients)*.2), replace=True)
+            ards_test = np.random.choice(list(ards_test_potentials), size=int(len(ards_patients)*.2), replace=True)
+
+            train_pts = np.append(other_train, ards_train)
+            test_pts = np.append(other_test, ards_test)
+            self.kfold_patient_splits[0] = {'train': train_pts, 'test': test_pts}
+
         return self.kfold_patient_splits
+
+    def _patient_map_to_loc(self, ground_truth, patients):
+        """
+        handles case of if we have bootstrapped patients we can select the
+        same row twice in the ground truth dataset
+        """
+        pt_locs = []
+        for pt in patients:
+            idxs = list(ground_truth[ground_truth.patient == pt].index)
+            pt_locs.extend(idxs)
+        return pd.Int64Index(pt_locs)
 
     def get_kfold_indexes_for_fold(self, kfold_num):
         self.set_kfold_patient_splits()
         ground_truth = self._get_all_sequence_ground_truth()
         if self.train:
             train_pts = self.kfold_patient_splits[kfold_num]['train']
-            return ground_truth[ground_truth.patient.isin(train_pts)].index
+            return self._patient_map_to_loc(ground_truth, train_pts)
         else:
             test_pts = self.kfold_patient_splits[kfold_num]['test']
-            return ground_truth[ground_truth.patient.isin(test_pts)].index
+            return self._patient_map_to_loc(ground_truth, test_pts)
 
     def _get_breath_by_breath_with_flow_time_features(self, process_breath_func, bm_features):
         last_patient = None
@@ -1070,7 +1111,6 @@ class ARDSRawDataset(Dataset):
                         meta = np.array(get_experimental_breath_meta(breath))
                 else:
                     meta = np.array(get_experimental_breath_meta(breath))
-                    # XXX save information to file so it can be retrieved
 
                 breath_meta.append(meta[indices])
                 seq_hour = (breath_time - start_time).total_seconds() / 60 / 60
@@ -1856,13 +1896,6 @@ class ImgARDSDataset(ARDSRawDataset):
                 'Scaling factors not found for dataset. You must derive them using '
                 'the `derive_scaling_factors` function.'
             )
-        # XXX fft logic must be incorporated into transforms too. This will be a
-        # bit hard tho, because need to duplicate all ops on one chan into another
-        # chan. And even then... your FFT op would probably be corrupted anyhow if
-        # you were doing something like window slicing or window warping and you'd
-        # have to re-compute the fft in order to get a proper value. So there are
-        # probably a number of transforms that I will have to fail on if FFT is
-        # asked for.
 
         data = (data - mu) / std
         if self.butter_filter is not None:
@@ -1885,7 +1918,7 @@ class ImgARDSDataset(ARDSRawDataset):
 
     @classmethod
     def from_pickle(self):
-        # XXX do this in a bit when we have figured all the ins and outs
+        # this isn't really worth my time to do.
         raise NotImplementedError('cant get 2d dataset from pickle yet')
 
 
