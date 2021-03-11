@@ -345,8 +345,8 @@ def one_to_many_shot_analysis(experiment_name, start_times):
     plt.xlabel('Hour', fontsize=12)
     plt.ylabel('Score', fontsize=12)
     plt.legend(loc='lower right', fontsize=12)
-    #plt.show()
-    plt.savefig('../img/one_to_many_plotting.png', dpi=200)
+    plt.show()
+    #plt.savefig('../img/one_to_many_plotting.png', dpi=200)
 
     templ = hour_range_pred_stats[['end_hour', 'model_n', 'sen', 'spec', 'auc', 'acc', 'fold']].groupby(['end_hour', 'fold'])
     # first mean is mean by model, next mean is mean by fold
@@ -391,6 +391,6 @@ if __name__ == "__main__":
     if args.sim_dissim_file:
         analyze_similar_dissimilar_experiments(args.sim_dissim_file, unique_experiments)
     else:
-        #do_fold_graphing(unique_experiments, args.only_aggregate)
+        do_fold_graphing(unique_experiments, args.only_aggregate)
         pass
     one_to_many_shot_analysis(args.experiment_name, unique_experiments)
