@@ -33,7 +33,7 @@ class PatientGradCam(object):
         self.data = data
         self.gt = self.data.get_ground_truth_df()
         self.ards, self.non_ards = self.get_ardsids_otherids()
-        self.batch_size = self.data.all_sequences[0][1].shape[0]
+        self.sub_batch_size = self.data.all_sequences[0][1].shape[0]
         self.breath_len = 224
         self.target = target
         self.results_base_dir = results_base_dir
@@ -64,7 +64,7 @@ class PatientGradCam(object):
         do_makedirs(dirname)
 
         # XXX in future make this configurable
-        med_breath = np.empty((0, self.batch_size, 1, self.breath_len))
+        med_breath = np.empty((0, self.sub_batch_size, 1, self.breath_len))
         cam_outputs = np.empty((0,7))
         target_class = None
         for i in patient_idxs:
@@ -73,7 +73,7 @@ class PatientGradCam(object):
 
         med_breath = np.median(np.median(med_breath, axis=0), axis=0)
         med_breath = np.expand_dims(med_breath, axis=0)
-        br = torch.FloatTensor(med_breath)[[0] * self.batch_size].cuda()
+        br = torch.FloatTensor(med_breath)[[0] * self.sub_batch_size].cuda()
         cam, model_output = self.grad_cam.generate_cam(br, target)
         cam_outputs = cv2.resize(cam, (1, self.breath_len))
         filename = os.path.join(dirname, patient_id + '_target-{}.png'.format(self.target))
@@ -123,7 +123,7 @@ class PatientGradCam(object):
         ground_truth = self.gt.loc[patient_idxs].y.iloc[0]
 
         for abs_idx in patient_idxs:
-            rand_seq = random.choice(range(self.batch_size))
+            rand_seq = random.choice(range(self.sub_batch_size))
             for target in self.get_target(ground_truth):
                 mapping = {0: 'non_ards', 1: 'ards'}
                 dirname = os.path.join(self.results_base_dir, 'gradcam_results', 'sampled_sequences', mapping[target], patient_id)
@@ -142,7 +142,7 @@ class PatientGradCam(object):
             patient_idxs = np.random.choice(patient_idxs, size=n_sequences_per_hour, replace=False)
         ground_truth = self.gt.loc[patient_idxs].y.iloc[0]
         for abs_idx in patient_idxs:
-            for seq_idx in range(self.batch_size):
+            for seq_idx in range(self.sub_batch_size):
                 for target in self.get_target(ground_truth):
                     mapping = {0: 'non_ards', 1: 'ards'}
                     dirname = os.path.join(self.results_base_dir, 'gradcam_results', 'hour_sequences', mapping[target], patient_id, str(hour_start))
@@ -212,7 +212,7 @@ class PatientGradCam(object):
             br = np.expand_dims(br, axis=0)
 
         # make sure the breath is duplicated <batch_size> times
-        br = torch.FloatTensor(br)[[0] * self.batch_size].cuda()
+        br = torch.FloatTensor(br)[[0] * self.sub_batch_size].cuda()
         cam, model_output = self.grad_cam.generate_cam(br, target)
         cam_outputs = cv2.resize(cam, (1, self.breath_len))
         return cam_outputs, br.cpu().numpy(), model_output
@@ -242,7 +242,7 @@ class PatientGradCam(object):
         target = {'ards': 1, 'non_ards': 0}[patho]
         patho_idxs = self.gt[self.gt.y == target].index
         abs_idx = random.choice(patho_idxs)
-        br_idx = random.randint(0, self.batch_size-1)
+        br_idx = random.randint(0, self.sub_batch_size-1)
 
         rel_idx = list(self.data.kfold_indexes).index(abs_idx)
         cam_outputs, br, model_output = self.get_single_sequence_grad_cam(rel_idx, br_idx, target)
@@ -305,6 +305,62 @@ class PatientGradCam(object):
             for _ in range(6):
                 self._make_titled_sequence_pane('random', dirname)
 
+    def perform_dtw_clustering(self, patient_id):
+        # this is against pep8. so sue me.
+        from dtwco import dtw
+        from deepards.mediods import KMedoids
+        patient_idxs = self.gt[self.gt.patient == patient_id].index
+        ground_truth = self.gt.loc[patient_idxs].y.iloc[0]
+        # Can make this configurable in future if we want.
+        sequence_thresh = .8
+        seq_min_len = 5
+
+        sequences = []
+        for abs_idx in patient_idxs:
+            for target in self.get_target(ground_truth):
+                mapping = {0: 'non_ards', 1: 'ards'}
+                dirname = os.path.join(self.results_base_dir, 'gradcam_results', 'dtw_clustering', mapping[target], patient_id)
+                do_makedirs(dirname)
+                rel_idx = list(self.data.kfold_indexes).index(abs_idx)
+                # XXX need to figure this out from here below
+                cam_outputs, br, model_output = self.get_read_grad_cam(rel_idx, target)
+                filename = os.path.join(dirname, 'seq-{}-target-{}.png'.format(abs_idx, self.target))
+                # find contiguous periods above threshold
+                tmp = pd.DataFrame(cam_outputs)
+                mask = tmp >= (sequence_thresh*255)
+                tmp[mask] = 1
+                tmp[~mask] = np.nan
+                for i in range(self.sub_batch_size):
+                    br_cam_row = tmp.loc[i]
+                    group_sizes = br_cam_row.groupby(
+                        (br_cam_row.shift(1) != br_cam_row).cumsum()
+                    ).size()
+                    final_rows = group_sizes[group_sizes >= seq_min_len]
+                    for start_idx, length in final_rows.iteritems():
+                        sequences.append(br[i, 0, start_idx:start_idx+length-1])
+
+        distance_matrix = np.zeros((len(sequences), len(sequences)))
+        for i, seq in enumerate(sequences):
+            for j_offset, seq2 in enumerate(sequences[i+1:]):
+                j_abs = i + j_offset + 1
+                score = dtw(seq, seq2)
+                distance_matrix[i][j_abs] = score
+                distance_matrix[j_abs][i] = score
+
+        # So I have to retrieve the distance between each item and its medoid index
+        # and then i find the min item, and then sum
+        distortions = []
+        for nclusts in range(2, 21):
+            km = KMedoids(nclusts, metric='precomputed')
+            km.fit(distance_matrix)
+            medoids = km.medoid_indices_
+            dist = sum(np.min(distance_matrix[:, medoids], axis=1)) / len(distance_matrix)
+            distortions.append(dist)
+        plt.plot(distortions)
+        plt.xticks(np.arange(0, 19), np.arange(2, 21))
+        plt.title('patient: {} target: {}'.format(patient_id, self.target))
+        plt.show()
+
 
 def plot_grads(pt_grad_obj):
     grads = pt_grad_obj.grad_cam.grads
@@ -325,7 +381,14 @@ if __name__ == '__main__':
     parser.add_argument('-pdp', '--pickled-data-path', help = 'PATH to pickled data', required=True)
     parser.add_argument('--only-patient')
     parser.add_argument('--fold', type=int, required=True, help="K-fold we want our dataset to use. This should be set in accordance to the patients that would normally be in the training dataset during a kfold run.")
-    parser.add_argument('--ops', choices=['averages', 'medians', 'sample_seqs', 'read_cam', 'rand_sample'], required=True)
+    parser.add_argument('--ops', choices=['averages', 'medians', 'sample_seqs', 'read_cam', 'rand_sample', 'dtw_clust'], required=True, help="""
+    *averages* - computes an average breath for patient and performs gradcam
+    *medians* - performs a median breath for patient and performs gradcam
+    *sample_seqs* -
+    *read_cam* - perform cam for an entire read
+    *rand_sample* - randomly sample sequences from stratified split of patients. output sequences and cam in figure for later analysis.
+    *dtw_clust* - perform dtw clustering to see if we can gain insight into specific patterns used.
+    """)
     parser.add_argument('-shuf', '--shuffle-samples', action='store_true')
     parser.add_argument('--results-base-dir', default='/slowdata/deepards/')
     parser.add_argument(
@@ -337,6 +400,9 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     data = pd.read_pickle(args.pickled_data_path)
+    data.random_kfold = False
+    data.bootstrap = False
+    data.kfold_patient_splits = dict()
     data = ARDSRawDataset.make_test_dataset_if_kfold(data)
     data.set_kfold_indexes_for_fold(args.fold)
     pretrained_model = torch.load(args.model_path)
@@ -366,5 +432,6 @@ if __name__ == '__main__':
     elif args.ops == 'read_cam':
         for patient_id in patients:
             pt_grad.get_full_read_patient_sequences(patient_id)
-
-    plot_grads(pt_grad)
+    elif args.ops == 'dtw_clust':
+        for patient_id in patients:
+            pt_grad.perform_dtw_clustering(patient_id)

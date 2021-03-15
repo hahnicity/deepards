@@ -101,7 +101,7 @@ class GradCam():
         one_hot = np.zeros((1, output.size()[-1]), dtype=np.float32)
         one_hot[0][target] = 1
         one_hot = torch.from_numpy(one_hot).requires_grad_(True)
-        return torch.sum(one_hot.cuda().double() * output)
+        return torch.sum(one_hot.cuda() * output)
 
 
 class MaxMinNormCam(GradCam):
