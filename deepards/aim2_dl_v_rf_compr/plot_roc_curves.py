@@ -21,6 +21,8 @@ class SillyPlottingClass(object):
             'frac_votes': 'pred_frac',
         })
         self.dl_experiment_ids = find_matching_experiments(dl_experiment_name)
+        if not self.dl_experiment_ids:
+            raise Exception('no experiments found with id: {}'.format(dl_experiment_name))
 
         # plot chance initially because we don't want to doublt plot
         plt.plot([0, 1], [0, 1], linestyle='--', lw=2, color='r',
@@ -94,7 +96,7 @@ def main():
     cls = SillyPlottingClass(args.reg_ml_results_file, args.dl_experiment_name)
     cls.plot_reg_ml_results()
     cls.plot_dl_results()
-    plt.legend(loc="lower right")
+    plt.legend(loc="lower right", fontsize=12)
     plt.savefig(args.output, dpi=400, bbox_inches='tight')
 
 

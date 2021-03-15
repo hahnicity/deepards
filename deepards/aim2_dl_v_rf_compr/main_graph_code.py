@@ -3,7 +3,7 @@ import io
 
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.signal import resample
+from scipy.signal import butter, resample, sosfilt
 import seaborn as sns
 
 from ventmap.raw_utils import extract_raw
@@ -194,6 +194,7 @@ plt.tick_params(axis='both', which='both', bottom=False, top=False, labelbottom=
 plt.savefig('continuous1.png', dpi=400, bbox_inches='tight', pad_inches=0.0)
 plt.close()
 
+# 2nd plot continuous
 l_rng = 112756+224
 u_rng = l_rng+(224)
 plt.plot(flow[l_rng:u_rng], color='darkblue', lw=1.35, label='flow')
@@ -207,6 +208,22 @@ fig.axes[0].yaxis.set_ticklabels([])
 remove_spines(fig.axes[0])
 plt.tick_params(axis='both', which='both', bottom=False, top=False, labelbottom=False, left=False, labelleft=False)
 plt.savefig('continuous2.png', dpi=400, bbox_inches='tight', pad_inches=0.0)
+plt.close()
+
+# 3rd
+l_rng = 112756+(224*2)
+u_rng = l_rng+(224)
+plt.plot(flow[l_rng:u_rng], color='darkblue', lw=1.35, label='flow')
+plt.xlim([-10, u_rng-l_rng])
+plt.ylim([-33, 43])
+plt.grid(axis='y')
+fig = plt.gcf()
+fig.set_size_inches(4, 4)
+fig.axes[0].xaxis.set_ticklabels([])
+fig.axes[0].yaxis.set_ticklabels([])
+remove_spines(fig.axes[0])
+plt.tick_params(axis='both', which='both', bottom=False, top=False, labelbottom=False, left=False, labelleft=False)
+plt.savefig('continuous3.png', dpi=400, bbox_inches='tight', pad_inches=0.0)
 plt.close()
 
 # downsampled breaths
@@ -297,3 +314,57 @@ remove_spines(fig.axes[0])
 plt.tick_params(axis='both', which='both', bottom=False, top=False, labelbottom=False, left=False, labelleft=False)
 plt.savefig('continuous-centered2.png', dpi=400, bbox_inches='tight', pad_inches=0.0)
 plt.close()
+
+# butterworth filtering
+def butter_plots(flow, hz, l_rng, u_rng, color, do_baseline=False):
+    sos = butter(10, hz, fs=50, output='sos')
+    signal = sosfilt(sos, flow[l_rng:u_rng])
+    plt.plot(signal, color=color, lw=1.35, label='flow')
+    plt.ylim([-33, 43])
+    plt.grid(axis='y')
+    fig = plt.gcf()
+    fig.set_size_inches(4, 4)
+    fig.axes[0].xaxis.set_ticklabels([])
+    fig.axes[0].yaxis.set_ticklabels([])
+    remove_spines(fig.axes[0])
+    plt.tick_params(axis='both', which='both', bottom=False, top=False, labelbottom=False, left=False, labelleft=False)
+    plt.savefig('butterworth-cc-lrng{}-{}hz.png'.format(l_rng, hz), dpi=400, bbox_inches='tight', pad_inches=0.0)
+    plt.close()
+
+    if do_baseline:
+        signal = flow[l_rng:u_rng]
+        plt.plot(signal, color=color, lw=1.35, label='flow')
+        plt.ylim([-33, 43])
+        plt.grid(axis='y')
+        fig = plt.gcf()
+        fig.set_size_inches(4, 4)
+        fig.axes[0].xaxis.set_ticklabels([])
+        fig.axes[0].yaxis.set_ticklabels([])
+        remove_spines(fig.axes[0])
+        plt.tick_params(axis='both', which='both', bottom=False, top=False, labelbottom=False, left=False, labelleft=False)
+        plt.savefig('butterworth-cc-lrng{}-baseline.png'.format(l_rng), dpi=400, bbox_inches='tight', pad_inches=0.0)
+        plt.close()
+
+for hz in [20, 15, 10, 8, 6, 4, 2]:
+    # the baseline sequence we are examining is the same one in continuous centered1
+    l_rng = 112756+19
+    u_rng = l_rng+224
+    if hz == 20:
+        butter_plots(flow, hz, l_rng, u_rng, 'royalblue', do_baseline=True)
+    else:
+        butter_plots(flow, hz, l_rng, u_rng, 'royalblue')
+
+    # we are examining continuous centered2
+    l_rng = 112756+19+224+153
+    u_rng = l_rng+(224)
+    if hz == 20:
+        butter_plots(flow, hz, l_rng, u_rng, 'darkviolet', do_baseline=True)
+    else:
+        butter_plots(flow, hz, l_rng, u_rng, 'darkviolet')
+
+    l_rng = og_l_rng + 8940
+    u_rng = l_rng+224
+    if hz == 20:
+        butter_plots(flow, hz, l_rng, u_rng, 'mediumvioletred', do_baseline=True)
+    else:
+        butter_plots(flow, hz, l_rng, u_rng, 'mediumvioletred')
