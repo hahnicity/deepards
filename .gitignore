@@ -10,6 +10,8 @@ results/
 *.DS_Store
 *.Rhistory
 *.zip
+*.png
+*.svg
 
 # project specific dirs
 Data/

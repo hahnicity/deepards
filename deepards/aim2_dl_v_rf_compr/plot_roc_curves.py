@@ -25,9 +25,9 @@ class SillyPlottingClass(object):
             raise Exception('no experiments found with id: {}'.format(dl_experiment_name))
 
         # plot chance initially because we don't want to doublt plot
-        plt.plot([0, 1], [0, 1], linestyle='--', lw=2, color='r',
+        plt.plot([0, 1], [0, 1], linestyle='dashdot', lw=2, color='r',
                  label='Chance', alpha=.8)
-        plt.grid(alpha=.2)
+        plt.grid(alpha=.2, axis='y')
 
     def plot_dl_results(self):
         df_patient_results_list = []
@@ -39,13 +39,13 @@ class SillyPlottingClass(object):
         epoch_to_auc = [(ep, roc_auc_score(frame.patho, frame.pred_frac)) for ep, frame in df.groupby('epoch_num')]
         best_epoch = sorted(epoch_to_auc, key=lambda x: x[1])[-1][0]
         df = df[df.epoch_num == best_epoch]
-        self.plot_results(df, 'steelblue', 'steelblue', 'Deep Learning')
+        self.plot_results(df, 'steelblue', 'steelblue', 'DNN', 2, 'dashed')
 
     def plot_reg_ml_results(self):
         """Convenience method"""
-        self.plot_results(self.reg_ml_results, 'sandybrown', 'sandybrown', 'Random Forest')
+        self.plot_results(self.reg_ml_results, 'sandybrown', 'sandybrown', 'RF', 1, 'dotted')
 
-    def plot_results(self, results, line_color, std_color, type_roc):
+    def plot_results(self, results, line_color, std_color, type_roc, zorder, linestyle):
         # I might be able to find confidence std using p(1-p). Nah. we actually cant do
         # this because polling is using the identity of std from a binomial distribution. So
         # in order to have conf interval we need some kind of observable std.
@@ -71,8 +71,8 @@ class SillyPlottingClass(object):
 
         auc_ci = (1.96 * np.sqrt(mean_auc * (1-mean_auc) / uniq_pts)).round(3)
         plt.plot(mean_fpr, mean_tpr, color=line_color,
-                 label=r'%s ROC (AUC = %0.2f$\pm$%0.3f)' % (type_roc, mean_auc, auc_ci),
-                 lw=1.5, alpha=.8)
+                 label=r'%s ROC (AUC = %0.2f)' % (type_roc, mean_auc),
+                 lw=1.5, alpha=.8, zorder=zorder, linestyle=linestyle)
 
         std_tpr = np.std(tprs, axis=0)
         tprs_upper = np.minimum(mean_tpr + std_tpr, 1)
@@ -94,8 +94,8 @@ def main():
     parser.add_argument('-o', '--output', default='roc-dl-ml.png')
     args = parser.parse_args()
     cls = SillyPlottingClass(args.reg_ml_results_file, args.dl_experiment_name)
-    cls.plot_reg_ml_results()
     cls.plot_dl_results()
+    cls.plot_reg_ml_results()
     plt.legend(loc="lower right", fontsize=12)
     plt.savefig(args.output, dpi=400, bbox_inches='tight')
 
