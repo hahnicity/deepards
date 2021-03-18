@@ -3,6 +3,7 @@ import io
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 from scipy.signal import butter, resample, sosfilt
 import seaborn as sns
 
@@ -228,12 +229,12 @@ plt.close()
 
 # downsampled breaths
 l_rng = 0
-u_rng = l_rng+(224*4)
+u_rng = l_rng+(224*10)
 flow_seq = flow[l_rng:u_rng]
 new_samples = int(math.ceil(len(flow_seq) / float(4)))
 flow_seq = list(resample(flow_seq, new_samples))
 plt.plot(flow_seq, color='darkblue', lw=1.35, label='flow')
-plt.xlim([-10, 234])
+plt.xlim([-10, 234*2])
 plt.ylim([-33, 43])
 plt.grid(axis='y')
 fig = plt.gcf()
@@ -247,12 +248,12 @@ plt.close()
 
 # downsampled2
 l_rng = u_rng
-u_rng = l_rng+(224*4)
+u_rng = l_rng+(224*10)
 flow_seq = flow[l_rng:u_rng]
 new_samples = int(math.ceil(len(flow_seq) / float(4)))
 flow_seq = list(resample(flow_seq, new_samples))
 plt.plot(flow_seq, color='darkblue', lw=1.35, label='flow')
-plt.xlim([-10, 234])
+plt.xlim([-10, 234*2])
 plt.ylim([-33, 43])
 plt.grid(axis='y')
 fig = plt.gcf()
@@ -266,12 +267,12 @@ plt.close()
 
 # downsampled3
 l_rng = u_rng
-u_rng = l_rng+(224*4)
+u_rng = l_rng+(224*10)
 flow_seq = flow[l_rng:u_rng]
 new_samples = int(math.ceil(len(flow_seq) / float(4)))
 flow_seq = list(resample(flow_seq, new_samples))
 plt.plot(flow_seq, color='darkblue', lw=1.35, label='flow')
-plt.xlim([-10, 234])
+plt.xlim([-10, 234*2])
 plt.ylim([-33, 43])
 plt.grid(axis='y')
 fig = plt.gcf()
@@ -319,6 +320,7 @@ plt.close()
 def butter_plots(flow, hz, l_rng, u_rng, color, do_baseline=False):
     sos = butter(10, hz, fs=50, output='sos')
     signal = sosfilt(sos, flow[l_rng:u_rng])
+    pd.Series(flow[l_rng:u_rng]).to_csv('butter-{}.csv'.format(l_rng), index=False)
     plt.plot(signal, color=color, lw=1.35, label='flow')
     plt.ylim([-33, 43])
     plt.grid(axis='y')

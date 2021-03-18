@@ -5,6 +5,7 @@ import re
 from warnings import warn
 import zipfile
 
+from matplotlib.cm import get_cmap
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MultipleLocator
 import numpy as np
@@ -89,6 +90,42 @@ def _do_fold_graphing(df_stats, metric, label='aggregate results'):
         for k, stats in df_stats.groupby('fold'):
             sns.lineplot(x='epoch', y=metric, data=stats, label='fold {}'.format(int(k)))
     _graph_aggregate(df_stats, metric, label)
+
+
+def show_loss(experiment_name, unique_experiments, plt_title):
+
+    ma = lambda x, w: np.convolve(x, np.ones(w), 'valid') / w
+    loss_map = {i: [] for i in range(5)}
+    for e in unique_experiments:
+        pth_file = 'results/{}_{}.pth'.format(experiment_name, e)
+        hp = torch.load(pth_file)
+        st = hp['start_time']
+        epochs = hp['conf']['epochs']
+        for fold in range(5):
+            loss_file = 'results/loss_fold_{}_deepards_start_{}.pt'.format(fold, st)
+            loss_map[fold].append(torch.load(loss_file).values)
+
+    fig, axes = plt.subplots(nrows=1, ncols=5, figsize=(20, 10))
+    cm = get_cmap('Dark2')
+    for fold in range(5):
+        arr = torch.stack(loss_map[fold], dim=0).mean(dim=0).numpy()
+        axes[fold].plot(ma(arr, 50), color=cm.colors[fold])
+        # i guess epochs can be configurable, but im lazy
+        n_batch_per_fold = len(arr) / epochs
+        if epochs == 10:
+            axes[fold].set_xticks([n_batch_per_fold*i for i in range(0, epochs)])
+        else:
+            axes[fold].set_xticks([0, n_batch_per_fold * (epochs/2), n_batch_per_fold*epochs])
+        if epochs == 10:
+            labels = range(1, epochs+1)
+        else:
+            labels = [1, int(epochs/2), epochs]
+        axes[fold].set_xticklabels(labels)
+        axes[fold].set_xlabel('Epoch')
+        axes[fold].set_title('Fold {}'.format(fold))
+
+    plt.savefig('../img/{}_loss_by_fold.png'.format(plt_title, dpi=400))
+    plt.show()
 
 
 def do_fold_graphing(start_times, only_aggregate):
@@ -373,6 +410,7 @@ if __name__ == "__main__":
     parser.add_argument('-e', '--experiment-name', default='main_experiment')
     parser.add_argument('-sds', '--sim-dissim-file', help='If we are comparing between similar and dissimilar patients in the testing cohort, then supply a yaml file which specifies which patients are similar and which are dissimilar')
     parser.add_argument('--only-aggregate', action='store_true', help='only graph aggregate results')
+    parser.add_argument('-lpt', '--loss-plt-title')
     args = parser.parse_args()
 
     exp_results = []
@@ -391,6 +429,6 @@ if __name__ == "__main__":
     if args.sim_dissim_file:
         analyze_similar_dissimilar_experiments(args.sim_dissim_file, unique_experiments)
     else:
+        show_loss(args.experiment_name, unique_experiments, args.loss_plt_title)
         do_fold_graphing(unique_experiments, args.only_aggregate)
-        pass
-    one_to_many_shot_analysis(args.experiment_name, unique_experiments)
+    #one_to_many_shot_analysis(args.experiment_name, unique_experiments)
