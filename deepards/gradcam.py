@@ -342,8 +342,9 @@ if __name__ == "__main__":
     plt.close()
 
     # gotta modify this so that frequency is a value and the columns are <frequency, intensity>
-    sns.set_style('white')
-    sns.despine()
+    sns.set_style('whitegrid')
+    sns.set_context('paper')
+    #sns.despine()
     cam_intensities = np.hstack(ards_cam_data+other_cam_data)
     freq_col = np.hstack([freqs]*(len(ards_cam_data)+len(other_cam_data)))
     patho_col = ([1] * len(ards_cam_data) * 224) + ([0] * len(other_cam_data) * 224)
@@ -358,13 +359,14 @@ if __name__ == "__main__":
     plt.xticks(np.arange(-25, 26, 5), fontsize=14)
     #axes[1].set_xticks(np.arange(-25, 26, 5))
     plt.yticks(np.arange(0, 0.81, 0.1), fontsize=14)
-    plt.ylabel('Cam Intensity', fontsize=16)
-    plt.xlabel('Frequency', fontsize=16)
+    plt.ylabel('Cam Intensity', fontsize=20)
+    plt.xlabel('Frequency (Hz)', fontsize=20)
     #axes[1].set_yticks(np.arange(0, 0.81, 0.1))
-    ax.legend(handles, ['Non-ARDS', 'ARDS'], fontsize=16)
-    ax.grid(axis='y')
+    ax.legend(handles, ['Non-ARDS', 'ARDS'], fontsize=20)
+    #ax.grid(axis='y')
+    ax.xaxis.grid(False)
     plt.xlim((-25.2, 25.2))
-    plt.savefig('cam_intensities_ards_non_ards.png', dpi=200)
+    plt.savefig('cam_intensities_ards_non_ards.png', dpi=400)
     plt.close()
     # so we need an input sequence to visualize. I mean the q is where to get one. I
     # guess we could just select randomly from the ground truth based on patho

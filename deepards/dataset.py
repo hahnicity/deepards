@@ -413,6 +413,7 @@ class ARDSRawDataset(Dataset):
             self.kfold_num = 0
             self.total_kfolds = 1
 
+        self.butter_freq = butter_filter
         if butter_filter is not None:
             sos = butter(10, butter_filter, fs=50, output='sos')
             self.butter_filter = lambda x: sosfilt(sos, x, axis=-1)
@@ -673,6 +674,7 @@ class ARDSRawDataset(Dataset):
             undersample_factor=-1,
             random_kfold=train_dataset.random_kfold,
             bootstrap=train_dataset.bootstrap,
+            butter_filter=train_dataset.butter_freq,
         )
         test_dataset.kfold_patient_splits = train_dataset.kfold_patient_splits
         test_dataset.scaling_factors = train_dataset.scaling_factors
@@ -707,6 +709,7 @@ class ARDSRawDataset(Dataset):
         if dataset.total_kfolds is not None or dataset.bootstrap:
             dataset.set_kfold_patient_splits()
         if butter_filter is not None:
+            dataset.butter_freq = butter_filter
             sos = butter(10, butter_filter, fs=50, output='sos')
             dataset.butter_filter = lambda x: sosfilt(sos, x, axis=-1)
         else:
