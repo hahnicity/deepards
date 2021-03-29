@@ -12,6 +12,7 @@ results/
 *.zip
 *.png
 *.svg
+*.csv
 
 # project specific dirs
 Data/
