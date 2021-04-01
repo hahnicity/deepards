@@ -369,7 +369,8 @@ class ARDSRawDataset(Dataset):
                  undersample_factor=-1,
                  undersample_std_factor=0.2,
                  oversample_all_factor=1.0,
-                 butter_filter=None,
+                 butter_low=None,
+                 butter_high=None,
                  add_fft=False,
                  only_fft=False,
                  fft_real_only=False,
@@ -413,12 +414,9 @@ class ARDSRawDataset(Dataset):
             self.kfold_num = 0
             self.total_kfolds = 1
 
-        self.butter_freq = butter_filter
-        if butter_filter is not None:
-            sos = butter(10, butter_filter, fs=50, output='sos')
-            self.butter_filter = lambda x: sosfilt(sos, x, axis=-1)
-        else:
-            self.butter_filter = None
+        self.butter_low = butter_low
+        self.butter_high = butter_high
+        self.setup_butter_filter()
 
         if drop_i_lim and drop_e_lim:
             raise Exception('You cannot drop both I and E lims!')
@@ -538,6 +536,20 @@ class ARDSRawDataset(Dataset):
 
         if kfold_num is not None:
             self.set_kfold_indexes_for_fold(kfold_num)
+
+    def setup_butter_filter(self):
+        if self.butter_low is not None and self.butter_high is None:
+            sos = butter(10, self.butter_low, fs=50, output='sos', btype='lowpass')
+            self.butter_filter = lambda x: sosfilt(sos, x, axis=-1)
+        elif self.butter_low is None and self.butter_high is not None:
+            sos = butter(10, self.butter_high, fs=50, output='sos', btype='highpass')
+            self.butter_filter = lambda x: sosfilt(sos, x, axis=-1)
+        elif self.butter_low is not None and self.butter_high is not None:
+            wn = (self.butter_low, self.butter_high)
+            sos = butter(10, wn, fs=50, output='sos', btype='bandpass')
+            self.butter_filter = lambda x: sosfilt(sos, x, axis=-1)
+        else:
+            self.butter_filter = None
 
     def set_oversampling_indices(self):
         # Cannot oversample with testing set
@@ -674,7 +686,8 @@ class ARDSRawDataset(Dataset):
             undersample_factor=-1,
             random_kfold=train_dataset.random_kfold,
             bootstrap=train_dataset.bootstrap,
-            butter_filter=train_dataset.butter_freq,
+            butter_low=train_dataset.butter_low,
+            butter_high=train_dataset.butter_high,
         )
         test_dataset.kfold_patient_splits = train_dataset.kfold_patient_splits
         test_dataset.scaling_factors = train_dataset.scaling_factors
@@ -689,7 +702,8 @@ class ARDSRawDataset(Dataset):
                     undersample_factor,
                     undersample_std_factor,
                     oversample_all_factor,
-                    butter_filter,
+                    butter_low,
+                    butter_high,
                     add_fft,
                     only_fft,
                     fft_real_only,
@@ -706,14 +720,13 @@ class ARDSRawDataset(Dataset):
         dataset.oversample_all_factor = oversample_all_factor
         dataset.random_kfold = random_kfold
         dataset.bootstrap = bootstrap
+        dataset.butter_low = butter_low
+        dataset.butter_high = butter_high
+        dataset.setup_butter_filter()
+
         if dataset.total_kfolds is not None or dataset.bootstrap:
             dataset.set_kfold_patient_splits()
-        if butter_filter is not None:
-            dataset.butter_freq = butter_filter
-            sos = butter(10, butter_filter, fs=50, output='sos')
-            dataset.butter_filter = lambda x: sosfilt(sos, x, axis=-1)
-        else:
-            dataset.butter_filter = None
+
         # backwards compat for older datasets
         try:
             dataset.add_fft
