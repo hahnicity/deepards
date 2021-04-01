@@ -347,7 +347,7 @@ def butter_plots(flow, hz, l_rng, u_rng, color, do_baseline=False):
         plt.savefig('butterworth-cc-lrng{}-baseline.png'.format(l_rng), dpi=400, bbox_inches='tight', pad_inches=0.0)
         plt.close()
 
-for hz in [20, 15, 10, 8, 6, 4, 2]:
+for hz in [20, 15, 10, 8, 6, 4, 2, 1, 0.5]:
     # the baseline sequence we are examining is the same one in continuous centered1
     l_rng = 112756+19
     u_rng = l_rng+224

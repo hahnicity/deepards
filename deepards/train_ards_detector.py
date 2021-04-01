@@ -223,7 +223,8 @@ class BaseTraining(object):
                 truncate_e_lim=self.args.truncate_e_lim,
                 undersample_factor=self.args.undersample_factor,
                 undersample_std_factor=self.args.undersample_std_factor,
-                butter_filter=self.args.butter_freq,
+                butter_low=self.args.butter_low,
+                butter_high=self.args.butter_high,
                 add_fft=self.args.with_fft,
                 only_fft=self.args.only_fft,
                 fft_real_only=self.args.fft_real_only,
@@ -239,7 +240,8 @@ class BaseTraining(object):
                 self.args.undersample_factor,
                 self.args.undersample_std_factor,
                 self.args.oversample_all_factor,
-                butter_filter=self.args.butter_freq,
+                butter_low=self.args.butter_low,
+                butter_high=self.args.butter_high,
                 add_fft=self.args.with_fft,
                 only_fft=self.args.only_fft,
                 fft_real_only=self.args.fft_real_only,
@@ -255,7 +257,11 @@ class BaseTraining(object):
         elif self.args.test_from_pickle:
             if self.args.with_fft or self.args.only_fft:
                 raise NotImplementedError('havent implemented test set only and FFT. would need to redo scaling factor derivation')
-            test_dataset = ARDSRawDataset.from_pickle(self.args.test_from_pickle, False, 1.0, None, -1, None, 1.0, butter_filter=self.args.butter_freq, add_fft=False, only_fft=False, fft_real_only=False)
+            test_dataset = ARDSRawDataset.from_pickle(
+                self.args.test_from_pickle, False, 1.0, None, -1, None, 1.0,
+                butter_low=self.args.butter_low, butter_high=self.args.butter_high,
+                add_fft=False, only_fft=False, fft_real_only=False
+            )
             test_dataset.scaling_factors = train_dataset.scaling_factors
         else:  # holdout, no pickle, no kfold
             # there is a really bizarre bug where my default arg is being overwritten by
@@ -281,7 +287,8 @@ class BaseTraining(object):
                 truncate_e_lim=self.args.truncate_e_lim,
                 undersample_factor=-1,
                 oversample_minority=False,
-                butter_filter=self.args.butter_freq,
+                butter_low=self.args.butter_low,
+                butter_high=self.args.butter_high,
                 add_fft=self.args.with_fft,
                 only_fft=self.args.only_fft,
                 fft_real_only=self.args.fft_real_only,
@@ -289,6 +296,7 @@ class BaseTraining(object):
             test_dataset.scaling_factors = train_dataset.scaling_factors
 
         if self.is_2d_dataset or self.is_2x1d_dataset:
+            # I dont think I'm going to be supporting this.
             train_dataset = ImgARDSDataset(train_dataset, self.args.two_dim_transforms, self.args.with_fft, self.args.only_fft, self.args.fft_real_only, self.bbox, self.args.row_mix, butter_filter=self.args.butter_freq)
             test_dataset = ImgARDSDataset(test_dataset, self.args.two_dim_transforms, self.args.with_fft, self.args.only_fft, self.args.fft_real_only, self.bbox, self.args.row_mix, butter_filter=self.args.butter_freq)
             test_dataset.scaling_factors = train_dataset.scaling_factors
@@ -1547,7 +1555,8 @@ def build_parser():
     parser.add_argument('--multitask-epochs', type=int)
     true_false_flag('--row-mix', 'mix row segments together from patients of the same pathophysiology')
     true_false_flag('--fft-real-only', 'Only incorporate the real component of FFT')
-    parser.add_argument('--butter-freq', type=float)
+    parser.add_argument('--butter-low', type=float, help='butter filter low frequency')
+    parser.add_argument('--butter-high', type=float, help='butter filter high frequency')
     true_false_flag('--random-kfold', 'perform a random kfold splitting.')
     true_false_flag('--bootstrap', 'perform a single trial of an 80-20 bootstrap with replacement')
     return parser
