@@ -1,4 +1,5 @@
 cuda_no_dp: true
+random_kfold: false
 clip_val: 0.01
 clip_grad: true
 dataset_type: unpadded_centered_sequences

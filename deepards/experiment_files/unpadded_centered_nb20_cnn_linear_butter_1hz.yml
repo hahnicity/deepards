@@ -1,4 +1,5 @@
 cuda_no_dp: true
+random_kfold: false
 clip_val: 0.01
 clip_grad: true
 dataset_type: unpadded_centered_sequences
@@ -11,5 +12,4 @@ train_from_pickle: /fastdata/deepards/unpadded_centered_sequences-nb20-kfold-new
 #train_to_pickle: /fastdata/deepards/unpadded_centered_sequences-nb20-kfold-new.pkl
 n_sub_batches: 20
 data_path: /fastdata/ardsdetection
-butter_freq: 20
-random_kfold: false
+butter_freq: 1

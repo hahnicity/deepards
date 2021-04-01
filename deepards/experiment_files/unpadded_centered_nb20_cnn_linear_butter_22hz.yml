@@ -12,3 +12,4 @@ train_from_pickle: /fastdata/deepards/unpadded_centered_sequences-nb20-kfold-new
 n_sub_batches: 20
 data_path: /fastdata/ardsdetection
 butter_freq: 22
+random_kfold: false
