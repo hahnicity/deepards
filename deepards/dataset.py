@@ -541,8 +541,14 @@ class ARDSRawDataset(Dataset):
         if self.butter_low is not None and self.butter_high is None:
             sos = butter(10, self.butter_low, fs=50, output='sos', btype='lowpass')
             self.butter_filter = lambda x: sosfilt(sos, x, axis=-1)
+        elif self.butter_low == 0:
+            sos = butter(10, self.butter_high, fs=50, output='sos', btype='lowpass')
+            self.butter_filter = lambda x: sosfilt(sos, x, axis=-1)
         elif self.butter_low is None and self.butter_high is not None:
             sos = butter(10, self.butter_high, fs=50, output='sos', btype='highpass')
+            self.butter_filter = lambda x: sosfilt(sos, x, axis=-1)
+        elif self.butter_high == 25:
+            sos = butter(10, self.butter_low, fs=50, output='sos', btype='highpass')
             self.butter_filter = lambda x: sosfilt(sos, x, axis=-1)
         elif self.butter_low is not None and self.butter_high is not None:
             wn = (self.butter_low, self.butter_high)
