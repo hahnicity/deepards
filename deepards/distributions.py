@@ -120,7 +120,7 @@ def fft_butterworth_filt_boxplot(data, target, hz_low, hz_high):
 
 
 def butterworth_filter_simple_dist(data, target, hz_low, hz_high):
-    sos = butter(10, (hz_low, hz_high), fs=50, output='sos', btype='bandpass')
+    sos = setup_butter_filter(hz_low, hz_high)
     filt = sosfilt(sos, data, axis=-1)
     frame_target = []
     for i in target:
@@ -138,18 +138,17 @@ def butterworth_filter_simple_dist(data, target, hz_low, hz_high):
     ards_dist = z_filter(ards_dist)
     other_dist = z_filter(other_dist)
 
-    plt.hist(ards_dist, label='ards', bins=100, alpha=.5)
-    plt.hist(other_dist, label='other', bins=100, alpha=.5)
-    plt.legend()
-    plt.show()
-    plt.close()
+#    plt.hist(ards_dist, label='ards', bins=100, alpha=.5)
+#    plt.hist(other_dist, label='other', bins=100, alpha=.5)
+#    plt.savefig('../img/butterworth-hist-{}-{}hz.png'.format(hz_low, hz_high))
+#    plt.legend()
+#    plt.close()
 
     # this just shows a seaborn distplot
     df = pd.DataFrame(np.array([filt.ravel(), frame_target]).T, columns=['obs', 'target'])
-    sns.distplot(z_filter(df[df.target==1].obs), label='ards')
-    sns.distplot(z_filter(df[df.target==0].obs), label='other')
+    sns.displot(data=df, x='obs', hue='target', kind='kde')
     plt.legend()
-    plt.show()
+    plt.savefig('../img/butterworth-kde-{}-{}hz.png'.format(hz_low, hz_high))
     plt.close()
 
 
@@ -170,8 +169,8 @@ def main():
             all_data.append(seq)
             all_target.append(np.argmax(target))
     all_data = np.concatenate(all_data)
-    for low, high in [(10, 11), (11, 12), (12, 13), (13, 14), (14, 15)]:
-        butterworth_filt_boxplot(all_data, all_target, low, high)
+    for low, high in [(0, 5), (5, 10), (10, 15), (15, 20), (20, 25)]:
+        butterworth_filter_simple_dist(all_data, all_target, low, high)
 
 
 if __name__ == "__main__":
