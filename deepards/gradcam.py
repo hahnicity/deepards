@@ -11,6 +11,7 @@ import torch
 import argparse
 import pickle
 import cv2
+from matplotlib import cm
 import matplotlib.pyplot as plt
 import pandas as pd
 from scipy.spatial.distance import cdist
@@ -906,7 +907,7 @@ def butterworth_1d_analytics(hz_low, hz_high):
         # caused by graph retention. Not retaining the graph seems to cause things
         # to work just fine.
         g = MaxMinNormCam(model)
-        n_samps = 1000
+        n_samps = 2000
 
         for i in range(n_samps):
             kfold_idx = i if n_samps == len(dat) else np.random.randint(0, len(dat))
@@ -952,17 +953,58 @@ def butterworth_1d_analytics(hz_low, hz_high):
     #axes[1].set_title('ARDS')
     #axes[1].set_xticks(np.arange(-25, 26, 5))
     plt.ylabel('Cam Intensity', fontsize=16)
+    plt.xlabel('')
     #axes[1].set_yticks(np.arange(0, 0.81, 0.1))
     ax.legend(handles, ['Non-ARDS', 'ARDS'], fontsize=16)
     ax.grid(axis='y')
     plt.title('{}-{}Hz Gradcam'.format(hz_low, hz_high), fontsize=18)
     plt.savefig('../img/{}-{}hz-gradcam.png'.format(hz_low, hz_high), dpi=200)
+    plt.close()
 
+    # look for representative waveforms
+    ards_cam_data = np.squeeze(np.array(ards_cam_data))
+    other_cam_data = np.squeeze(np.array(other_cam_data))
+
+    ards_avgs = np.nanmean(ards_cam_data, axis=0).ravel()
+    other_avgs = np.nanmean(other_cam_data, axis=0).ravel()
+
+    ards_rel_min_idx = np.sum((ards_cam_data - ards_avgs) ** 2, axis=1).argmin()
+    other_rel_min_idx = np.sum((other_cam_data - other_avgs) ** 2, axis=1).argmin()
+
+    ards_kfold, ards_kfold_idx = ards_kfold_idxs[ards_rel_min_idx]
+    other_kfold, other_kfold_idx = other_kfold_idxs[other_rel_min_idx]
+
+    dat.set_kfold_indexes_for_fold(ards_kfold)
+    ards_seq = dat[ards_kfold_idx][1]
+    dat.set_kfold_indexes_for_fold(other_kfold)
+    other_seq = dat[other_kfold_idx][1]
+
+    rand_idx = np.random.randint(0, 20)
+
+    sns.set_style('white')
+    cmap = cm.get_cmap('Set2')
+    fig, axes = plt.subplots(nrows=2, ncols=2)
+    fig.set_figheight(10)
+    fig.set_figwidth(16)
+    axes[0][0].plot(ards_avgs, color=cmap.colors[0], lw=2)
+    axes[0][0].set_title('ARDS mean cam')
+    axes[0][0].grid(axis='y')
+    axes[0][1].plot(other_avgs, color=cmap.colors[1], lw=2)
+    axes[0][1].set_title('Non-ARDS mean cam')
+    axes[0][1].grid(axis='y')
+    axes[1][0].plot(np.median(ards_seq, axis=0).ravel(), color=cmap.colors[2], lw=2)
+    axes[1][0].set_title('ARDS mean prototype')
+    axes[1][0].grid(axis='y')
+    axes[1][1].plot(np.median(other_seq, axis=0).ravel(), color=cmap.colors[3], lw=2)
+    axes[1][1].set_title('Non-ARDS mean prototype')
+    axes[1][1].grid(axis='y')
+    plt.suptitle('{}-{}Hz Cam and Mean Prototypes'.format(hz_low, hz_high), fontsize=18)
+    plt.savefig('../img/{}-{}hz-prototypes.png'.format(hz_low, hz_high), dpi=200)
 
 
 if __name__ == "__main__":
     """
     This runs the frequency exploration experiment
     """
-    for hz_low, hz_high in [(10, 11), (11, 12), (12, 13), (13, 14), (14, 15)]:
+    for hz_low, hz_high in [(0, 5), (5, 10), (10, 15), (15, 20), (20, 25)]:
         butterworth_1d_analytics(hz_low, hz_high)
