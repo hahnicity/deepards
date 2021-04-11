@@ -539,23 +539,18 @@ class ARDSRawDataset(Dataset):
 
     def setup_butter_filter(self):
         if self.butter_low is not None and self.butter_high is None:
-            sos = butter(10, self.butter_low, fs=50, output='sos', btype='lowpass')
-            self.butter_filter = lambda x: sosfilt(sos, x, axis=-1)
+            self.sos = butter(10, self.butter_low, fs=50, output='sos', btype='lowpass')
         elif self.butter_low == 0:
-            sos = butter(10, self.butter_high, fs=50, output='sos', btype='lowpass')
-            self.butter_filter = lambda x: sosfilt(sos, x, axis=-1)
+            self.sos = butter(10, self.butter_high, fs=50, output='sos', btype='lowpass')
         elif self.butter_low is None and self.butter_high is not None:
-            sos = butter(10, self.butter_high, fs=50, output='sos', btype='highpass')
-            self.butter_filter = lambda x: sosfilt(sos, x, axis=-1)
+            self.sos = butter(10, self.butter_high, fs=50, output='sos', btype='highpass')
         elif self.butter_high == 25:
-            sos = butter(10, self.butter_low, fs=50, output='sos', btype='highpass')
-            self.butter_filter = lambda x: sosfilt(sos, x, axis=-1)
+            self.sos = butter(10, self.butter_low, fs=50, output='sos', btype='highpass')
         elif self.butter_low is not None and self.butter_high is not None:
             wn = (self.butter_low, self.butter_high)
-            sos = butter(10, wn, fs=50, output='sos', btype='bandpass')
-            self.butter_filter = lambda x: sosfilt(sos, x, axis=-1)
+            self.sos = butter(10, wn, fs=50, output='sos', btype='bandpass')
         else:
-            self.butter_filter = None
+            self.sos = None
 
     def set_oversampling_indices(self):
         # Cannot oversample with testing set
@@ -1368,8 +1363,8 @@ class ARDSRawDataset(Dataset):
         else:
             data = (data - mu) / std
 
-        if self.butter_filter is not None:
-            data = self.butter_filter(data).copy()
+        if self.sos is not None:
+            data = sosfilt(self.sos, data, axis=-1).copy()
         # this will return absolute index of data, the data, metadata, and target
         # by absolute index we mean the indexing in self.all_sequences
         return index, data, meta, target
