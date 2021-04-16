@@ -873,14 +873,20 @@ def one_two_d_comparison():
         plt.savefig('img1d2d/i{}-b{}.png'.format(idx, breath_n), dpi=200)
 
 
-def butterworth_1d_analytics(hz_low, hz_high):
+def butterworth_1d_analytics(dataset_path, file_map, experiment, hz_low, hz_high, n_samps):
     ards_cam_data = []
     other_cam_data = []
     dat = dataset.ARDSRawDataset.from_pickle(
-        '/fastdata/deepards/unpadded_centered_sequences-nb20-kfold.pkl',
-        True, 1.0, None, -1, 0.2, 1.0, hz_low, hz_high, False, False, False, False, False
+        dataset_path, False, 1.0, None, -1, 0.2, 1.0, hz_low, hz_high,
+        False, False, False, False, False
+    )
+    dat_no_filter = dataset.ARDSRawDataset.from_pickle(
+        dataset_path, False, 1.0, None, -1, 0.2, 1.0, None, None,
+        False, False, False, False, False
     )
     dat.train = False
+    dat_no_filter.train = False
+
     ards_all_img = None
     other_all_img = None
     dev = torch.device('cuda:0')
@@ -892,14 +898,6 @@ def butterworth_1d_analytics(hz_low, hz_high):
     ards_kfold_idxs = []
     other_kfold_idxs = []
 
-    file_map = {
-        0: 'saved_models/experiment_files_unpadded_centered_nb20_cnn_linear_butter_{}_{}hz/model-run-0-fold0.pth'.format(hz_low, hz_high),
-        1: 'saved_models/experiment_files_unpadded_centered_nb20_cnn_linear_butter_{}_{}hz/model-run-0-fold1.pth'.format(hz_low, hz_high),
-        2: 'saved_models/experiment_files_unpadded_centered_nb20_cnn_linear_butter_{}_{}hz/model-run-0-fold2.pth'.format(hz_low, hz_high),
-        3: 'saved_models/experiment_files_unpadded_centered_nb20_cnn_linear_butter_{}_{}hz/model-run-0-fold3.pth'.format(hz_low, hz_high),
-        4: 'saved_models/experiment_files_unpadded_centered_nb20_cnn_linear_butter_{}_{}hz/model-run-0-fold4.pth'.format(hz_low, hz_high),
-    }
-
     for fold in range(5):
         dat.set_kfold_indexes_for_fold(fold)
         model = torch.load(file_map[fold], map_location=dev)
@@ -907,7 +905,6 @@ def butterworth_1d_analytics(hz_low, hz_high):
         # caused by graph retention. Not retaining the graph seems to cause things
         # to work just fine.
         g = MaxMinNormCam(model)
-        n_samps = 2000
 
         for i in range(n_samps):
             kfold_idx = i if n_samps == len(dat) else np.random.randint(0, len(dat))
@@ -958,7 +955,7 @@ def butterworth_1d_analytics(hz_low, hz_high):
     ax.legend(handles, ['Non-ARDS', 'ARDS'], fontsize=16)
     ax.grid(axis='y')
     plt.title('{}-{}Hz Gradcam'.format(hz_low, hz_high), fontsize=18)
-    plt.savefig('../img/{}-{}hz-gradcam.png'.format(hz_low, hz_high), dpi=200)
+    plt.savefig('../img/{}-{}-{}hz-gradcam.png'.format(experiment, hz_low, hz_high), dpi=200)
     plt.close()
 
     # look for representative waveforms
@@ -976,35 +973,103 @@ def butterworth_1d_analytics(hz_low, hz_high):
 
     dat.set_kfold_indexes_for_fold(ards_kfold)
     ards_seq = dat[ards_kfold_idx][1]
+    mu, std = dat.scaling_factors[ards_kfold]
+    ards_seq = (ards_seq * std) + mu
+
+    dat_no_filter.set_kfold_indexes_for_fold(ards_kfold)
+    ards_seq_no_filt = dat_no_filter[ards_kfold_idx][1]
+    mu, std = dat_no_filter.scaling_factors[ards_kfold]
+    ards_seq_no_filt = (ards_seq_no_filt * std) + mu
+
     dat.set_kfold_indexes_for_fold(other_kfold)
     other_seq = dat[other_kfold_idx][1]
+    mu, std = dat.scaling_factors[other_kfold]
+    other_seq = (other_seq * std) + mu
 
+    dat_no_filter.set_kfold_indexes_for_fold(other_kfold)
+    other_seq_no_filt = dat_no_filter[other_kfold_idx][1]
+    mu, std = dat_no_filter.scaling_factors[other_kfold]
+    other_seq_no_filt = (other_seq_no_filt * std) + mu
+
+    # I should rly consider doing things breath by breath. Probably for the final paper.
     rand_idx = np.random.randint(0, 20)
 
     sns.set_style('white')
     cmap = cm.get_cmap('Set2')
     fig, axes = plt.subplots(nrows=2, ncols=2)
+    axes_ards_proto = axes[0][0].twinx()
+    axes_other_proto = axes[0][1].twinx()
     fig.set_figheight(10)
-    fig.set_figwidth(16)
-    axes[0][0].plot(ards_avgs, color=cmap.colors[0], lw=2)
-    axes[0][0].set_title('ARDS mean cam')
+    fig.set_figwidth(20)
+
+    axes_ards_proto.plot(np.median(ards_seq, axis=0).ravel(), color=cmap.colors[2], lw=2, label='Prototype')
+    axes_ards_proto.yaxis.tick_right()
+    axes_ards_proto.set_ylabel('Flow', color=cmap.colors[2])
+    axes_ards_proto.tick_params(axis='y', labelcolor=cmap.colors[2])
+
+    axes_other_proto.plot(np.median(other_seq, axis=0).ravel(), color=cmap.colors[3], lw=2, label='Prototype')
+    axes_other_proto.yaxis.tick_right()
+    axes_other_proto.set_ylabel('Flow', color=cmap.colors[3])
+    axes_other_proto.tick_params(axis='y', labelcolor=cmap.colors[3])
+
+    axes[0][0].plot(ards_avgs, color=cmap.colors[0], lw=3, label='Mean Cam', alpha=.6)
+    axes[0][0].set_title('ARDS')
     axes[0][0].grid(axis='y')
-    axes[0][1].plot(other_avgs, color=cmap.colors[1], lw=2)
-    axes[0][1].set_title('Non-ARDS mean cam')
+    axes[0][0].set_ylabel('Cam Intensity', color=cmap.colors[0])
+    axes[0][0].tick_params(axis='y', labelcolor=cmap.colors[0])
+
+    axes[0][1].plot(other_avgs, color=cmap.colors[0], lw=3, label='Mean Cam', alpha=.6)
+    axes[0][1].set_title('Non-ARDS')
     axes[0][1].grid(axis='y')
-    axes[1][0].plot(np.median(ards_seq, axis=0).ravel(), color=cmap.colors[2], lw=2)
-    axes[1][0].set_title('ARDS mean prototype')
+    axes[0][1].tick_params(axis='y', labelcolor=cmap.colors[0])
+
+    c = cmap.colors[6]
+    axes[1][0].plot(np.median(ards_seq_no_filt, axis=0).ravel(), color=c, lw=2, label='Prototype No Filter')
+    axes[1][0].set_ylabel('Flow', color=c)
+    axes[1][0].tick_params(axis='y', labelcolor=c)
     axes[1][0].grid(axis='y')
-    axes[1][1].plot(np.median(other_seq, axis=0).ravel(), color=cmap.colors[3], lw=2)
-    axes[1][1].set_title('Non-ARDS mean prototype')
+    axes[1][0].legend(loc='upper right')
+
+    c = cmap.colors[1]
+    axes[1][1].plot(np.median(other_seq_no_filt, axis=0).ravel(), color=c, lw=2, label='Prototype No Filter')
+    axes[1][1].set_ylabel('Flow', color=c)
+    axes[1][1].tick_params(axis='y', labelcolor=c)
     axes[1][1].grid(axis='y')
+    axes[1][1].legend(loc='upper right')
+
+    lines, labels = axes[0][0].get_legend_handles_labels()
+    lines2, labels2 = axes_ards_proto.get_legend_handles_labels()
+    axes_ards_proto.legend(lines + lines2, labels + labels2, loc='upper right')
+
+    lines, labels = axes[0][1].get_legend_handles_labels()
+    lines2, labels2 = axes_other_proto.get_legend_handles_labels()
+    axes_other_proto.legend(lines + lines2, labels + labels2, loc='upper right')
+
+    #axes[1][1].set_title('Non-ARDS mean prototype')
+    #axes[1][1].grid(axis='y')
     plt.suptitle('{}-{}Hz Cam and Mean Prototypes'.format(hz_low, hz_high), fontsize=18)
-    plt.savefig('../img/{}-{}hz-prototypes.png'.format(hz_low, hz_high), dpi=200)
+    plt.savefig('../img/{}-{}-{}hz-prototypes.png'.format(experiment, hz_low, hz_high), dpi=200)
 
 
 if __name__ == "__main__":
     """
     This runs the frequency exploration experiment
     """
-    for hz_low, hz_high in [(0, 5), (5, 10), (10, 15), (15, 20), (20, 25)]:
-        butterworth_1d_analytics(hz_low, hz_high)
+    experiment_map = {
+        'experiment_files_unpadded_centered_nb20_cnn_linear_butter': '/fastdata/deepards/unpadded_centered_sequences-nb20-kfold.pkl',
+        'experiment_files_padded_breath_by_breath_cnn_linear_butter': '/fastdata/deepards/padded_breath_by_breath_nb20-kfold.pkl',
+    }
+    n_samps = 4000
+    for experiment in ['experiment_files_unpadded_centered_nb20_cnn_linear_butter', 'experiment_files_padded_breath_by_breath_cnn_linear_butter']:
+        #for hz_low, hz_high in [(0, 5)]:
+        for hz_low, hz_high in [(0, 5), (5, 10), (10, 15), (15, 20), (20, 25)]:
+
+            file_map = {
+                0: 'saved_models/{}_{}_{}hz/model-run-0-fold0.pth'.format(experiment, hz_low, hz_high),
+                1: 'saved_models/{}_{}_{}hz/model-run-0-fold1.pth'.format(experiment, hz_low, hz_high),
+                2: 'saved_models/{}_{}_{}hz/model-run-0-fold2.pth'.format(experiment, hz_low, hz_high),
+                3: 'saved_models/{}_{}_{}hz/model-run-0-fold3.pth'.format(experiment, hz_low, hz_high),
+                4: 'saved_models/{}_{}_{}hz/model-run-0-fold4.pth'.format(experiment, hz_low, hz_high),
+            }
+            dataset_path = experiment_map[experiment]
+            butterworth_1d_analytics(dataset_path, file_map, experiment, hz_low, hz_high, n_samps)
