@@ -25,7 +25,7 @@ def setup_butter_filter(hz_low, hz_high):
     return sos
 
 
-def butterworth_filt_boxplot(data, target, hz_low, hz_high):
+def butterworth_filt_boxplot(data, target, experiment, hz_low, hz_high):
     sos = setup_butter_filter(hz_low, hz_high)
     filt = sosfilt(sos, data, axis=-1)
 
@@ -67,7 +67,7 @@ def butterworth_filt_boxplot(data, target, hz_low, hz_high):
     ax.grid(axis='y')
     handles, labels = ax.get_legend_handles_labels()
     ax.legend(handles, ['Non-ARDS', 'ARDS'], fontsize=16)
-    plt.savefig('../img/{}-{}-bandpass-time-series-dist.png'.format(hz_low, hz_high))
+    plt.savefig('../img/{}-{}-{}hz-box-dist.png'.format(experiment, hz_low, hz_high))
 
 
 def fft_butterworth_filt_boxplot(data, target, hz_low, hz_high):
@@ -153,24 +153,33 @@ def butterworth_filter_simple_dist(data, target, hz_low, hz_high):
 
 
 def main():
-    dataset = ARDSRawDataset.from_pickle(
-        '/fastdata/deepards/unpadded_centered_sequences-nb20-kfold.pkl',
-        True, 1.0, None, -1, 0.2, 1.0, None, None, False, False, False, False, False
-    )
-    dataset.butter_filter = None
-    dataset.train = False
+    experiment_map = {
+        'experiment_files_unpadded_centered_nb20_cnn_linear_butter': '/fastdata/deepards/unpadded_centered_sequences-nb20-kfold.pkl',
+        'experiment_files_padded_breath_by_breath_cnn_linear_butter': '/fastdata/deepards/padded_breath_by_breath_nb20-kfold.pkl',
+    }
+    for experiment in ['experiment_files_padded_breath_by_breath_cnn_linear_butter']:
+    #for experiment in ['experiment_files_unpadded_centered_nb20_cnn_linear_butter', 'experiment_files_padded_breath_by_breath_cnn_linear_butter']:
 
-    all_data = []
-    all_target = []
-    for fold in range(5):
-        dataset.set_kfold_indexes_for_fold(fold)
-        for i in range(len(dataset)):
-            _, seq, _, target = dataset[i]
-            all_data.append(seq)
-            all_target.append(np.argmax(target))
-    all_data = np.concatenate(all_data)
-    for low, high in [(0, 5), (5, 10), (10, 15), (15, 20), (20, 25)]:
-        butterworth_filter_simple_dist(all_data, all_target, low, high)
+        # I think it would have been easier to let the original dataset class do the
+        # filtering.
+        dataset = ARDSRawDataset.from_pickle(
+            experiment_map[experiment], True, 1.0, None, -1, 0.2, 1.0, None, None,
+            False, False, False, False, False
+        )
+        dataset.butter_filter = None
+        dataset.train = False
+
+        all_data = []
+        all_target = []
+        for fold in range(5):
+            dataset.set_kfold_indexes_for_fold(fold)
+            for i in range(len(dataset)):
+                _, seq, _, target = dataset[i]
+                all_data.append(seq)
+                all_target.append(np.argmax(target))
+        all_data = np.concatenate(all_data)
+        for low, high in [(0, 5), (5, 10), (10, 15), (15, 20), (20, 25)]:
+            butterworth_filt_boxplot(all_data, all_target, experiment, low, high)
 
 
 if __name__ == "__main__":
