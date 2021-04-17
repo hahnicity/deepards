@@ -319,34 +319,46 @@ plt.close()
 # butterworth filtering
 def butter_plots(flow, hz_low, hz_high, l_rng, u_rng, color, do_baseline=False):
 
-    if hz_low is not None and hz_high is None:
-        sos = butter(10, hz_low, fs=50, output='sos', btype='lowpass')
+    if hz_low == 0:
+        sos = butter(10, hz_high, fs=50, output='sos', btype='lowpass')
 
-    elif hz_low is None and hz_high is not None:
-        sos = butter(10, hz_high, fs=50, output='sos', btype='highpass')
+    elif hz_high == 25:
+        sos = butter(10, hz_low, fs=50, output='sos', btype='highpass')
 
-    elif hz_low is not None and hz_high is not None:
+    else:
         wn = (hz_low, hz_high)
         sos = butter(10, wn, fs=50, output='sos', btype='bandpass')
 
-    else:
-        butter_filter = None
-
-    signal = sosfilt(sos, flow[l_rng:u_rng])
-    pd.Series(flow[l_rng:u_rng]).to_csv('butter-{}.csv'.format(l_rng), index=False)
+    waveform = flow[l_rng:u_rng]
+    signal = sosfilt(sos, waveform)
+    pd.Series(waveform).to_csv('butter-{}.csv'.format(l_rng), index=False)
     plt.plot(signal, color=color, lw=1.35, label='flow')
-    plt.ylim([-33, 43])
-    plt.grid(axis='y')
+    #plt.ylim([-33, 43])
+    #plt.grid(axis='y')
     fig = plt.gcf()
     fig.set_size_inches(4, 4)
     fig.axes[0].xaxis.set_ticklabels([])
     fig.axes[0].yaxis.set_ticklabels([])
     remove_spines(fig.axes[0])
     plt.tick_params(axis='both', which='both', bottom=False, top=False, labelbottom=False, left=False, labelleft=False)
-    try:
-        plt.savefig('butterworth-cc-lrng{}-{}-{}hz.png'.format(l_rng, hz_low, hz_high), dpi=400, bbox_inches='tight', pad_inches=0.0)
-    except:
-        import IPython; IPython.embed()
+    plt.savefig('butterworth-cc-lrng{}-{}-{}hz.png'.format(l_rng, hz_low, hz_high), dpi=400, bbox_inches='tight', pad_inches=0.0)
+    plt.close()
+
+    # also perform fft filter and see if that works too.
+    freqs = np.fft.fftshift(np.fft.fftfreq(224, d=0.02))
+    freq_mask = np.logical_or(np.abs(freqs) < hz_low, np.abs(freqs) > hz_high)  # mask outside frequency bands
+    filtered = np.fft.fftshift(np.fft.fft(waveform))
+    filtered[freq_mask] = 0
+    recon = np.fft.ifft(np.fft.ifftshift(filtered))
+
+    fix, ax = plt.subplots(nrows=1, ncols=1)
+    ax.plot(recon, color=color, lw=1.35, label='flow')
+    fig.set_size_inches(4, 4)
+    ax.xaxis.set_ticklabels([])
+    ax.yaxis.set_ticklabels([])
+    remove_spines(ax)
+    plt.tick_params(axis='both', which='both', bottom=False, top=False, labelbottom=False, left=False, labelleft=False)
+    plt.savefig('fft-filt-lrng{}-{}-{}hz.png'.format(l_rng, hz_low, hz_high), dpi=400, bbox_inches='tight', pad_inches=0.0)
     plt.close()
 
     if do_baseline:
@@ -363,31 +375,55 @@ def butter_plots(flow, hz_low, hz_high, l_rng, u_rng, color, do_baseline=False):
         plt.savefig('butterworth-cc-lrng{}-baseline.png'.format(l_rng), dpi=400, bbox_inches='tight', pad_inches=0.0)
         plt.close()
 
-for hz in [20, 15, 10, 8, 6, 4, 2, 1, 0.5]:
+
+def downsample_plots(flow, factor, l_rng, u_rng, color):
+    length = 224
+    waveform = flow[l_rng:u_rng]
+    len_new = int(length / factor)
+    downsamp = resample(waveform, len_new)
+    downsamp = np.pad(downsamp, (0, length-len_new))
+    plt.plot(downsamp, color=color, lw=1.35, label='flow')
+    fig = plt.gcf()
+    fig.set_size_inches(4, 4)
+    fig.axes[0].xaxis.set_ticklabels([])
+    fig.axes[0].yaxis.set_ticklabels([])
+    remove_spines(fig.axes[0])
+    plt.tick_params(axis='both', which='both', bottom=False, top=False, labelbottom=False, left=False, labelleft=False)
+    plt.savefig('downsampled-lrng{}-{}x.png'.format(l_rng, factor), dpi=400, bbox_inches='tight', pad_inches=0.0)
+    plt.close()
+
+
+for factor in [1.5, 2, 2.5, 3, 4, 5, 6, 7, 8]:
+    l_rng = 112756+19
+    u_rng = l_rng+224
+    downsample_plots(flow, factor, l_rng, u_rng, 'royalblue')
+
+
+for hz in [20, 15, 10, 8, 6, 4, 2, 1, 0.5, 0.25, 0.125, 0.0625, 0.03125]:
     # the baseline sequence we are examining is the same one in continuous centered1
     l_rng = 112756+19
     u_rng = l_rng+224
     if hz == 20:
-        butter_plots(flow, hz, None, l_rng, u_rng, 'royalblue', do_baseline=True)
+        butter_plots(flow, 0, hz, l_rng, u_rng, 'royalblue', do_baseline=True)
     else:
-        butter_plots(flow, hz, None, l_rng, u_rng, 'royalblue')
+        butter_plots(flow, 0, hz, l_rng, u_rng, 'royalblue')
 
     # we are examining continuous centered2
     l_rng = 112756+19+224+153
     u_rng = l_rng+(224)
     if hz == 20:
-        butter_plots(flow, hz, None, l_rng, u_rng, 'darkviolet', do_baseline=True)
+        butter_plots(flow, 0, hz, l_rng, u_rng, 'darkviolet', do_baseline=True)
     else:
-        butter_plots(flow, hz, None, l_rng, u_rng, 'darkviolet')
+        butter_plots(flow, 0, hz, l_rng, u_rng, 'darkviolet')
 
     l_rng = og_l_rng + 8940
     u_rng = l_rng+224
     if hz == 20:
-        butter_plots(flow, hz, None, l_rng, u_rng, 'mediumvioletred', do_baseline=True)
+        butter_plots(flow, 0, hz, l_rng, u_rng, 'mediumvioletred', do_baseline=True)
     else:
-        butter_plots(flow, hz, None, l_rng, u_rng, 'mediumvioletred')
+        butter_plots(flow, 0, hz, l_rng, u_rng, 'mediumvioletred')
 
-for hz in [(None, 20), (15, 20), (10, 15), (5, 10), (5, None)]:
+for hz in [(20, 25), (15, 20), (10, 15), (5, 10), (0, 5)]:
     l_rng = 112756+19
     u_rng = l_rng+224
     butter_plots(flow, hz[0], hz[1], l_rng, u_rng, 'royalblue')
