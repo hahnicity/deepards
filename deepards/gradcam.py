@@ -1,5 +1,6 @@
 """
-Created on Thu Oct 26 11:06:51 2017
+credits for cam code to:
+
 @author: Utku Ozbulak - github.com/utkuozbulak
 """
 import csv
@@ -14,6 +15,7 @@ import cv2
 from matplotlib import cm
 import matplotlib.pyplot as plt
 import pandas as pd
+from scipy.signal import butter, resample, sosfilt
 from scipy.spatial.distance import cdist
 from sklearn import metrics
 from sklearn.cluster import KMeans
@@ -1051,16 +1053,81 @@ def butterworth_1d_analytics(dataset_path, file_map, experiment, hz_low, hz_high
     plt.savefig('../img/{}-{}-{}hz-prototypes.png'.format(experiment, hz_low, hz_high), dpi=200)
 
 
+def remove_spines(ax):
+    spines = ['top', 'left', 'right', 'bottom']
+    for s in spines:
+        ax.spines[s].set_visible(False)
+
+
+def butter_plots(dataset_path, index, experiment, hz_low, hz_high, color, do_baseline=False):
+    """
+    Do a butterworth plot for a given index of data.
+    """
+    dat_no_filter = dataset.ARDSRawDataset.from_pickle(
+        dataset_path, False, 1.0, None, -1, 0.2, 1.0, None, None,
+        False, False, False, False, False
+    )
+
+    if hz_low == 0:
+        sos = butter(10, hz_high, fs=50, output='sos', btype='lowpass')
+    elif hz_high == 25:
+        sos = butter(10, hz_low, fs=50, output='sos', btype='highpass')
+    else:
+        wn = (hz_low, hz_high)
+        sos = butter(10, wn, fs=50, output='sos', btype='bandpass')
+
+    dat_no_filter.set_kfold_indexes_for_fold(0)
+    rand_breath_idx = np.random.randint(0, 20)
+    seq = dat_no_filter[index][1]
+
+    signal = sosfilt(sos, seq[rand_breath_idx].ravel())
+    plt.plot(signal, color=color, lw=1.35, label='flow')
+    plt.grid(axis='y')
+    fig = plt.gcf()
+    fig.set_size_inches(4, 4)
+    fig.axes[0].xaxis.set_ticklabels([])
+    fig.axes[0].yaxis.set_ticklabels([])
+    remove_spines(fig.axes[0])
+    plt.tick_params(axis='both', which='both', bottom=False, top=False, labelbottom=False, left=False, labelleft=False)
+    plt.savefig('../img/butterworth-plt-{}-idx{}-{}-{}hz.png'.format(experiment, index, hz_low, hz_high), dpi=400, bbox_inches='tight', pad_inches=0.0)
+    plt.close()
+
+
 if __name__ == "__main__":
     """
     This runs the frequency exploration experiment
     """
     experiment_map = {
-        'experiment_files_unpadded_centered_nb20_cnn_linear_butter': '/fastdata/deepards/unpadded_centered_sequences-nb20-kfold.pkl',
-        'experiment_files_padded_breath_by_breath_cnn_linear_butter': '/fastdata/deepards/padded_breath_by_breath_nb20-kfold.pkl',
+        'experiment_files_unpadded_centered_nb20_cnn_linear_butter': ('/fastdata/deepards/unpadded_centered_sequences-nb20-kfold.pkl', 4000),
+        'experiment_files_padded_breath_by_breath_cnn_linear_butter': ('/fastdata/deepards/padded_breath_by_breath_nb20-kfold.pkl', 4000),
     }
-    n_samps = 4000
-    for experiment in ['experiment_files_unpadded_centered_nb20_cnn_linear_butter', 'experiment_files_padded_breath_by_breath_cnn_linear_butter']:
+    i = 0
+    cmap = ['darkviolet', 'mediumvioletred', 'royalblue']
+    for experiment in ['experiment_files_padded_breath_by_breath_cnn_linear_butter']:
+        #for hz_low, hz_high in [(0, 5)]:
+        for classification in [0, 1, 1]:
+            dataset_path, n_samps = experiment_map[experiment]
+            dat_no_filter = dataset.ARDSRawDataset.from_pickle(
+                dataset_path, False, 1.0, None, -1, 0.2, 1.0, None, None,
+                False, False, False, False, False
+            )
+            dat_no_filter.set_kfold_indexes_for_fold(0)
+            gt = dat_no_filter.get_ground_truth_df()
+            idx = np.random.choice(gt[gt.y == classification].index)
+            idx = list(dat_no_filter.kfold_indexes).index(idx)
+
+            for hz_low, hz_high in [(0, 5), (5, 10), (10, 15), (15, 20), (20, 25)]:
+                if hz_low == 0:
+                    butter_plots(dataset_path, idx, experiment, hz_low, hz_high, cmap[i], do_baseline=True)
+                else:
+                    butter_plots(dataset_path, idx, experiment, hz_low, hz_high, cmap[i])
+            i+= 1
+    # XXX debug
+    import sys
+    sys.exit(0)
+
+    #for experiment in ['experiment_files_unpadded_centered_nb20_cnn_linear_butter', 'experiment_files_padded_breath_by_breath_cnn_linear_butter']:
+    for experiment in ['experiment_files_padded_breath_by_breath_cnn_linear_butter']:
         #for hz_low, hz_high in [(0, 5)]:
         for hz_low, hz_high in [(0, 5), (5, 10), (10, 15), (15, 20), (20, 25)]:
 
@@ -1071,5 +1138,5 @@ if __name__ == "__main__":
                 3: 'saved_models/{}_{}_{}hz/model-run-0-fold3.pth'.format(experiment, hz_low, hz_high),
                 4: 'saved_models/{}_{}_{}hz/model-run-0-fold4.pth'.format(experiment, hz_low, hz_high),
             }
-            dataset_path = experiment_map[experiment]
+            dataset_path, n_samps = experiment_map[experiment]
             butterworth_1d_analytics(dataset_path, file_map, experiment, hz_low, hz_high, n_samps)
