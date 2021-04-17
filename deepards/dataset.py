@@ -375,7 +375,8 @@ class ARDSRawDataset(Dataset):
                  only_fft=False,
                  fft_real_only=False,
                  random_kfold=False,
-                 bootstrap=False,):
+                 bootstrap=False,
+                 post_hoc_downsampling=None,):
         """
         Dataset to generate sequences of data for ARDS Detection
         """
@@ -405,6 +406,7 @@ class ARDSRawDataset(Dataset):
         self.fft_real_only = fft_real_only
         self.random_kfold = random_kfold
         self.bootstrap = bootstrap
+        self.post_hoc_downsampling = post_hoc_downsampling
         # this is kinda a hacky thing that I'm doing because we're at the end of this
         # project. But the deal is that I'm fashioning bootstrap as kfold so we can
         # sample from every patient that we have with replacement. Otherwise we'd have
@@ -689,6 +691,7 @@ class ARDSRawDataset(Dataset):
             bootstrap=train_dataset.bootstrap,
             butter_low=train_dataset.butter_low,
             butter_high=train_dataset.butter_high,
+            post_hoc_downsampling=train_dataset.post_hoc_downsampling,
         )
         test_dataset.kfold_patient_splits = train_dataset.kfold_patient_splits
         test_dataset.scaling_factors = train_dataset.scaling_factors
@@ -709,7 +712,8 @@ class ARDSRawDataset(Dataset):
                     only_fft,
                     fft_real_only,
                     random_kfold,
-                    bootstrap,):
+                    bootstrap,
+                    post_hoc_downsampling,):
         dataset = pd.read_pickle(data_path)
         if not isinstance(dataset, ARDSRawDataset) and not isinstance(dataset, deepards.dataset.ARDSRawDataset):
             raise ValueError('The pickle file you have specified is out-of-date. Please re-process your dataset and save the new pickled dataset.')
@@ -724,6 +728,7 @@ class ARDSRawDataset(Dataset):
         dataset.butter_low = butter_low
         dataset.butter_high = butter_high
         dataset.setup_butter_filter()
+        dataset.post_hoc_downsampling = post_hoc_downsampling
 
         if dataset.total_kfolds is not None or dataset.bootstrap:
             dataset.set_kfold_patient_splits()
@@ -1365,6 +1370,15 @@ class ARDSRawDataset(Dataset):
 
         if self.sos is not None:
             data = sosfilt(self.sos, data, axis=-1).copy()
+
+        if self.post_hoc_downsampling is not None:
+            old_len = data.shape[-1]
+            new_len = int(old_len/self.post_hoc_downsampling)
+            pad_len = old_len-new_len
+            resamp = resample(data, new_len, axis=-1)
+            # this basically says dont add any new padding to 0, 1 axes. Add a padding
+            # len to end of axis 2.
+            data = np.pad(resamp, ((0,0), (0,0), (0,pad_len)))
         # this will return absolute index of data, the data, metadata, and target
         # by absolute index we mean the indexing in self.all_sequences
         return index, data, meta, target

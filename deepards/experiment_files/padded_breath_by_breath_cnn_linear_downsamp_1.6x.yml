@@ -1,0 +1,15 @@
+cuda_no_dp: true
+clip_val: 0.01
+clip_grad: true
+dataset_type: padded_breath_by_breath
+oversample_minority: true
+kfolds: 5
+epochs: 10
+batch_size: 16
+network: cnn_linear
+train_from_pickle: /fastdata/deepards/padded_breath_by_breath_nb20-kfold.pkl
+#train_to_pickle: /fastdata/deepards/padded_breath_by_breath_nb20-kfold.pkl
+n_sub_batches: 20
+data_path: /fastdata/ardsdetection
+random_kfold: false
+post_hoc_downsampling: 1.6

@@ -230,6 +230,7 @@ class BaseTraining(object):
                 fft_real_only=self.args.fft_real_only,
                 random_kfold=self.args.random_kfold,
                 bootstrap=self.args.bootstrap,
+                post_hoc_downsampling=self.args.post_hoc_downsampling,
             )
         else:
             train_dataset = ARDSRawDataset.from_pickle(
@@ -247,6 +248,7 @@ class BaseTraining(object):
                 fft_real_only=self.args.fft_real_only,
                 random_kfold=self.args.random_kfold,
                 bootstrap=self.args.bootstrap,
+                post_hoc_downsampling=self.args.post_hoc_downsampling,
             )
 
         self.n_sub_batches = train_dataset.n_sub_batches
@@ -260,7 +262,7 @@ class BaseTraining(object):
             test_dataset = ARDSRawDataset.from_pickle(
                 self.args.test_from_pickle, False, 1.0, None, -1, None, 1.0,
                 butter_low=self.args.butter_low, butter_high=self.args.butter_high,
-                add_fft=False, only_fft=False, fft_real_only=False
+                add_fft=False, only_fft=False, fft_real_only=False, post_hoc_downsampling=self.args.post_hoc_downsampling,
             )
             test_dataset.scaling_factors = train_dataset.scaling_factors
         else:  # holdout, no pickle, no kfold
@@ -292,6 +294,7 @@ class BaseTraining(object):
                 add_fft=self.args.with_fft,
                 only_fft=self.args.only_fft,
                 fft_real_only=self.args.fft_real_only,
+                post_hoc_downsampling=self.args.post_hoc_downsampling,
             )
             test_dataset.scaling_factors = train_dataset.scaling_factors
 
@@ -1559,6 +1562,7 @@ def build_parser():
     parser.add_argument('--butter-high', type=float, help='butter filter high frequency')
     true_false_flag('--random-kfold', 'perform a random kfold splitting.')
     true_false_flag('--bootstrap', 'perform a single trial of an 80-20 bootstrap with replacement')
+    parser.add_argument('--post-hoc-downsampling', type=float, help='perform post-hoc downsampling on data')
     return parser
 
 
