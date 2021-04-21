@@ -79,15 +79,16 @@ def get_metrics(start_times):
 def _graph_aggregate(df_stats, metric, label):
     ax = sns.lineplot(x='epoch', y=metric, data=df_stats, label=label)
     paths = ax.collections[-1].get_paths()
-    vertices = paths[0].__dict__['_vertices']
+    vertices = paths[0].vertices
     x = [vs[0] for vs in vertices]
     max_x = max(x)
     ci = [vs[-1] for vs in vertices if vs[0] == max(x)]
     ci_min = min(ci)
     ci_max = max(ci)
+    mean_final = ax.lines[-1].get_path().vertices[-1][1]
     plt.annotate('min CI: {}'.format(str(round(ci_min,2))), (max_x, ci_min))
     plt.annotate('max CI: {}'.format(str(round(ci_max,2))), (max_x, ci_max))
-    plt.annotate('CI $\pm${}'.format(str(round((ci_max-ci_min)/2,3))), (max_x, ci_min+(ci_max-ci_min)/2))
+    plt.annotate('{}$\pm${}'.format(round(mean_final,2), round((ci_max-ci_min)/2,3)), (max_x, ci_min+(ci_max-ci_min)/2))
     plt.xticks(np.arange(len(df_stats.epoch.unique())), sorted((df_stats.epoch.unique()+1).astype(int)))
     ax = plt.gca()
     ax.yaxis.set_minor_locator(MultipleLocator(.01))
