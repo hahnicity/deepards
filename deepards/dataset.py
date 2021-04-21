@@ -376,7 +376,9 @@ class ARDSRawDataset(Dataset):
                  fft_real_only=False,
                  random_kfold=False,
                  bootstrap=False,
-                 post_hoc_downsampling=None,):
+                 post_hoc_downsampling=None,
+                 fft_filtering_low=None,
+                 fft_filtering_high=None,):
         """
         Dataset to generate sequences of data for ARDS Detection
         """
@@ -407,6 +409,8 @@ class ARDSRawDataset(Dataset):
         self.random_kfold = random_kfold
         self.bootstrap = bootstrap
         self.post_hoc_downsampling = post_hoc_downsampling
+        self.fft_filtering_low = fft_filtering_low
+        self.fft_filtering_high = fft_filtering_high
         # this is kinda a hacky thing that I'm doing because we're at the end of this
         # project. But the deal is that I'm fashioning bootstrap as kfold so we can
         # sample from every patient that we have with replacement. Otherwise we'd have
@@ -692,6 +696,8 @@ class ARDSRawDataset(Dataset):
             butter_low=train_dataset.butter_low,
             butter_high=train_dataset.butter_high,
             post_hoc_downsampling=train_dataset.post_hoc_downsampling,
+            fft_filtering_low=train_dataset.fft_filtering_low,
+            fft_filtering_high=train_dataset.fft_filtering_high,
         )
         test_dataset.kfold_patient_splits = train_dataset.kfold_patient_splits
         test_dataset.scaling_factors = train_dataset.scaling_factors
@@ -713,7 +719,9 @@ class ARDSRawDataset(Dataset):
                     fft_real_only,
                     random_kfold,
                     bootstrap,
-                    post_hoc_downsampling,):
+                    post_hoc_downsampling,
+                    fft_filtering_low,
+                    fft_filtering_high,):
         dataset = pd.read_pickle(data_path)
         if not isinstance(dataset, ARDSRawDataset) and not isinstance(dataset, deepards.dataset.ARDSRawDataset):
             raise ValueError('The pickle file you have specified is out-of-date. Please re-process your dataset and save the new pickled dataset.')
@@ -729,6 +737,8 @@ class ARDSRawDataset(Dataset):
         dataset.butter_high = butter_high
         dataset.setup_butter_filter()
         dataset.post_hoc_downsampling = post_hoc_downsampling
+        dataset.fft_filtering_low = fft_filtering_low
+        dataset.fft_filtering_high = fft_filtering_high
 
         if dataset.total_kfolds is not None or dataset.bootstrap:
             dataset.set_kfold_patient_splits()
@@ -1379,6 +1389,16 @@ class ARDSRawDataset(Dataset):
             # this basically says dont add any new padding to 0, 1 axes. Add a padding
             # len to end of axis 2.
             data = np.pad(resamp, ((0,0), (0,0), (0,pad_len)))
+
+        if self.fft_filtering_low is not None and self.fft_filtering_high is not None:
+            freqs = np.fft.fftshift(np.fft.fftfreq(224, d=0.02))
+            freq_mask = np.logical_and(np.abs(freqs) > self.fft_filtering_low, np.abs(freqs) < self.fft_filtering_high)  # mask outside frequency bands
+            filtered = np.fft.fftshift(np.fft.fft(data, axis=-1))
+
+            filtered[:, :, ~freq_mask] = 0
+            # the order where youre performing the shift shouldnt matter.
+            data = np.fft.ifft(np.fft.ifftshift(filtered), axis=-1).real
+
         # this will return absolute index of data, the data, metadata, and target
         # by absolute index we mean the indexing in self.all_sequences
         return index, data, meta, target

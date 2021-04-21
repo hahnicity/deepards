@@ -231,6 +231,8 @@ class BaseTraining(object):
                 random_kfold=self.args.random_kfold,
                 bootstrap=self.args.bootstrap,
                 post_hoc_downsampling=self.args.post_hoc_downsampling,
+                fft_filtering_low=self.args.fft_filtering_low,
+                fft_filtering_high=self.args.fft_filtering_high,
             )
         else:
             train_dataset = ARDSRawDataset.from_pickle(
@@ -249,6 +251,8 @@ class BaseTraining(object):
                 random_kfold=self.args.random_kfold,
                 bootstrap=self.args.bootstrap,
                 post_hoc_downsampling=self.args.post_hoc_downsampling,
+                fft_filtering_low=self.args.fft_filtering_low,
+                fft_filtering_high=self.args.fft_filtering_high,
             )
 
         self.n_sub_batches = train_dataset.n_sub_batches
@@ -263,6 +267,7 @@ class BaseTraining(object):
                 self.args.test_from_pickle, False, 1.0, None, -1, None, 1.0,
                 butter_low=self.args.butter_low, butter_high=self.args.butter_high,
                 add_fft=False, only_fft=False, fft_real_only=False, post_hoc_downsampling=self.args.post_hoc_downsampling,
+                fft_filtering_low=self.args.fft_filtering_low, fft_filtering_high=self.args.fft_filtering_high,
             )
             test_dataset.scaling_factors = train_dataset.scaling_factors
         else:  # holdout, no pickle, no kfold
@@ -295,6 +300,8 @@ class BaseTraining(object):
                 only_fft=self.args.only_fft,
                 fft_real_only=self.args.fft_real_only,
                 post_hoc_downsampling=self.args.post_hoc_downsampling,
+                fft_filtering_low=self.args.fft_filtering_low,
+                fft_filtering_high=self.args.fft_filtering_high,
             )
             test_dataset.scaling_factors = train_dataset.scaling_factors
 
@@ -1563,6 +1570,8 @@ def build_parser():
     true_false_flag('--random-kfold', 'perform a random kfold splitting.')
     true_false_flag('--bootstrap', 'perform a single trial of an 80-20 bootstrap with replacement')
     parser.add_argument('--post-hoc-downsampling', type=float, help='perform post-hoc downsampling on data')
+    parser.add_argument('--fft-filtering-low', type=float, help='add the hz boundary at which you want to filter your signal using fft filtering.')
+    parser.add_argument('--fft-filtering-high', type=float, help='add the hz boundary at which you want to filter your signal using fft filtering.')
     return parser
 
 
