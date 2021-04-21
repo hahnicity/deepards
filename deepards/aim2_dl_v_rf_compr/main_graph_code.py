@@ -346,9 +346,9 @@ def butter_plots(flow, hz_low, hz_high, l_rng, u_rng, color, do_baseline=False):
 
     # also perform fft filter and see if that works too.
     freqs = np.fft.fftshift(np.fft.fftfreq(224, d=0.02))
-    freq_mask = np.logical_or(np.abs(freqs) < hz_low, np.abs(freqs) > hz_high)  # mask outside frequency bands
+    freq_mask = np.logical_and(np.abs(freqs) > hz_low, np.abs(freqs) < hz_high)  # mask outside frequency bands
     filtered = np.fft.fftshift(np.fft.fft(waveform))
-    filtered[freq_mask] = 0
+    filtered[~freq_mask] = 0
     recon = np.fft.ifft(np.fft.ifftshift(filtered))
 
     fix, ax = plt.subplots(nrows=1, ncols=1)
