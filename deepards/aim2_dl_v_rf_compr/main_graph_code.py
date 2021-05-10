@@ -320,14 +320,14 @@ plt.close()
 def butter_plots(flow, hz_low, hz_high, l_rng, u_rng, color, do_baseline=False):
 
     if hz_low == 0:
-        sos = butter(10, hz_high, fs=50, output='sos', btype='lowpass')
+        sos = butter(2, hz_high, fs=50, output='sos', btype='lowpass')
 
     elif hz_high == 25:
-        sos = butter(10, hz_low, fs=50, output='sos', btype='highpass')
+        sos = butter(2, hz_low, fs=50, output='sos', btype='highpass')
 
     else:
         wn = (hz_low, hz_high)
-        sos = butter(10, wn, fs=50, output='sos', btype='bandpass')
+        sos = butter(2, wn, fs=50, output='sos', btype='bandpass')
 
     waveform = flow[l_rng:u_rng]
     signal = sosfilt(sos, waveform)
