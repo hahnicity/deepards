@@ -11,3 +11,5 @@ batch_size: 16
 cuda_no_dp: true
 epochs: 10
 holdout_set_type: main
+random_kfold: false
+bootstrap: false

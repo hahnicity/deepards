@@ -267,6 +267,7 @@ class BaseTraining(object):
                 self.args.test_from_pickle, False, 1.0, None, -1, None, 1.0,
                 butter_low=self.args.butter_low, butter_high=self.args.butter_high,
                 add_fft=False, only_fft=False, fft_real_only=False, post_hoc_downsampling=self.args.post_hoc_downsampling,
+                random_kfold=self.args.random_kfold, bootstrap=self.args.bootstrap,
                 fft_filtering_low=self.args.fft_filtering_low, fft_filtering_high=self.args.fft_filtering_high,
             )
             test_dataset.scaling_factors = train_dataset.scaling_factors
