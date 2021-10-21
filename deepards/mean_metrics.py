@@ -114,7 +114,10 @@ def show_loss(experiment_name, unique_experiments, plt_title):
         epochs = hp['conf']['epochs']
         for fold in range(5):
             loss_file = 'results/loss_fold_{}_deepards_start_{}.pt'.format(fold, st)
-            loss_map[fold].append(torch.load(loss_file).values)
+            try:
+                loss_map[fold].append(torch.load(loss_file).values)
+            except FileNotFoundError:
+                pass
 
     fig, axes = plt.subplots(nrows=1, ncols=5, figsize=(20, 10))
     cm = get_cmap('Dark2')
@@ -439,7 +442,8 @@ if __name__ == "__main__":
     exp_results = pd.DataFrame(exp_results, columns=['dataset_type', 'network', 'base_cnn', 'auc'])
     if args.sim_dissim_file:
         analyze_similar_dissimilar_experiments(args.sim_dissim_file, unique_experiments)
-    else:
+    elif ('holdout' not in args.experiment_name) and ('bootstrap' not in args.experiment_name):
         show_loss(args.experiment_name, unique_experiments, args.loss_plt_title)
         do_fold_graphing(unique_experiments, args.only_aggregate)
-    #one_to_many_shot_analysis(args.experiment_name, unique_experiments)
+    else:
+        do_fold_graphing(unique_experiments, args.only_aggregate)
