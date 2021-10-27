@@ -95,6 +95,18 @@ Note that the spaced padding is zoomed so you can see what's happening.
 ### Best Performers
 We have found that `unpadded_centered_sequences` performs best across all of the datasets.
 
+## Dataset Inspection
+You can iterate over the dataset if you have loaded a saved pickle file. If you want you
+can visualize the breath data as well
+
+    import matplotlib.pyplot as plt
+
+    dataset = pd.read_pickle('path/to/dataset.pkl')
+    for patient, data, target, hours in dataset.all_sequences:
+        plt.plot(data.numpy()[0][0])
+        plt.show()
+        break  # just break iteration. can always modify this if you want
+
 ## GradCam
 Gradcam can be used for explaining model predictions. The main script that we use for this is
 the `patient_gradcam.py` script. This script requires 4 primary inputs to function properly
