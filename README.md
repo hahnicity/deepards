@@ -25,9 +25,13 @@ We will just showcase a single model with a single network. Here we can just run
 experiment with a standard cnn_linear network. First download our anonymous dataset
 from [box.](https://ucdavis.box.com/s/yuawpixlokf25bt71doz6g3mzdqr0ehj) Then run the training script
 
+    conda activate deepardsdev3
+    cd deepards/
+
     python train_ards_detector.py \
     -co experiment_files/unpadded_centered_nb20_cnn_linear.yml \
-    --train-from-pickle anon-unpadded_centered_sequences-nb20-kfold.pkl
+    --train-to-pickle anon-unpadded_centered_sequences-nb20-kfold.pkl \
+    --data-path /path/to/ardsdetection/dataset/path
 
 ## Running with Config File
 
