@@ -75,10 +75,10 @@ class SillyPlottingClass(object):
                  lw=1.5, alpha=.8, zorder=zorder, linestyle=linestyle)
 
         std_tpr = np.std(tprs, axis=0)
-        tprs_upper = np.minimum(mean_tpr + std_tpr, 1)
-        tprs_lower = np.maximum(mean_tpr - std_tpr, 0)
+        tprs_upper = np.minimum(mean_tpr + auc_ci, 1)
+        tprs_lower = np.maximum(mean_tpr - auc_ci, 0)
         plt.fill_between(mean_fpr, tprs_lower, tprs_upper, color=std_color, alpha=.2,
-                         label=r'{} 1 std. dev.'.format(type_roc))
+                         label=r'{} 95% CI'.format(type_roc))
 
         plt.xlim([-0.025, 1.025])
         plt.ylim([-0.025, 1.025])
