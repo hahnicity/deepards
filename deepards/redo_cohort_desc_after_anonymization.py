@@ -17,7 +17,7 @@ cohort_desc = cohort_desc.rename(columns={old_pt_id_col: 'patient_id'})
 merged = shift_file.merge(cohort_desc, on='patient_id', how='outer')
 merged = merged[~merged.new_patient_id.isna()]
 cols_to_keep = [
-  'patient_id', 'new_patient_id', 'shift_hours', 'experiment_group', 'Pathophysiology',
+  'patient_id', 'new_patient_id', 'shift_hours', 'Pathophysiology',
   'Date when Berlin criteria first met (m/dd/yyy)', 'vent_start_time'
 ]
 merged = merged[cols_to_keep]
